@@ -1,0 +1,8 @@
+{
+  "name": "dabernaz-game-club",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Dabernaz with server-backed accounts, automatic 20-player Daberna rooms, and skill-based mini-games",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}

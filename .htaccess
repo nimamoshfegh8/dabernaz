@@ -1,0 +1,16 @@
+Options -Indexes
+RewriteEngine On
+
+# API endpoint for ordinary Apache/cPanel PHP hosting.
+RewriteRule ^api(?:/.*)?$ api.php [QSA,L]
+
+# Do not expose application/server documentation or private data.
+<FilesMatch "^(server\.js|package\.json|README(\.fa)?\.md)$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>

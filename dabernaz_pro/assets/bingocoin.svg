@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+<title id="title">Bingo Coin</title>
+<defs>
+ <radialGradient id="gold" cx="30%" cy="22%" r="82%"><stop offset="0" stop-color="#fff6bd"/><stop offset=".25" stop-color="#ffdf72"/><stop offset=".62" stop-color="#e5a52d"/><stop offset="1" stop-color="#8d4c08"/></radialGradient>
+ <linearGradient id="rim" x2="0" y2="1"><stop stop-color="#fff4b0"/><stop offset=".45" stop-color="#d48b19"/><stop offset="1" stop-color="#6e3907"/></linearGradient>
+ <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<circle cx="64" cy="64" r="59" fill="#301700" stroke="#ffdc72" stroke-width="3" filter="url(#glow)"/>
+<circle cx="64" cy="64" r="52" fill="url(#gold)" stroke="url(#rim)" stroke-width="5"/>
+<circle cx="64" cy="64" r="43" fill="none" stroke="#fff0a2" stroke-width="2" stroke-dasharray="3 4"/>
+<path d="M39 39l8 8 17-19 17 19 8-8-5 18H44z" fill="#8a4b08" stroke="#fff0a2" stroke-width="2"/>
+<path d="M48 58h32a7 7 0 0 1 0 14H48a7 7 0 0 1 0-14z" fill="#8a4b08" opacity=".22"/>
+<text x="64" y="83" text-anchor="middle" font-family="Arial,sans-serif" font-size="42" font-weight="900" fill="#713a05" stroke="#fff1a7" stroke-width="1.5" paint-order="stroke">B</text>
+<path d="M45 99h38" stroke="#fff0a2" stroke-width="2" stroke-linecap="round"/>
+<path d="M64 9l3 7 7 1-6 5 2 7-6-4-6 4 2-7-6-5 7-1z" fill="#fff0a2"/>
+</svg>

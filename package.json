@@ -1,0 +1,12 @@
+{
+  "name": "dabernaz-game-club",
+  "version": "3.0.1",
+  "private": true,
+  "description": "Dabernaz with PHP/cPanel and Node.js server APIs, registered accounts, automatic 20-player Daberna rooms and skill-based mini-games",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

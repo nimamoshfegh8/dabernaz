@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "Dabernaz Game Club",
+  "short_name": "Dabernaz",
+  "description": "باشگاه بازی و رقابت دابرناز",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#08080b",
+  "theme_color": "#09090c",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
