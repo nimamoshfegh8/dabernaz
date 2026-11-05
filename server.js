@@ -14,7 +14,8 @@ const PRIVATE_DIR = process.env.DABERNAZ_DATA_DIR || path.join(ROOT, '.private')
 const DB_FILE = path.join(PRIVATE_DIR, 'store.json');
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
 const ROOM_CAPACITY = 20;
-const DRAW_INTERVAL_MS = Math.max(20, Number(process.env.DABERNAZ_DRAW_INTERVAL_MS || 3000));
+const requestedDrawInterval = Number(process.env.DABERNAZ_DRAW_INTERVAL_MS || 3000);
+const DRAW_INTERVAL_MS = Number.isFinite(requestedDrawInterval) ? Math.max(20, Math.min(requestedDrawInterval, 60000)) : 3000;
 const ROOM_CONFIG = {
   room5000: { price: 5000 }, room10000: { price: 10000 },
   room20000: { price: 20000 }, room50000: { price: 50000 }
@@ -46,8 +47,23 @@ function json(res, status, payload, headers = {}) {
 }
 function parseCookies(header = '') {
   return Object.fromEntries(header.split(';').map(part => part.trim()).filter(Boolean).map(part => {
-    const index = part.indexOf('='); return index < 0 ? [part, ''] : [part.slice(0,index), decodeURIComponent(part.slice(index+1))];
+    const index = part.indexOf('=');
+    if (index < 0) return [part, ''];
+    const key = part.slice(0,index);
+    const raw = part.slice(index+1);
+    try { return [key, decodeURIComponent(raw)]; }
+    catch { return [key, raw]; }
   }));
+}
+function validateWriteOrigin(req, url) {
+  const origin = req.headers.origin;
+  if (origin) {
+    let parsed;
+    try { parsed = new URL(origin); } catch { throw Object.assign(new Error('مبدأ درخواست معتبر نیست.'), { status:403 }); }
+    if (parsed.origin !== url.origin) throw Object.assign(new Error('مبدأ درخواست معتبر نیست.'), { status:403 });
+  } else if (String(req.headers['sec-fetch-site'] || '').toLowerCase() === 'cross-site') {
+    throw Object.assign(new Error('مبدأ درخواست معتبر نیست.'), { status:403 });
+  }
 }
 function cookieOptions(maxAge) {
   const secure = process.env.COOKIE_SECURE === 'true' || (process.env.COOKIE_SECURE !== 'false' && process.env.NODE_ENV === 'production');
@@ -72,8 +88,12 @@ async function loadDb() {
     const saved = JSON.parse(await fs.promises.readFile(DB_FILE, 'utf8'));
     db = { users:Array.isArray(saved.users)?saved.users:[], sessions:Array.isArray(saved.sessions)?saved.sessions:[], rooms:saved.rooms && typeof saved.rooms==='object'?saved.rooms:{} };
   } catch (error) {
-    if (error.code !== 'ENOENT') console.error('Database file could not be read:', error.message);
-    await persist();
+    if (error.code === 'ENOENT') {
+      await persist();
+    } else {
+      // Never replace an unreadable/corrupt database with an empty one.
+      throw new Error('Database file is unreadable; startup stopped to protect existing data.', { cause:error });
+    }
   }
   for (const user of db.users) { if (!Number.isFinite(Number(user.bingoCoins))) user.bingoCoins=0; if (!Array.isArray(user.coinTransactions)) user.coinTransactions=[]; if (!user.stats) user.stats={gamesPlayed:0,wins:0,points:0}; }
   for (const id of Object.keys(ROOM_CONFIG)) if (!db.rooms[id]) db.rooms[id] = freshRoom(id);
@@ -84,10 +104,17 @@ async function loadDb() {
 function freshRoom(id) {
   return { id, status:'waiting', queue:[], cardCounts:{}, queuedCards:{}, players:[], calledNumbers:[], winners:{line:null,full:null}, startedAt:null, finishedAt:null, updatedAt:Date.now() };
 }
+function secureShuffle(items) {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
 function makeCard() {
   // 3 rows, 9 columns, 5 numbers per row, with every column populated.
   const grid=Array.from({length:3},()=>Array(9).fill(false));
-  for(let r=0;r<3;r++) for(const c of [...Array(9).keys()].sort(()=>Math.random()-.5).slice(0,5)) grid[r][c]=true;
+  for(let r=0;r<3;r++) for(const c of secureShuffle([...Array(9).keys()]).slice(0,5)) grid[r][c]=true;
   let counts=Array.from({length:9},(_,c)=>grid.reduce((sum,row)=>sum+(row[c]?1:0),0));
   for(let missing=0;missing<9;missing++) if(counts[missing]===0) {
     const moves=[];
@@ -101,7 +128,7 @@ function makeCard() {
   for(let c=0;c<9;c++) {
     const min=c===0?1:c*10; const max=c===8?90:c*10+9;
     const places=[0,1,2].filter(r=>card[r][c]===0);
-    const values=Array.from({length:max-min+1},(_,i)=>min+i).sort(()=>Math.random()-.5).slice(0,places.length).sort((a,b)=>a-b);
+    const values=secureShuffle(Array.from({length:max-min+1},(_,i)=>min+i)).slice(0,places.length).sort((a,b)=>a-b);
     places.forEach((r,i)=>card[r][c]=values[i]);
   }
   return card;
@@ -201,6 +228,7 @@ function rateLimited(req) {
   state.count++; authAttempts.set(ip,state); return state.count>60;
 }
 async function routeApi(req,res,url) {
+  if (['POST','PATCH','PUT','DELETE'].includes(req.method)) validateWriteOrigin(req,url);
   if (req.method==='GET' && url.pathname==='/api/health') return json(res,200,{ok:true,service:'dabernaz',backend:'node',mode:'accounts-and-automatic-rooms-ready'});
   if (req.method==='POST' && (url.pathname==='/api/auth/register' || url.pathname==='/api/auth/login')) {
     if (rateLimited(req)) return json(res,429,{error:'تعداد درخواست‌ها زیاد است. کمی بعد دوباره تلاش کن.'});
@@ -281,7 +309,11 @@ async function routeApi(req,res,url) {
 
 const server=http.createServer(async (req,res)=>{
   let url;
-  try { url=new URL(req.url,`http://${req.headers.host||'localhost'}`); }
+  try {
+    const forwardedProto=String(req.headers['x-forwarded-proto']||'').split(',')[0].trim().toLowerCase();
+    const protocol=forwardedProto==='https' ? 'https:' : 'http:';
+    url=new URL(req.url,`${protocol}//${req.headers.host||'localhost'}`);
+  }
   catch { return json(res,400,{error:'آدرس درخواست معتبر نیست.'}); }
   if (url.pathname.startsWith('/api/')) {
     try { return await routeApi(req,res,url); }
