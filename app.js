@@ -85,7 +85,7 @@ function applyAuthenticatedUser(user) {
   currentUser = user;
   state.username = user.name; state.memberId = user.memberId;
   state.referralCode = `DABERNAZ${user.memberId}`;
-  state.balance = 0; state.bingoCoins = Math.max(0, Number(user.bingoCoins)||0);
+  state.balance = Math.max(0, Number(user.balance)||0); state.bingoCoins = Math.max(0, Number(user.bingoCoins)||0);
   state.coinTransactions = Array.isArray(user.coinTransactions) ? user.coinTransactions.slice(0,50) : [];
   state.gamesPlayed = Number(user.stats?.gamesPlayed)||0; state.wins = Number(user.stats?.wins)||0; state.points = Number(user.stats?.points)||0;
   state.transactions = []; state.joined = [];
@@ -835,5 +835,7 @@ document.addEventListener('submit', async event => {
 
 render();
 loadAuthenticatedUser();
+// Always refresh the authenticated account when the app returns to the foreground so wallet data comes from D1, not stale browser storage.
+document.addEventListener('visibilitychange', () => { if (!document.hidden && currentUser) loadAuthenticatedUser(); });
+window.addEventListener('focus', () => { if (currentUser) loadAuthenticatedUser(); });
 setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom(); }, 2200);
-
