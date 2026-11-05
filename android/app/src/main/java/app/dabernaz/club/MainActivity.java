@@ -21,7 +21,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.webkit.SslError;
+import android.net.http.SslError;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 
@@ -172,7 +172,7 @@ public class MainActivity extends Activity {
             }
         });
 
-        webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) ->
+        webView.setDownloadListener((url, downloadUserAgent, contentDisposition, mimeType, contentLength) ->
             openExternal(Uri.parse(url)));
 
         if (savedInstanceState != null) {
