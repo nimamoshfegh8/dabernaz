@@ -734,7 +734,21 @@ export async function onRequest({ request, env }) {
     return await routeRequest(request, env);
   } catch (error) {
     const status = Number(error?.status) || 500;
+    const requestId = randomToken(8);
+    if (status >= 500) {
+      // Log technical diagnostics only; never log request bodies, email addresses, or passwords.
+      console.error('[dabernaz-api-error]', JSON.stringify({
+        requestId,
+        method: request.method,
+        path: new URL(request.url).pathname,
+        status,
+        name: error?.name || 'Error',
+        message: String(error?.message || error),
+        stack: typeof error?.stack === 'string' ? error.stack : undefined,
+        cause: error?.cause ? String(error.cause?.message || error.cause) : undefined,
+      }));
+    }
     const message = status >= 500 ? 'خطای داخلی سرور رخ داد. تنظیم D1 و گزارش‌های Worker را بررسی کن.' : error.message;
-    return json({ error: message, ...(error?.extra || {}) }, status);
+    return json({ error: message, ...(status >= 500 ? { requestId } : {}), ...(error?.extra || {}) }, status);
   }
 }
