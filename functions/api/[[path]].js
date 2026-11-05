@@ -265,6 +265,7 @@ async function publicUser(db, row) {
     email: row.email || '',
     memberId: String(row.member_id || ''),
     createdAt: row.created_at || '',
+    balance: Math.max(0, Number(row.balance) || 0),
     stats: {
       gamesPlayed: Number(row.games_played) || 0,
       wins: Number(row.wins) || 0,
