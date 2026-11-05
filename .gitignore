@@ -4,3 +4,11 @@ node_modules/
 .DS_Store
 
 /dist/
+
+# Android / Gradle
+android/.gradle/
+android/local.properties
+android/**/build/
+android/.idea/
+*.jks
+*.keystore
