@@ -1,10 +1,11 @@
 {
   "name": "dabernaz-game-club",
-  "version": "3.0.1",
+  "version": "4.0.0",
   "private": true,
-  "description": "Dabernaz with PHP/cPanel and Node.js server APIs, registered accounts, automatic 20-player Daberna rooms and skill-based mini-games",
+  "description": "Dabernaz Cloudflare Pages Functions + D1 backend with registered accounts and 20-player automatic Daberna rooms",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build:pages": "node build-pages.mjs"
   },
   "engines": {
     "node": ">=18"

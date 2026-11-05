@@ -363,7 +363,7 @@ function renderAuthPage() {
   const register=authMode==='register';
   return `${heading('حساب کاربری دابرناز', 'برای ذخیره حساب و ورود به بازی‌ها ثبت‌نام کن یا وارد شو.', 'SECURE PLAYER ACCOUNT')}
     <section class="panel auth-panel">
-      ${authReady && !apiReady ? '<div class="mini-game-info-notice" role="status">اتصال سرور برقرار نیست. برای فعال شدن ثبت‌نام و ورود، فایل‌ها را روی هاست PHP با فایل api.php یا سرور Node.js اجرا کن؛ بازکردن مستقیم HTML کار نمی‌کند.</div>' : authReady && apiReady ? '<div class="mini-game-info-notice" role="status">اتصال به سرور برقرار است؛ ثبت‌نام و ورود آماده است.</div>' : '<div class="mini-game-info-notice" role="status">در حال بررسی اتصال سرور…</div>'}
+      ${authReady && !apiReady ? '<div class="mini-game-info-notice" role="status">اتصال API برقرار نیست. برای ثبت‌نام و ورود، Cloudflare Pages باید با D1 و Binding دقیق DB منتشر شده باشد. تنظیمات Pages و اتصال دیتابیس را بررسی کن.</div>' : authReady && apiReady ? '<div class="mini-game-info-notice" role="status">اتصال به سرور برقرار است؛ ثبت‌نام و ورود آماده است.</div>' : '<div class="mini-game-info-notice" role="status">در حال بررسی اتصال سرور…</div>'}
       <div class="auth-tabs"><button class="${register?'':'active'}" data-auth-mode="login">ورود</button><button class="${register?'active':''}" data-auth-mode="register">ثبت‌نام</button></div>
       <form id="authForm" class="form-stack" autocomplete="on">
         ${register?'<label class="muted-note" for="authName">نام نمایشی</label><input id="authName" class="form-control" name="name" minlength="2" maxlength="32" autocomplete="name" placeholder="نامی که در بازی نمایش داده می‌شود" required>':''}

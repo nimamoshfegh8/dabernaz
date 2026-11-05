@@ -1,0 +1,11 @@
+Dabernaz Cloudflare Backend – Static validation report
+
+- Pages Function JavaScript syntax: passed with Node.js --check.
+- Pages asset build script syntax: passed with Node.js --check.
+- Pages asset build: passed; dist contains only frontend assets and _routes.json.
+- Route map: includes /api/* only.
+- D1 bootstrap: schema tables and missing user columns are created automatically on first API request; no manual SQL paste required.
+- Required manual Cloudflare step: bind the D1 database to the Pages project using variable name DB, then redeploy.
+- Not claimed as live-tested: Cloudflare production deployment, D1 binding, public registration/login, and concurrent 20-player room behavior. Those require the user's Cloudflare environment after the files are pushed and the DB binding is enabled.
+
+This report distinguishes local/static validation from production verification.
