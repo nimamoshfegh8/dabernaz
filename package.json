@@ -5,7 +5,9 @@
   "description": "Dabernaz Cloudflare Pages Functions + D1 backend with registered accounts and 20-player automatic Daberna rooms",
   "scripts": {
     "start": "node server.js",
-    "build:pages": "node build-pages.mjs"
+    "build:pages": "node build-pages.mjs",
+    "check": "node --check server.js && node --check app.js && node --check build-pages.mjs && node --check --input-type=module < 'functions/api/[[path]].js'",
+    "test": "npm run check"
   },
   "engines": {
     "node": ">=18"
