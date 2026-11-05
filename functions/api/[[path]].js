@@ -682,6 +682,31 @@ async function routeRequest(request, env) {
     return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', mode: 'ready' });
   }
 
+  // Temporary one-off diagnostic to verify PBKDF2 in the deployed Pages runtime.
+  if (request.method === 'GET' && path === '/api/health/crypto-check') {
+    const startedAt = Date.now();
+    try {
+      const probePassword = 'DabernazRuntimeProbeOnly';
+      const stored = await hashPassword(probePassword);
+      const verified = await verifyPassword(probePassword, stored);
+      return json({
+        ok: verified,
+        check: 'PBKDF2-SHA256',
+        iterations: PASSWORD_ITERATIONS,
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      return json({
+        ok: false,
+        check: 'PBKDF2-SHA256',
+        iterations: PASSWORD_ITERATIONS,
+        elapsedMs: Date.now() - startedAt,
+        errorName: error?.name || 'Error',
+        errorMessage: String(error?.message || error),
+      }, 500);
+    }
+  }
+
   const authResponse = await handleAuth(env.DB, request, path);
   if (authResponse) return authResponse;
 
