@@ -81,7 +81,7 @@ async function verifyPassword(password, stored) {
   try {
     const [kind, roundsText, saltText, digestText] = String(stored).split('$');
     const rounds = Number(roundsText);
-    if (kind !== 'pbkdf2' || !Number.isInteger(rounds) || rounds < 50000 || rounds > 500000) return false;
+    if (kind !== 'pbkdf2' || !Number.isInteger(rounds) || rounds < 50000 || rounds > 100000) return false;
     const salt = hexToBytes(saltText);
     const expected = hexToBytes(digestText);
     if (salt.length !== 16 || expected.length !== 32) return false;
@@ -293,6 +293,9 @@ async function readJson(request) {
 function validateWriteOrigin(request) {
   const origin = request.headers.get('origin');
   if (origin && origin !== new URL(request.url).origin) throw new HttpError(403, 'مبدأ درخواست معتبر نیست.');
+  if (!origin && request.headers.get('sec-fetch-site')?.toLowerCase() === 'cross-site') {
+    throw new HttpError(403, 'مبدأ درخواست معتبر نیست.');
+  }
 }
 
 async function checkAuthRate(db, request, email) {
@@ -368,18 +371,35 @@ async function handleAuth(db, request, path) {
           (username, email, member_id, password_hash, balance, bingo_coins, referral_code, games_played, wins, points, created_at)
           VALUES (?, ?, ?, ?, 0, 0, ?, 0, 0, 0, ?)`)
           .bind(name, email, memberId, passwordHash, referralCode, new Date().toISOString()).run();
-      } catch (_) {
-        throw new HttpError(409, 'این ایمیل یا شناسه قبلاً ثبت شده است.');
+      } catch (error) {
+        const message = String(error?.message || error);
+        if (/unique constraint failed|constraint failed/i.test(message)) {
+          throw new HttpError(409, 'این ایمیل، نام نمایشی یا شناسه قبلاً ثبت شده است.');
+        }
+        throw error;
       }
       userRow = await db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
+      if (!userRow) throw new Error('User row was not available after successful registration insert.');
     } else {
       userRow = await db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
       const valid = userRow ? await verifyPassword(password, userRow.password_hash) : false;
       if (!valid) throw new HttpError(401, 'ایمیل یا رمز عبور اشتباه است.');
     }
 
-    const token = await createSession(db, userRow.id);
     const user = await publicUser(db, userRow);
+    let token;
+    try {
+      token = await createSession(db, userRow.id);
+    } catch (error) {
+      // A failed session insert must not leave a newly registered, unusable account behind.
+      if (path === '/api/auth/register') {
+        await db.batch([
+          db.prepare('DELETE FROM auth_sessions WHERE user_id = ?').bind(userRow.id),
+          db.prepare('DELETE FROM users WHERE id = ?').bind(userRow.id),
+        ]).catch((cleanupError) => console.error('[dabernaz-register-rollback-failed]', String(cleanupError?.message || cleanupError)));
+      }
+      throw error;
+    }
     return json({ ok: true, user }, 200, { 'set-cookie': sessionCookie(token, request) });
   }
   return null;
@@ -405,7 +425,11 @@ function newRoom(roomId) {
 async function loadRoom(db, roomId) {
   const row = await db.prepare('SELECT payload FROM room_states WHERE room_id = ?').bind(roomId).first();
   if (row?.payload) {
-    try { return JSON.parse(row.payload); } catch (_) { /* recreate corrupt room payload below */ }
+    try { return JSON.parse(row.payload); }
+    catch (error) {
+      console.error('[dabernaz-room-state-corrupt]', JSON.stringify({ roomId, message:String(error?.message || error) }));
+      throw new HttpError(500, 'اطلاعات اتاق قابل خواندن نیست؛ برای جلوگیری از پاک شدن صف، اتاق بازنشانی نشد.');
+    }
   }
   const room = newRoom(roomId);
   await saveRoom(db, room);
@@ -671,13 +695,13 @@ async function routeRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
   if (!path.startsWith('/api/')) return json({ error: 'مسیر API پیدا نشد.' }, 404);
-  if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
-  await ensureSchema(env.DB);
-
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: {
     'allow': 'GET, POST, PATCH, OPTIONS',
     'cache-control': 'no-store',
   } });
+  if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
+  await ensureSchema(env.DB);
+
   if (request.method === 'GET' && path === '/api/health') {
     return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', mode: 'ready' });
   }
