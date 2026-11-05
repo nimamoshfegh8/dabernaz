@@ -6,7 +6,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(root, 'dist');
 const files = [
   'index.html', 'app.js', 'styles.css', 'icon.svg',
-  'manifest.webmanifest', 'sw.js', 'sw-register.js',
+  'manifest.webmanifest', 'sw.js', 'sw-register.js', '_headers',
 ];
 
 await rm(out, { recursive: true, force: true });
