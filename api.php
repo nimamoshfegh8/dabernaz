@@ -75,10 +75,17 @@ function fresh_room(string $id): array {
         'nextDrawAt'=>null,'updatedAt'=>time()];
 }
 function random_int_safe(int $min, int $max): int { return random_int($min, $max); }
+function secure_shuffle(array $items): array {
+    for ($i = count($items) - 1; $i > 0; $i--) {
+        $j = random_int(0, $i);
+        [$items[$i], $items[$j]] = [$items[$j], $items[$i]];
+    }
+    return $items;
+}
 function make_card(): array {
     $grid = array_fill(0, 3, array_fill(0, 9, false));
     for ($r=0; $r<3; $r++) {
-        $cols = range(0, 8); shuffle($cols);
+        $cols = secure_shuffle(range(0, 8));
         foreach (array_slice($cols, 0, 5) as $c) $grid[$r][$c] = true;
     }
     $counts = array_fill(0, 9, 0);
@@ -99,7 +106,7 @@ function make_card(): array {
         $max = $c===8 ? 90 : $c*10+9;
         $places=[];
         for ($r=0; $r<3; $r++) if ($card[$r][$c] === 0) $places[]=$r;
-        $values=range($min,$max); shuffle($values); $values=array_slice($values,0,count($places)); sort($values);
+        $values=secure_shuffle(range($min,$max)); $values=array_slice($values,0,count($places)); sort($values);
         foreach ($places as $i=>$r) $card[$r][$c]=$values[$i];
     }
     return $card;
