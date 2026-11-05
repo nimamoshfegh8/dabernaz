@@ -137,13 +137,13 @@ function renderHome() {
     <button class="shortcut" data-page="invite"><span class="symbol">🎁</span><b>دعوت دوستان</b><small>دعوت و همراهی</small></button>
     <button class="shortcut" data-page="wallet"><span class="symbol">👛</span><b>کیف پول</b><small>موجودی سکه</small></button>
   </div>
-  <div class="promo"><div class="promo-art">🎯</div><div class="promo-copy"><b>چالش روزانه دابرناز</b><p>هر روز وارد شو و مأموریت‌های تازه رو دنبال کن.</p></div><button class="btn btn-outline" data-page="games">مشاهده</button></div>
+  <div class="promo"><div class="promo-art">🎯</div><div class="promo-copy"><b>بازی‌های دابرناز</b><p>بازی مورد علاقه‌ات را انتخاب کن و مهارتت را محک بزن.</p></div><button class="btn btn-outline" data-page="games">مشاهده</button></div>
   <section class="room-teaser"><div class="room-teaser-art">🎱</div><div class="room-teaser-copy"><span>اتاق‌های آنلاین دبرنا</span><b>۴ سطح اتاق</b><small>ظرفیت ۲۰ نفر · شروع و قرعه‌کشی خودکار</small></div><button class="btn btn-gold" data-page="games">انتخاب اتاق <span>←</span></button></section>
   ${section('بازی‌های محبوب', 'همه بازی‌ها', 'games')}
   <div class="game-grid">${roomGameCard()}${gameCard('rps','✊✋✌️','سنگ، کاغذ، قیچی','مسابقه خودکار تا رسیدن یکی از طرفین به ۳ برد','بازی مهارتی · بدون شرط‌بندی','game-cover-rps')}${gameCard('tic','⭕❌','دوز حرفه‌ای','صفحه ۳×۳ با حریف هوشمند و تصمیم‌های تاکتیکی','بازی مهارتی · بدون شرط‌بندی','game-cover-tic')}</div>
   ${section('وضعیت حساب', 'حساب کاربری', 'account')}
   <div class="mini-stats"><div class="stat-card"><b id="homeGamesPlayed">${money(state.gamesPlayed)}</b><small>بازی انجام‌شده</small></div><div class="stat-card"><b id="homeWins">${money(state.wins)}</b><small>بردها</small></div><div class="stat-card"><b>${money(state.points)}</b><small>امتیاز کل</small></div></div>
-  <div class="ticker"><span>⭐ وضعیت عضویت</span><strong>عضو فعال دابرناز</strong><span>● آنلاین</span></div>`;
+  <div class="ticker"><span>⭐ وضعیت حساب</span><strong>${currentUser ? 'حساب ثبت‌شده' : 'مهمان'}</strong><span>● آماده بازی</span></div>`;
 }
 function gameCard(id, symbol, name, desc, price, coverClass = '') {
   return `<article class="game-card"><div class="game-cover ${coverClass}">${symbol}</div><h3>${name}</h3><p>${desc}</p><button class="btn btn-primary" data-game="${id}">ورود به بازی</button><div class="price">${price}</div></article>`;
@@ -380,14 +380,14 @@ function renderSettings() {
   return `${heading('تنظیمات', 'دابرناز رو مطابق سلیقه خودت تنظیم کن.', 'PREFERENCES')}
   <section class="setting-group"><h3 class="settings-title">تنظیمات عمومی</h3>${sw('sounds','صدای بازی','فعال یا غیرفعال کردن صداها')}${sw('notifications','اعلان‌ها','دریافت اعلان‌های داخل سایت')}${sw('vibration','لرزش','بازخورد لرزشی در دستگاه‌های پشتیبانی‌شده')}</section>
   <section class="setting-group"><h3 class="settings-title">حریم خصوصی</h3>${sw('privacy','نمایش وضعیت آنلاین','تنظیم نمایش وضعیت حضور در بخش‌های بازی')}</section>
-  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3><div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div><div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های خودکار</small></div><span class="muted-note">2.0.0</span></div></section>
+  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3><div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div><div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های خودکار</small></div><span class="muted-note">4.0.0</span></div></section>
   <button class="btn btn-outline btn-block" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
 const faqs = [
   ['چطور وارد اتاق بازی بشم؟','از صفحه خانه روی «اتاق بازی» بزن یا از کارت بازی مورد علاقه‌ات وارد شو.'],
   ['ورود به اتاق دبرنا هزینه دارد؟','فعلاً ورود به اتاق‌ها رایگان است. تا زمان اتصال درگاه، هیچ پولی دریافت یا جایزه نقدی پرداخت نمی‌شود.'],
   ['تورنمنت‌ها و کیف پول فعال هستند؟','فعلاً این بخش‌ها به سیستم پرداخت و ثبت‌نام سروری متصل نیستند. حساب کاربری، اتاق دبرنا، سنگ‌کاغذقیچی و دوز فعال‌اند.'],
-  ['اطلاعات حساب من کجا ذخیره می‌شود؟','نام، ایمیل، شناسه و رمزِ هش‌شده حساب در فایل خصوصی سرور ذخیره می‌شوند. آمار مسابقه‌های مهارتی نیز سمت سرور ثبت می‌شود. تنظیمات ظاهری در مرورگر می‌مانند.'],
+  ['اطلاعات حساب من کجا ذخیره می‌شود؟','در استقرار فعلی Cloudflare، اطلاعات حساب و آمار در دیتابیس D1 نگهداری می‌شوند و رمز عبور فقط به‌شکل هش‌شده ذخیره می‌شود. در استقرار PHP/Node روش ذخیره‌سازی مخصوص همان بک‌اند است. تنظیمات ظاهری در مرورگر می‌مانند.'],
   ['چطور با پشتیبانی ارتباط بگیرم؟','فرم پایین صفحه را تکمیل کن. پیام در این نسخه فقط به‌صورت محلی نمایش داده می‌شود و به اپراتور ارسال نمی‌شود.']
 ];
 function renderSupport() {
@@ -768,7 +768,7 @@ document.addEventListener('click', async event => {
   else if (action === 'memory-card') revealMemory(actionEl);
   else if (action === 'edit-profile') editProfile();
   else if (action === 'settings') setPage('settings');
-  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">رمز عبور با الگوریتم scrypt و salt اختصاصی هش می‌شود و متن ساده آن ذخیره نمی‌شود.</p><p class="muted-note">ورود با کوکی نشست HttpOnly و SameSite=Strict انجام می‌شود و نشست پس از ۳۰ روز منقضی می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
+  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه Cloudflare رمز عبور با PBKDF2-SHA256 و salt اختصاصی هش می‌شود؛ نسخه PHP از password_hash و نسخه Node از scrypt استفاده می‌کند. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
   else if (action === 'reset-settings') { state.settings = { ...defaultState.settings }; saveState(); render(); showToast('تنظیمات بازنشانی شد'); }
@@ -803,7 +803,7 @@ function revealMemory(button) {
   }
 }
 function editProfile() {
-  openModal('ویرایش اطلاعات حساب', `<form id="profileForm" class="form-stack"><label class="muted-note">نام نمایشی</label><input class="form-control" name="username" maxlength="22" minlength="2" value="${escapeHTML(state.username)}" required><p class="muted-note">شناسه بازیکن: ${state.memberId}</p><button class="btn btn-primary btn-block" type="submit">ذخیره تغییرات</button></form>`);
+  openModal('ویرایش اطلاعات حساب', `<form id="profileForm" class="form-stack"><label class="muted-note">نام نمایشی</label><input class="form-control" name="username" maxlength="32" minlength="2" value="${escapeHTML(state.username)}" required><p class="muted-note">شناسه بازیکن: ${state.memberId}</p><button class="btn btn-primary btn-block" type="submit">ذخیره تغییرات</button></form>`);
 }
 function confirmReset() {
   openModal('پاک کردن اطلاعات محلی؟', `<p class="muted-note">با این کار اطلاعات نمایشی این مرورگر به حالت اولیه برمی‌گردد.</p><div style="display:flex;gap:8px"><button class="btn btn-muted" style="flex:1" data-action="close-modal">انصراف</button><button class="btn btn-primary" style="flex:1" data-action="confirm-reset">تأیید و بازنشانی</button></div>`);
