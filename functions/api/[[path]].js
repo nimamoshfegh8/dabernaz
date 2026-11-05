@@ -2,7 +2,7 @@
 const CAPACITY = 20;
 const DRAW_INTERVAL_MS = 3000;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
-const PASSWORD_ITERATIONS = 120000;
+const PASSWORD_ITERATIONS = 100000;
 const ROOM_IDS = ['room5000', 'room10000', 'room20000', 'room50000'];
 const encoder = new TextEncoder();
 const bootstrappedBindings = new WeakSet();
@@ -680,31 +680,6 @@ async function routeRequest(request, env) {
   } });
   if (request.method === 'GET' && path === '/api/health') {
     return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', mode: 'ready' });
-  }
-
-  // Temporary one-off diagnostic to verify PBKDF2 in the deployed Pages runtime.
-  if (request.method === 'GET' && path === '/api/health/crypto-check') {
-    const startedAt = Date.now();
-    try {
-      const probePassword = 'DabernazRuntimeProbeOnly';
-      const stored = await hashPassword(probePassword);
-      const verified = await verifyPassword(probePassword, stored);
-      return json({
-        ok: verified,
-        check: 'PBKDF2-SHA256',
-        iterations: PASSWORD_ITERATIONS,
-        elapsedMs: Date.now() - startedAt,
-      });
-    } catch (error) {
-      return json({
-        ok: false,
-        check: 'PBKDF2-SHA256',
-        iterations: PASSWORD_ITERATIONS,
-        elapsedMs: Date.now() - startedAt,
-        errorName: error?.name || 'Error',
-        errorMessage: String(error?.message || error),
-      }, 500);
-    }
   }
 
   const authResponse = await handleAuth(env.DB, request, path);
