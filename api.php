@@ -38,6 +38,24 @@ function request_body(): array {
     if (!is_array($value)) send_json(400, ['error' => 'داده ارسالی معتبر نیست.']);
     return $value;
 }
+function validate_write_origin(): void {
+    $origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
+    if ($origin !== '') {
+        $host = (string)($_SERVER['HTTP_HOST'] ?? '');
+        $scheme = (($_SERVER['HTTPS'] ?? '') !== '' && ($_SERVER['HTTPS'] ?? '') !== 'off')
+            || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https'
+            ? 'https' : 'http';
+        $expected = strtolower($scheme . '://' . $host);
+        if (!hash_equals($expected, strtolower(rtrim($origin, '/')))) {
+            send_json(403, ['error' => 'مبدأ درخواست معتبر نیست.']);
+        }
+        return;
+    }
+    if (strtolower((string)($_SERVER['HTTP_SEC_FETCH_SITE'] ?? '')) === 'cross-site') {
+        send_json(403, ['error' => 'مبدأ درخواست معتبر نیست.']);
+    }
+}
+
 function text_length(string $value): int {
     $count = preg_match_all('/./us', $value, $matches);
     return $count === false ? strlen($value) : $count;
@@ -172,12 +190,24 @@ function public_room(array $room, string $userId, array $db): array {
 function store_update(callable $callback): mixed {
     global $privateDir,$dbFile,$lockFile;
     if (!is_dir($privateDir) && !mkdir($privateDir,0700,true) && !is_dir($privateDir)) send_json(500,['error'=>'ساخت پوشه اطلاعات سرور ممکن نشد.']);
+    // Defense in depth: deny HTTP access to runtime data even when .private is auto-created.
+    $privateHtaccess = $privateDir . '/.htaccess';
+    if (!is_file($privateHtaccess)) {
+        $denyRules = "Options -Indexes\n<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nOrder allow,deny\nDeny from all\n</IfModule>\n";
+        if (file_put_contents($privateHtaccess, $denyRules, LOCK_EX) === false) send_json(500,['error'=>'محافظت از پوشه اطلاعات سرور ممکن نشد.']);
+        @chmod($privateHtaccess,0600);
+    }
     $guard=fopen($lockFile,'c+'); if (!$guard) send_json(500,['error'=>'قفل پایگاه داده باز نشد.']);
     if (!flock($guard,LOCK_EX)) { fclose($guard); send_json(500,['error'=>'دسترسی به اطلاعات سرور ممکن نشد.']); }
     $db=['users'=>[],'rooms'=>[]];
     if (is_file($dbFile)) {
-        $decoded=json_decode((string)file_get_contents($dbFile),true);
-        if (is_array($decoded)) $db=$decoded;
+        $raw = file_get_contents($dbFile);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        if (!is_array($decoded) || json_last_error() !== JSON_ERROR_NONE || !isset($decoded['users']) || !is_array($decoded['users'])) {
+            flock($guard, LOCK_UN); fclose($guard);
+            send_json(500, ['error'=>'فایل اطلاعات سرور خراب یا ناخواناست؛ برای جلوگیری از حذف اطلاعات، سرویس متوقف شد.']);
+        }
+        $db=$decoded;
     }
     $db['users']=is_array($db['users']??null)?$db['users']:[];
     foreach ($db['users'] as &$storedUser) { if (!isset($storedUser['bingoCoins'])) $storedUser['bingoCoins']=0; if (!isset($storedUser['coinTransactions']) || !is_array($storedUser['coinTransactions'])) $storedUser['coinTransactions']=[]; if (!isset($storedUser['stats'])) $storedUser['stats']=['gamesPlayed'=>0,'wins'=>0,'points'=>0]; }
@@ -204,6 +234,7 @@ function get_user_index(array $db, string $userId): int {
 $method=$_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path=$_GET['path'] ?? parse_url($_SERVER['REQUEST_URI'] ?? '/',PHP_URL_PATH);
 $path='/'.trim((string)$path,'/');
+if (in_array($method, ['POST','PATCH','PUT','DELETE'], true)) validate_write_origin();
 if ($path==='/api/health') send_json(200,['ok'=>true,'service'=>'dabernaz','backend'=>'php','mode'=>'ready']);
 
 if ($method==='POST' && ($path==='/api/auth/register' || $path==='/api/auth/login')) {
