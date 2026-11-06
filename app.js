@@ -41,13 +41,13 @@ let currentPage = 'home';
 let toastTimer = null;
 let bingoGame = null;
 const ROOM_CONFIGS = [
-  { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000' },
-  { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000' },
-  { id:'room20000', price:20000, label:'۲۰,۰۰۰', code:'DB-20000' },
-  { id:'room50000', price:50000, label:'۵۰,۰۰۰', code:'DB-50000' }
+  { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrize:20000, fullPrize:115000, commission:15000 },
+  { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrize:40000, fullPrize:230000, commission:30000 },
+  { id:'room20000', price:20000, label:'۲۰,۰۰۰', code:'DB-20000', linePrize:80000, fullPrize:460000, commission:60000 },
+  { id:'room50000', price:50000, label:'۵۰,۰۰۰', code:'DB-50000', linePrize:200000, fullPrize:1150000, commission:150000 }
 ];
 function currentRoomConfig() { const id = currentPage === 'roomGame' ? activeRoomId : currentPage; return ROOM_CONFIGS.find(room => room.id === id) || ROOM_CONFIGS[0]; }
-const ROOM_CAPACITY = 20;
+const ROOM_CAPACITY = 30;
 let activeRoomId = 'room5000';
 let roomCards = [];
 let roomCardCount = 1;
@@ -138,7 +138,7 @@ function renderHome() {
     <button class="shortcut" data-page="wallet"><span class="symbol">👛</span><b>کیف پول</b><small>موجودی سکه</small></button>
   </div>
   <div class="promo"><div class="promo-art">🎯</div><div class="promo-copy"><b>بازی‌های دابرناز</b><p>بازی مورد علاقه‌ات را انتخاب کن و مهارتت را محک بزن.</p></div><button class="btn btn-outline" data-page="games">مشاهده</button></div>
-  <section class="room-teaser"><div class="room-teaser-art">🎱</div><div class="room-teaser-copy"><span>اتاق‌های آنلاین دبرنا</span><b>۴ سطح اتاق</b><small>ظرفیت ۲۰ نفر · شروع و قرعه‌کشی خودکار</small></div><button class="btn btn-gold" data-page="games">انتخاب اتاق <span>←</span></button></section>
+  <section class="room-teaser"><div class="room-teaser-art">🎱</div><div class="room-teaser-copy"><span>اتاق‌های آنلاین دبرنا</span><b>۴ سطح اتاق</b><small>ظرفیت ۳۰ نفر · شروع و قرعه‌کشی خودکار</small></div><button class="btn btn-gold" data-page="games">انتخاب اتاق <span>←</span></button></section>
   ${section('بازی‌های محبوب', 'همه بازی‌ها', 'games')}
   <div class="game-grid">${roomGameCard()}${gameCard('rps','✊✋✌️','سنگ، کاغذ، قیچی','مسابقه خودکار تا رسیدن یکی از طرفین به ۳ برد','بازی مهارتی · بدون شرط‌بندی','game-cover-rps')}${gameCard('tic','⭕❌','دوز حرفه‌ای','صفحه ۳×۳ با حریف هوشمند و تصمیم‌های تاکتیکی','بازی مهارتی · بدون شرط‌بندی','game-cover-tic')}</div>
   ${section('وضعیت حساب', 'حساب کاربری', 'account')}
@@ -149,7 +149,7 @@ function gameCard(id, symbol, name, desc, price, coverClass = '') {
   return `<article class="game-card"><div class="game-cover ${coverClass}">${symbol}</div><h3>${name}</h3><p>${desc}</p><button class="btn btn-primary" data-game="${id}">ورود به بازی</button><div class="price">${price}</div></article>`;
 }
 function roomGameCard() {
-  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>چهار سطح اتاق · ظرفیت ۲۰ نفر</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
+  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>چهار سطح اتاق · ظرفیت ۳۰ نفر</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
 }
 function renderGames() {
   const tiers = ['red','silver','gold','purple'];
@@ -157,14 +157,14 @@ function renderGames() {
   return `<section class="games-page">
     <header class="games-lobby-heading">
       <div class="games-lobby-title"><span class="games-lobby-icon">🎮</span><div><h1>اتاق بازی</h1><p>وارد صف شو، بازی خودکار شروع می‌شود.</p></div></div>
-      <div class="games-online-badge"><span class="online-people-icon">♟</span><div><small>اتاق‌های چندنفره</small><b>ظرفیت ۲۰ نفر</b></div><i aria-label="صف واقعی"></i></div>
+      <div class="games-online-badge"><span class="online-people-icon">♟</span><div><small>اتاق‌های چندنفره</small><b>ظرفیت ۳۰ نفر</b></div><i aria-label="صف واقعی"></i></div>
     </header>
 
     <section class="games-lobby-hero">
-      <div class="games-lobby-callout"><small>بازی گروهی ۲۰ نفره</small><h2>شروع خودکار!</h2><p>با ورود به صف، پس از تکمیل ۲۰ بازیکن واقعی، قرعه‌کشی به‌صورت خودکار آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
+      <div class="games-lobby-callout"><small>بازی گروهی ۳۰ نفره</small><h2>شروع خودکار!</h2><p>با ورود به صف، پس از تکمیل ۳۰ بازیکن واقعی، قرعه‌کشی به‌صورت خودکار آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
       <div class="games-lobby-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
       <div class="games-lobby-features">
-        <div><span>▤</span><p>ظرفیت هر اتاق<strong>۲۰ بازیکن</strong></p></div>
+        <div><span>▤</span><p>ظرفیت هر اتاق<strong>۳۰ بازیکن</strong></p></div>
         <div><span>◷</span><p>شروع بازی<strong>پس از تکمیل ظرفیت</strong></p></div>
         <div><span>🎲</span><p>مهره‌ها<strong>شماره‌های ۱ تا ۹۰</strong></p></div>
         <div><span>♛</span><p>شرط برنده شدن<strong>یک خط و دبرنای کامل</strong></p></div>
@@ -177,7 +177,7 @@ function renderGames() {
         <div class="games-price-card-art" aria-hidden="true"><span class="mini-bingo-card card-a">BINGO</span><span class="mini-bingo-card card-b">BINGO</span><span class="mini-bingo-card card-c">BINGO</span><span class="mini-bingo-crown">${cardIcons[index]}</span></div>
         <b class="games-price-name">اتاق سطح ${index+1}</b>
         <button class="games-price-button" data-page="${room.id}">ورود به اتاق</button>
-        <small class="games-price-caption">ظرفیت ۲۰ بازیکن · ۱ کارت</small>
+        <small class="games-price-caption">ظرفیت ۳۰ بازیکن · ۱ کارت</small>
       </article>`).join('')}</div>
     </section>
 
@@ -232,16 +232,17 @@ function renderRoomPurchasePage() {
   const waiting=queue.status==='waiting';
   return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}`, 'وارد صف بازیکنان واقعی شو؛ بازی با تکمیل ظرفیت به‌صورت خودکار شروع می‌شود.', 'DABERNAZ · LIVE ROOM')}
   <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
+  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>هر بازیکن یک کارت</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div><div><b>🏛️ ${faDigits(room.commission)} تومان</b><small>کمیسیون سایت</small></div></section>
   <section class="purchase-wait-hero"><div class="purchase-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
     <div class="purchase-box"><div class="purchase-box-top"><span class="live-dot"></span> سالن آنلاین <b>${room.code}</b></div>
       <small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${joined||selectedCount<=1?'disabled':''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${joined||selectedCount>=4?'disabled':''}>+</button></div>
       <div class="purchase-total"><span>هزینه ورود</span><b>رایگان تا اتصال درگاه</b></div>
       ${!currentUser ? `<button class="btn btn-primary btn-block" data-page="account">ورود / ثبت‌نام برای بازی</button>` : queue.status==='playing' && joined ? `<button class="btn btn-primary btn-block" data-action="room-open-game">ورود به بازی زنده</button>` : queue.status==='playing' ? `<button class="btn btn-muted btn-block" disabled>سانس در حال اجراست</button>` : joined && waiting ? `<button class="btn btn-muted btn-block" data-action="room-leave">خروج از صف</button>` : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">${queue.status==='finished'?'ورود به سانس بعدی':'ورود به صف واقعی'}</button>`}
-      <small class="purchase-disclaimer">تا زمان تهیه درگاه، ورود رایگان است و هیچ مبلغی دریافت یا جایزه نقدی پرداخت نمی‌شود.</small>
+      <small class="purchase-disclaimer">هزینه ورود از کیف پول پس از ثبت قطعی در صف کسر می‌شود و جایزه‌ها پس از ثبت برنده توسط سرور به کیف پول برندگان اضافه می‌شود.</small>
     </div></section>
-  <section class="room-wait-panel" id="roomWaitPanel"><div class="wait-panel-heading"><div><span class="eyebrow">ONLINE WAITING ROOM</span><h2>${queue.status==='playing'?'بازی شروع شده':queue.status==='finished'?'سانس پایان یافته':joined?'در صف انتظار هستی':'منتظر بازیکنان باش'}</h2><p>${queue.status==='playing'?'قرعه‌کشی خودکار در حال اجراست.':queue.status==='finished'?'برندگان ثبت شده‌اند؛ برای سانس بعدی دوباره وارد صف شو.':`با ورود ${Math.max(0,20-count).toLocaleString('fa-IR')} بازیکن دیگر، بازی آغاز می‌شود.`}</p></div><div class="wait-hourglass">${queue.status==='playing'?'🎱':'⌛'}</div></div>
-    <div class="wait-stats"><div><b id="queueCount">${faDigits(count)} / ۲۰</b><small>بازیکنان حاضر</small></div><div><b>۲۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}</b><small>سطح اتاق</small></div></div>
-    <div class="queue-progress"><span id="queueProgress" style="width:${count/20*100}%"></span></div><div class="queue-avatars" id="queueAvatars">${roomQueueSlots(count)}</div>
+  <section class="room-wait-panel" id="roomWaitPanel"><div class="wait-panel-heading"><div><span class="eyebrow">ONLINE WAITING ROOM</span><h2>${queue.status==='playing'?'بازی شروع شده':queue.status==='finished'?'سانس پایان یافته':joined?'در صف انتظار هستی':'منتظر بازیکنان باش'}</h2><p>${queue.status==='playing'?'قرعه‌کشی خودکار در حال اجراست.':queue.status==='finished'?'برندگان ثبت شده‌اند؛ برای سانس بعدی دوباره وارد صف شو.':`با ورود ${Math.max(0,ROOM_CAPACITY-count).toLocaleString('fa-IR')} بازیکن دیگر، بازی آغاز می‌شود.`}</p></div><div class="wait-hourglass">${queue.status==='playing'?'🎱':'⌛'}</div></div>
+    <div class="wait-stats"><div><b id="queueCount">${faDigits(count)} / ۳۰</b><small>بازیکنان حاضر</small></div><div><b>۳۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}</b><small>سطح اتاق</small></div></div>
+    <div class="queue-progress"><span id="queueProgress" style="width:${count/ROOM_CAPACITY*100}%"></span></div><div class="queue-avatars" id="queueAvatars">${roomQueueSlots(count)}</div>
     <div class="queue-wait-hint">${joined?'اتصال صف به سرور برقرار است؛ وضعیت بازیکنان به‌طور خودکار به‌روزرسانی می‌شود.':'پس از ورود به صف، تعداد بازیکنان به‌صورت زنده از سرور خوانده می‌شود.'}</div>
     <p class="muted-note room-session-note">توجه: خروج از حساب، حضور همان حساب را از صف حذف می‌کند. تب‌های یک مرورگر نشست مشترک دارند؛ برای آزمایش هم‌زمان چند حساب، هر حساب را در مرورگر یا دستگاه جداگانه باز کن.</p>
   </section>
@@ -317,8 +318,8 @@ const tournaments = [
 function renderTournaments() {
   return `${heading('تورنومنت', 'رقابت‌های ویژه دابرناز را انتخاب کن.', 'TOURNAMENTS')}
   <div class="tournament-subpage-grid">
-    <button class="tournament-subpage-card" data-page="tournamentRoom"><span>🏆</span><b>اتاق تورنومنت</b><small>ظرفیت ۲۰ نفر · رقابت گروهی</small><em>مشاهده اتاق ←</em></button>
-    <button class="tournament-subpage-card" data-page="bingoTournament"><span>🎱</span><b>اتاق بینگو تورنومنت</b><small>ظرفیت ۲۰ نفر · بینگوی رقابتی</small><em>مشاهده اتاق ←</em></button>
+    <button class="tournament-subpage-card" data-page="tournamentRoom"><span>🏆</span><b>اتاق تورنومنت</b><small>ظرفیت ۳۰ نفر · رقابت گروهی</small><em>مشاهده اتاق ←</em></button>
+    <button class="tournament-subpage-card" data-page="bingoTournament"><span>🎱</span><b>اتاق بینگو تورنومنت</b><small>ظرفیت ۳۰ نفر · بینگوی رقابتی</small><em>مشاهده اتاق ←</em></button>
   </div>
   <p class="muted-note">اتاق‌های تورنومنت هنوز به صف و ثبت‌نام سروری متصل نشده‌اند؛ تا فعال‌سازی نهایی امکان ثبت‌نام ندارند.</p>`;
 }
@@ -328,7 +329,7 @@ function renderTournamentDetail(bingo=false) {
   const cost = bingo ? 100 : 20;
   const entered = state.joined.includes(id);
   return `${heading(title, 'برای حضور در رقابت، هزینه ورود را با بینگوکوین پرداخت کن.', 'TOURNAMENT ROOM')}
-  <section class="room-panel tournament-room-detail"><div class="tournament-emblem">${bingo ? '🎱' : '🏆'}</div><h2>${title}</h2><p>ظرفیت این اتاق ۲۰ نفر است. با تکمیل ظرفیت، وضعیت اتاق آماده شروع می‌شود.</p><div class="coin-entry-cost"><img class="bingocoin-icon-img" src="./assets/bingocoin.svg" alt="سکه بینگوکوین"><b>${cost.toLocaleString('fa-IR')} بینگوکوین</b><small>هزینه ورود</small></div><div class="wait-stats"><div><b>۲۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${state.bingoCoins.toLocaleString('fa-IR')}</b><small>موجودی بینگوکوین تو</small></div><div><b>${entered ? 'ثبت‌نام شد' : 'آماده'}</b><small>وضعیت</small></div></div><button class="btn btn-muted btn-block" disabled>ثبت‌نام فعلاً غیرفعال است</button><small class="room-safe-caption">این بخش تا اتصال صف مسابقه و ثبت‌نام سروری غیرفعال است؛ بینگوکوین از حساب کسر نمی‌شود.</small></section>`;
+  <section class="room-panel tournament-room-detail"><div class="tournament-emblem">${bingo ? '🎱' : '🏆'}</div><h2>${title}</h2><p>ظرفیت این اتاق ۳۰ نفر است. با تکمیل ظرفیت، وضعیت اتاق آماده شروع می‌شود.</p><div class="coin-entry-cost"><img class="bingocoin-icon-img" src="./assets/bingocoin.svg" alt="سکه بینگوکوین"><b>${cost.toLocaleString('fa-IR')} بینگوکوین</b><small>هزینه ورود</small></div><div class="wait-stats"><div><b>۳۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${state.bingoCoins.toLocaleString('fa-IR')}</b><small>موجودی بینگوکوین تو</small></div><div><b>${entered ? 'ثبت‌نام شد' : 'آماده'}</b><small>وضعیت</small></div></div><button class="btn btn-muted btn-block" disabled>ثبت‌نام فعلاً غیرفعال است</button><small class="room-safe-caption">این بخش تا اتصال صف مسابقه و ثبت‌نام سروری غیرفعال است؛ بینگوکوین از حساب کسر نمی‌شود.</small></section>`;
 }
 function renderInvite() {
   const nextMilestone = (Math.floor(state.inviteCount / 5) + 1) * 5;
@@ -740,7 +741,7 @@ document.addEventListener('click', async event => {
         try {
           result = await apiRequest(`/api/rooms/${activeRoomId}/join`, {
             method:'POST',
-            body:JSON.stringify({cardsCount:roomCardCount})
+            body:JSON.stringify({cardsCount:1})
           });
           break;
         } catch (error) {
