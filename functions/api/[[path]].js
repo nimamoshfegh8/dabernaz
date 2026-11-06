@@ -777,15 +777,10 @@ async function handleRoom(db, request, user, path) {
       const previouslyOwned = alreadyQueued
         ? Math.max(0, Number(room.cardCounts?.[userKey]) || room.queuedCards?.[userKey]?.length || 0)
         : 0;
-      const playerRemainingCards = Math.max(0, 4 - previouslyOwned);
-      if (alreadyQueued && playerRemainingCards === 0) {
-        throw new HttpError(409, 'هر بازیکن حداکثر ۴ کارت می‌تواند داشته باشد.');
-      }
-
       const soldCards = Object.values(room.cardCounts || {}).reduce((total, count) => total + Math.max(0, Number(count) || 0), 0);
       const remainingCards = Math.max(0, CAPACITY - soldCards);
       if (remainingCards === 0) throw new HttpError(409, 'ظرفیت ۳۰ کارت این سانس تکمیل شده است.');
-      const cardsCount = Math.min(requestedCardsCount, remainingCards, playerRemainingCards || (alreadyQueued ? 0 : 4));
+      const cardsCount = Math.min(requestedCardsCount, remainingCards);
       if (cardsCount < 1) throw new HttpError(409, 'در این اتاق امکان خرید کارت بیشتری وجود ندارد.');
 
       const account = await db.prepare('SELECT balance FROM users WHERE id = ?').bind(userId).first();
