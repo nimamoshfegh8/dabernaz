@@ -454,15 +454,19 @@ async function saveRoom(db, room, awards = []) {
 async function withRoomLock(db, roomId, callback) {
   const token = randomToken(16);
   let acquired = false;
-  const now = Date.now();
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 16; attempt++) {
+    // Refresh the clock on each attempt. A timestamp captured before waiting can
+    // otherwise prevent acquisition even after a previous lease has expired.
+    const now = Date.now();
     const lock = await db.prepare(`INSERT INTO room_locks (room_id, token, expires_at) VALUES (?, ?, ?)
       ON CONFLICT(room_id) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at
       WHERE room_locks.expires_at < ?
       RETURNING token`)
       .bind(roomId, token, now + 10000, now).first();
     if (lock?.token === token) { acquired = true; break; }
-    await new Promise((resolve) => setTimeout(resolve, 35 + attempt * 25));
+    // Room writes are serialized in D1. Wait longer for neighboring joins
+    // instead of rejecting valid players during a short burst of activity.
+    await new Promise((resolve) => setTimeout(resolve, Math.min(45 + attempt * 25, 200)));
   }
   if (!acquired) throw new HttpError(409, 'اتاق در حال به‌روزرسانی است؛ چند لحظه دیگر دوباره تلاش کن.');
   try { return await callback(); }
