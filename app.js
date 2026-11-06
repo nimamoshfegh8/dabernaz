@@ -476,13 +476,13 @@ const faqs = [
   ['ورود به اتاق دبرنا هزینه دارد؟','فعلاً ورود به اتاق‌ها رایگان است. تا زمان اتصال درگاه، هیچ پولی دریافت یا جایزه نقدی پرداخت نمی‌شود.'],
   ['تورنمنت‌ها و کیف پول فعال هستند؟','فعلاً این بخش‌ها به سیستم پرداخت و ثبت‌نام سروری متصل نیستند. حساب کاربری، اتاق دبرنا، سنگ‌کاغذقیچی و دوز فعال‌اند.'],
   ['اطلاعات حساب من کجا ذخیره می‌شود؟','در استقرار فعلی Cloudflare، اطلاعات حساب و آمار در دیتابیس D1 نگهداری می‌شوند و رمز عبور فقط به‌شکل هش‌شده ذخیره می‌شود. در استقرار PHP/Node روش ذخیره‌سازی مخصوص همان بک‌اند است. تنظیمات ظاهری در مرورگر می‌مانند.'],
-  ['چطور با پشتیبانی ارتباط بگیرم؟','فرم پایین صفحه را تکمیل کن. پیام در این نسخه فقط به‌صورت محلی نمایش داده می‌شود و به اپراتور ارسال نمی‌شود.']
+  ['چطور با پشتیبانی ارتباط بگیرم؟','فرم پایین صفحه را تکمیل کن. پیام روی سرور ذخیره می‌شود و شماره پیگیری دریافت می‌کنی.']
 ];
 function renderSupport() {
   return `${heading('پشتیبانی دابرناز', 'کنارت هستیم تا تجربه بهتری داشته باشی.', 'WE ARE HERE FOR YOU')}
   <section class="invite-hero" style="text-align:right;padding:15px"><div style="display:flex;align-items:center;gap:13px"><div style="font-size:48px;filter:drop-shadow(0 0 12px #f32b43)">🎧</div><div><span class="eyebrow">پشتیبانی آنلاین</span><h2 style="font-size:18px;margin:4px 0;color:#fff">همیشه همراه تو هستیم</h2><p style="margin:0;font-size:9px">سوال یا مشکلی داری؟ راه‌های ارتباطی و پاسخ سوالات متداول رو ببین.</p></div></div></section>
   ${section('راه‌های ارتباطی')}
-  <div class="support-grid"><div class="support-card"><span>✈️</span><b>تلگرام</b><small>آیدی پشتیبانی ثبت نشده</small></div><div class="support-card"><span>💬</span><b>گفت‌وگوی آنلاین</b><small>در نسخه نمایشی غیرفعال</small></div><div class="support-card"><span>✉️</span><b>ایمیل</b><small>آدرس ایمیل ثبت نشده</small></div><div class="support-card"><span>📞</span><b>تماس با ما</b><small>شماره تماس ثبت نشده</small></div></div>
+  <div class="support-grid"><div class="support-card"><span>📝</span><b>تیکت پشتیبانی</b><small>پیام‌ها در سامانه ثبت و قابل پیگیری هستند</small></div><div class="support-card"><span>💬</span><b>وضعیت تیکت</b><small>فهرست تیکت‌های حساب از سرور خوانده می‌شود</small></div><div class="support-card"><span>🔒</span><b>حریم خصوصی</b><small>اطلاعات تیکت فقط برای حساب خودت نمایش داده می‌شود</small></div><div class="support-card"><span>⚡</span><b>پاسخگویی</b><small>وضعیت هر درخواست در سامانه نگهداری می‌شود</small></div></div>
   ${section('سوالات متداول')}
   ${faqs.map((f,i) => `<div class="faq-item"><button class="faq-question" data-action="faq" data-id="${i}"><span>${f[0]}</span><span class="chevron">⌄</span></button><div class="faq-answer">${f[1]}</div></div>`).join('')}
   ${section('ارسال پیام به پشتیبانی')}
