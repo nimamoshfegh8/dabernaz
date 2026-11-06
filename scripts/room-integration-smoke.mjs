@@ -92,7 +92,7 @@ const emailPrefix = 'qa-' + runId + '-%@example.test';
 execFileSync('wrangler', [
   'd1', 'execute', 'dabernaz-ci', '--local',
   '--persist-to', '.wrangler/test-state',
-  '--command', 'UPDATE users SET balance = ' + startingBalance + " WHERE email LIKE '" + emailPrefix + "'",
+  '--command', 'UPDATE users SET balance = ' + startingBalance + ', bingo_coins = 500 WHERE email LIKE \'" + emailPrefix + "\'',
 ], { stdio: 'inherit' });
 
 for (const account of accounts) {
@@ -280,10 +280,88 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.match(ledgerOutput, new RegExp(String(expectedCommission)));
   const repeatedRead = await roomFor(accounts[0], roomId);
   assert.equal(repeatedRead.finance.siteCommission, expectedCommission);
+  const history = await request('/api/rooms/history');
+  const storedRound = (history.rounds || []).find(round => round.room_id === roomId);
+  assert.ok(storedRound, roomId + ': finished round must appear in public history');
+  assert.ok(Array.isArray(storedRound.lineWinners) && storedRound.lineWinners.length > 0,
+    roomId + ': line winners must be persisted in room_finances');
+  assert.ok(Array.isArray(storedRound.fullWinners) && storedRound.fullWinners.length > 0,
+    roomId + ': full winners must be persisted in room_finances');
 }
+
+// Referral reward: five distinct newly registered accounts grant exactly one milestone.
+const inviterBefore = await accountMe(accounts[0]);
+for (let index = 0; index < 5; index++) {
+  const invited = await request('/api/auth/register', {
+    method: 'POST',
+    body: {
+      name: 'QA Referral ' + (index + 1),
+      email: 'ref-' + runId + '-' + (index + 1) + '@example.test',
+      password,
+      referralCode: 'DABERNAZ' + accounts[0].memberId,
+    },
+  });
+  assert.equal(invited.ok, true, 'referral registration must succeed');
+}
+const inviterAfter = await accountMe(accounts[0]);
+assert.equal(Number(inviterAfter.balance), Number(inviterBefore.balance) + 20000,
+  'five confirmed referrals must grant 20,000 toman wallet credit');
+assert.equal(Number(inviterAfter.bingoCoins), Number(inviterBefore.bingoCoins) + 5,
+  'five confirmed referrals must grant 5 BGC');
+const referralSummary = await request('/api/referrals', { account: accounts[0] });
+assert.equal(referralSummary.count, 5);
+assert.equal(referralSummary.nextRewardIn, 5);
+
+// Support ticket writes and authenticated reads must round-trip.
+const ticketSubject = 'QA Support ' + runId;
+const ticketCreated = await request('/api/support', {
+  account: accounts[0], method: 'POST',
+  body: { subject: ticketSubject, message: 'Automated end-to-end support ticket test.' },
+});
+assert.ok(ticketCreated.ticketId > 0);
+const ticketList = await request('/api/tickets', { account: accounts[0] });
+assert.ok(ticketList.tickets.some(ticket => ticket.id === ticketCreated.ticketId && ticket.subject === ticketSubject));
+
+// Tournament balances are atomic, registrations are unique, and both entry types appear in the queue.
+const beforeTournament = await accountMe(accounts[0]);
+const simpleEntry = await request('/api/tournaments/register', {
+  account: accounts[0], method: 'POST', body: { type: 'simple' },
+});
+assert.equal(simpleEntry.tournament, 'simple');
+const bingoEntry = await request('/api/tournaments/register', {
+  account: accounts[0], method: 'POST', body: { type: 'bingo' },
+});
+assert.equal(bingoEntry.tournament, 'bingo');
+const tournamentBalance = await accountMe(accounts[0]);
+assert.equal(Number(tournamentBalance.bingoCoins), Number(beforeTournament.bingoCoins) - 120);
+const tournamentState = await request('/api/tournaments/me', { account: accounts[0] });
+assert.equal(tournamentState.entries.length, 2);
+assert.equal(tournamentState.rooms.find(room => room.tournament_type === 'simple').registered_count, 1);
+assert.equal(tournamentState.rooms.find(room => room.tournament_type === 'bingo').registered_count, 1);
+const duplicateTournament = await fetch(baseUrl + '/api/tournaments/register', {
+  method: 'POST',
+  headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+  body: JSON.stringify({ type: 'simple' }),
+});
+assert.equal(duplicateTournament.status, 409, 'duplicate tournament entry must be rejected');
+assert.equal(Number((await accountMe(accounts[0])).bingoCoins), Number(tournamentBalance.bingoCoins),
+  'duplicate tournament entry must not deduct BGC');
+
+// Mini-game completion writes a result row and increments official account counters.
+const statsBefore = await accountMe(accounts[0]);
+await request('/api/games/result', {
+  account: accounts[0], method: 'POST', body: { gameType: 'rps', result: 'win' },
+});
+await request('/api/games/result', {
+  account: accounts[0], method: 'POST', body: { gameType: 'tic', result: 'draw' },
+});
+const statsAfter = await accountMe(accounts[0]);
+assert.equal(Number(statsAfter.stats.gamesPlayed), Number(statsBefore.stats.gamesPlayed) + 2);
+assert.equal(Number(statsAfter.stats.wins), Number(statsBefore.stats.wins) + 1);
+assert.equal(Number(statsAfter.stats.points), Number(statsBefore.stats.points) + 10);
 
 for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
 
-console.log('PASS: all rooms start at 30 sold cards (not 30 users), a player can temporarily buy more than four cards, the final purchase is limited to remaining capacity, player count is separate, queue cancellation is rejected, wallet deductions are immediate, prizes and per-round site commission are correct.');
+console.log('PASS: Daberna capacity, wallet debits, simultaneous winners, prize splits and winner history; referrals and milestone rewards; support ticket create/read; tournament queue registration and duplicate protection; mini-game history and official stats.');
