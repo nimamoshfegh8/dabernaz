@@ -1053,12 +1053,16 @@ async function routeRequest(request, env) {
     'allow': 'GET, POST, PATCH, OPTIONS',
     'cache-control': 'no-store',
   } });
+
+  // Keep a lightweight health probe independent from schema initialization so the
+  // frontend can distinguish "API route is alive" from a D1/migration failure.
+  if (request.method === 'GET' && path === '/api/health') {
+    if (!env.DB) return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'missing', mode: 'misconfigured' }, 503);
+    return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'bound', mode: 'ready' });
+  }
+
   if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
   await ensureSchema(env.DB);
-
-  if (request.method === 'GET' && path === '/api/health') {
-    return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', mode: 'ready' });
-  }
 
   if (request.method === 'GET' && path === '/api/rooms/history') {
     return json({ ok: true, rounds: await recentWinners(env.DB) });
