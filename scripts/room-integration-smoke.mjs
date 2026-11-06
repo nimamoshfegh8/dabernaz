@@ -127,7 +127,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.deepEqual(snapshot.economics, economics);
   for (const account of accounts.slice(0, 4)) {
     const accountRoom = await roomFor(account, roomId);
-    assert.equal(accountRoom.myCards.length, 4, roomId + ': each account can add cards up to four');
+    assert.equal(accountRoom.myCards.length, 4, roomId + ': each of the four initial players owns four cards');
   }
   const balanceBeforeFifthCard = Number((await accountMe(accounts[0])).balance);
   const fifthCardResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
@@ -149,7 +149,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const afterLogoutFromOtherAccount = await roomFor(accounts[1], roomId);
   assert.equal(afterLogoutFromOtherAccount.playerCount, 4,
     roomId + ': logout must not remove a purchased player from the shared queue');
-  assert.equal(afterLogoutFromOtherAccount.cardCount, 16,
+  assert.equal(afterLogoutFromOtherAccount.cardCount, 17,
     roomId + ': logout must not remove purchased cards from the shared queue');
   const reloginResponse = await fetch(baseUrl + '/api/auth/login', {
     method: 'POST',
@@ -162,9 +162,9 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   accounts[0].cookie = (reloginResponse.headers.get('set-cookie') || '').split(';', 1)[0];
   const afterRelogin = await roomFor(accounts[0], roomId);
   assert.equal(afterRelogin.joined, true, roomId + ': paid entry must survive logout and login');
-  assert.equal(afterRelogin.myCards.length, 4, roomId + ': own cards must be restored after login');
+  assert.equal(afterRelogin.myCards.length, 5, roomId + ': own cards must be restored after login');
   assert.equal(afterRelogin.playerCount, 4);
-  assert.equal(afterRelogin.cardCount, 16);
+  assert.equal(afterRelogin.cardCount, 17);
 
   // A purchased place cannot be cancelled or refunded.
   const beforeLeave = Number((await accountMe(accounts[0])).balance);
@@ -178,7 +178,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     roomId + ': no refund on attempted cancellation');
   snapshot = await roomFor(accounts[0], roomId);
   assert.equal(snapshot.playerCount, 4);
-  assert.equal(snapshot.cardCount, 16);
+  assert.equal(snapshot.cardCount, 17);
 
   // Three further players buy four cards each: 29 cards in total.
   for (const account of accounts.slice(4, 7)) await join(account, roomId, 4);
