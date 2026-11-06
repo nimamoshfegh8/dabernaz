@@ -216,6 +216,28 @@ async function ensureSchema(db) {
       created_at TEXT NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_room_finances_room_created ON room_finances(room_id, id DESC)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_referrals_invited ON referrals(invited_user_id)`,
+    `CREATE TABLE IF NOT EXISTS support_tickets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      subject TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id, id DESC)`,
+    `CREATE TABLE IF NOT EXISTS tournament_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tournament_type TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      entry_cost INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'registered',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(tournament_type, user_id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_tournament_entries_type ON tournament_entries(tournament_type, id)`,
   ];
   for (const sql of statements) await db.prepare(sql).run();
   bootstrappedBindings.add(db);
@@ -375,6 +397,12 @@ async function handleAuth(db, request, path) {
       if (!memberId) throw new HttpError(503, 'ساخت شناسه بازیکن ناموفق بود؛ دوباره تلاش کن.');
       const passwordHash = await hashPassword(password);
       const referralCode = `DABERNAZ${memberId}`;
+      const referralInput = String(body.referralCode || '').trim().toUpperCase();
+      let inviter = null;
+      if (referralInput) {
+        inviter = await db.prepare('SELECT id, referral_code FROM users WHERE referral_code = ? LIMIT 1').bind(referralInput).first();
+        if (!inviter) throw new HttpError(400, 'کد دعوت معتبر نیست.');
+      }
       try {
         await db.prepare(`INSERT INTO users
           (username, email, member_id, password_hash, balance, bingo_coins, referral_code, games_played, wins, points, created_at)
@@ -389,6 +417,24 @@ async function handleAuth(db, request, path) {
       }
       userRow = await db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
       if (!userRow) throw new Error('User row was not available after successful registration insert.');
+      if (inviter && Number(inviter.id) !== Number(userRow.id)) {
+        await db.prepare('INSERT INTO referrals (inviter_id, invited_user_id, created_at) VALUES (?, ?, ?)')
+          .bind(inviter.id, userRow.id, new Date().toISOString()).run();
+        const referralCount = await db.prepare('SELECT COUNT(*) AS n FROM referrals WHERE inviter_id = ?').bind(inviter.id).first();
+        const milestones = Math.floor(Number(referralCount?.n || 0) / 5);
+        const rewarded = await db.prepare(`SELECT COUNT(*) AS n FROM transactions WHERE user_id = ? AND type = 'referral_reward'`).bind(inviter.id).first();
+        const alreadyRewarded = Number(rewarded?.n || 0);
+        if (milestones > alreadyRewarded) {
+          const nowText = new Date().toISOString();
+          for (let milestone = alreadyRewarded + 1; milestone <= milestones; milestone++) {
+            await db.batch([
+              db.prepare('UPDATE users SET balance = balance + 20000, bingo_coins = bingo_coins + 5 WHERE id = ?').bind(inviter.id),
+              db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, 'referral_reward', 20000, ?, ?)`).bind(inviter.id, `پاداش ${milestone * 5} دعوت موفق`, nowText),
+              db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, 'bingo_coin', 5, ?, ?)`).bind(inviter.id, `۵ بینگوکوین پاداش ${milestone * 5} دعوت موفق`, nowText),
+            ]);
+          }
+        }
+      }
     } else {
       userRow = await db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
       const valid = userRow ? await verifyPassword(password, userRow.password_hash) : false;
@@ -846,6 +892,18 @@ async function handleRoom(db, request, user, path) {
   return json({ error: 'روش درخواست برای این مسیر پشتیبانی نمی‌شود.' }, 405);
 }
 
+async function referralSummary(db, userId) {
+  const countRow = await db.prepare('SELECT COUNT(*) AS n FROM referrals WHERE inviter_id = ?').bind(userId).first();
+  const count = Number(countRow?.n || 0);
+  return { count, nextRewardIn: 5 - (count % 5 || 5), referralCode: (await db.prepare('SELECT referral_code FROM users WHERE id = ?').bind(userId).first())?.referral_code || '' };
+}
+
+async function recentWinners(db, limit = 12) {
+  const result = await db.prepare(`SELECT room_id, round_id, total_players, total_cards, line_prize_paid, full_prize_paid, finished_at
+    FROM room_finances ORDER BY id DESC LIMIT ?`).bind(limit).all();
+  return result.results || [];
+}
+
 async function routeRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -859,6 +917,10 @@ async function routeRequest(request, env) {
 
   if (request.method === 'GET' && path === '/api/health') {
     return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', mode: 'ready' });
+  }
+
+  if (request.method === 'GET' && path === '/api/rooms/history') {
+    return json({ ok: true, rounds: await recentWinners(env.DB) });
   }
 
   const authResponse = await handleAuth(env.DB, request, path);
@@ -884,23 +946,50 @@ async function routeRequest(request, env) {
     return json({ ok: true, user: await publicUser(env.DB, updated) });
   }
 
-  if (request.method === 'POST' && path === '/api/games/result') {
+  if (request.method === 'GET' && path === '/api/referrals') {
+    return json({ ok: true, ...(await referralSummary(env.DB, user.id)) });
+  }
+
+  if (request.method === 'POST' && path === '/api/support') {
     validateWriteOrigin(request);
     const body = await readJson(request);
-    if (typeof body.won !== 'boolean') throw new HttpError(400, 'نتیجه مسابقه معتبر نیست.');
-    const won = body.won ? 1 : 0;
+    const subject = String(body.subject || '').trim();
+    const message = String(body.message || '').trim();
+    if (subject.length < 3 || subject.length > 70 || message.length < 3 || message.length > 1000) throw new HttpError(400, 'موضوع یا متن پیام معتبر نیست.');
+    const nowText = new Date().toISOString();
+    const inserted = await env.DB.prepare('INSERT INTO support_tickets (user_id, subject, message, status, created_at) VALUES (?, ?, ?, \'open\', ?)')
+      .bind(user.id, subject, message, nowText).run();
+    return json({ ok: true, ticketId: Number(inserted.meta?.last_row_id || 0) });
+  }
+
+  if (request.method === 'GET' && path === '/api/tickets') {
+    const result = await env.DB.prepare('SELECT id, subject, status, created_at FROM support_tickets WHERE user_id = ? ORDER BY id DESC LIMIT 20').bind(user.id).all();
+    return json({ ok: true, tickets: result.results || [] });
+  }
+
+  if (request.method === 'GET' && path === '/api/tournaments/me') {
+    const result = await env.DB.prepare('SELECT tournament_type, entry_cost, status, created_at FROM tournament_entries WHERE user_id = ? ORDER BY id DESC').bind(user.id).all();
+    return json({ ok: true, entries: result.results || [] });
+  }
+
+  if (request.method === 'POST' && path === '/api/tournaments/register') {
+    validateWriteOrigin(request);
+    const body = await readJson(request);
+    const tournamentType = String(body.type || '');
+    const config = tournamentType === 'simple' ? { cost: 20, label: 'تورنومنت ساده' } : tournamentType === 'bingo' ? { cost: 100, label: 'بینگو تورنومنت' } : null;
+    if (!config) throw new HttpError(400, 'نوع تورنومنت معتبر نیست.');
+    const existing = await env.DB.prepare('SELECT id FROM tournament_entries WHERE tournament_type = ? AND user_id = ?').bind(tournamentType, user.id).first();
+    if (existing) throw new HttpError(409, 'قبلاً در این تورنومنت ثبت‌نام کرده‌ای.');
+    const fresh = await env.DB.prepare('SELECT bingo_coins FROM users WHERE id = ?').bind(user.id).first();
+    if (Number(fresh?.bingo_coins || 0) < config.cost) throw new HttpError(409, 'بینگوکوین کافی برای ثبت‌نام نداری.');
+    const nowText = new Date().toISOString();
     await env.DB.batch([
-      env.DB.prepare(`UPDATE users SET games_played = games_played + 1,
-        wins = wins + ?, points = points + ? WHERE id = ?`).bind(won, won ? 10 : 0, user.id),
-      env.DB.prepare(`INSERT INTO game_results (user_id, game_type, result, prize, bingo_coins_earned)
-        VALUES (?, 'mini-game', ?, 0, 0)`).bind(user.id, won ? 'win' : 'loss'),
+      env.DB.prepare('UPDATE users SET bingo_coins = bingo_coins - ? WHERE id = ?').bind(config.cost, user.id),
+      env.DB.prepare('INSERT INTO tournament_entries (tournament_type, user_id, entry_cost, status, created_at) VALUES (?, ?, ?, \'registered\', ?)').bind(tournamentType, user.id, config.cost, nowText),
+      env.DB.prepare('INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, \'bingo_coin\', ?, ?, ?)').bind(user.id, -config.cost, `ورود به ${config.label}`, nowText),
     ]);
-    const stats = await env.DB.prepare('SELECT games_played, wins, points FROM users WHERE id = ?').bind(user.id).first();
-    return json({ ok: true, stats: {
-      gamesPlayed: Number(stats?.games_played) || 0,
-      wins: Number(stats?.wins) || 0,
-      points: Number(stats?.points) || 0,
-    } });
+    const updated = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
+    return json({ ok: true, user: await publicUser(env.DB, updated), tournament: tournamentType });
   }
 
   const roomResponse = await handleRoom(env.DB, request, user, path);
