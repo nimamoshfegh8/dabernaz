@@ -243,6 +243,7 @@ function renderRoomPurchasePage() {
     <div class="wait-stats"><div><b id="queueCount">${faDigits(count)} / ۲۰</b><small>بازیکنان حاضر</small></div><div><b>۲۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}</b><small>سطح اتاق</small></div></div>
     <div class="queue-progress"><span id="queueProgress" style="width:${count/20*100}%"></span></div><div class="queue-avatars" id="queueAvatars">${roomQueueSlots(count)}</div>
     <div class="queue-wait-hint">${joined?'اتصال صف به سرور برقرار است؛ وضعیت بازیکنان به‌طور خودکار به‌روزرسانی می‌شود.':'پس از ورود به صف، تعداد بازیکنان به‌صورت زنده از سرور خوانده می‌شود.'}</div>
+    <p class="muted-note room-session-note">توجه: خروج از حساب، حضور همان حساب را از صف حذف می‌کند. تب‌های یک مرورگر نشست مشترک دارند؛ برای آزمایش هم‌زمان چند حساب، هر حساب را در مرورگر یا دستگاه جداگانه باز کن.</p>
   </section>
   <section class="room-info-strip"><div><b>🏅 یک خط</b><small>اولین بازیکن با تکمیل یک ردیف</small></div><div><b>👑 دبرنای کامل</b><small>اولین بازیکن با تکمیل ۱۵ عدد</small></div><div><b>🎱 ۹۰ مهره</b><small>اعلام خودکار بدون تکرار</small></div></section>
   <section class="room-panel ticket-selection"><div class="room-panel-heading"><div><span class="eyebrow">YOUR TICKETS</span><h3>کارت‌های تو</h3><p>کارت‌ها هنگام ثبت‌نام صف روی سرور ساخته و نگهداری می‌شوند.</p></div><span class="ticket-count-badge" id="roomTicketCount">${faDigits(selectedCount)} کارت</span></div><div class="room-tickets-list" id="roomTicketsList">${joined&&roomCards.length?roomCards.map(roomCardMarkup).join(''):'<div class="empty"><span>🎟️</span>کارت نهایی پس از ورود به صف، به‌صورت تصادفی و روی سرور ساخته می‌شود.</div>'}</div></section>`;
@@ -732,7 +733,34 @@ document.addEventListener('click', async event => {
   if (action === 'close-modal' || (action === 'backdrop-close' && event.target === actionEl)) { closeModal(); return; }
   if (action === 'room-join-auto') {
     if(!requireLogin()) return;
-    try { const result=await apiRequest(`/api/rooms/${activeRoomId}/join`,{method:'POST',body:JSON.stringify({cardsCount:roomCardCount})}); roomServerSnapshot=result.room; roomCards=result.room.myCards||[]; roomCardCount=roomCards.length||roomCardCount; if(result.room.status==='playing'){activeRoomId=result.room.id;roomCalledNumbers=result.room.allCalledNumbers||[];currentPage='roomGame';} showToast(result.room.status==='playing'?'ظرفیت تکمیل شد؛ بازی آغاز شد.':'وارد صف واقعی شدی.'); render(); } catch(error){showToast(error.message);} return;
+    try {
+      let result;
+      // A short retry makes simultaneous joins resilient to a temporary D1 room lock.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          result = await apiRequest(`/api/rooms/${activeRoomId}/join`, {
+            method:'POST',
+            body:JSON.stringify({cardsCount:roomCardCount})
+          });
+          break;
+        } catch (error) {
+          const temporaryLock = error.message.includes('اتاق در حال به‌روزرسانی است');
+          if (!temporaryLock || attempt === 2) throw error;
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      roomServerSnapshot=result.room;
+      roomCards=result.room.myCards||[];
+      roomCardCount=roomCards.length||roomCardCount;
+      if(result.room.status==='playing'){
+        activeRoomId=result.room.id;
+        roomCalledNumbers=result.room.allCalledNumbers||[];
+        currentPage='roomGame';
+      }
+      showToast(result.room.status==='playing'?'ظرفیت تکمیل شد؛ بازی آغاز شد.':'وارد صف واقعی شدی.');
+      render();
+    } catch(error) { showToast(error.message); }
+    return;
   }
   if (action === 'room-leave') {
     try { const oldCount=roomCards.length||roomCardCount; const result=await apiRequest(`/api/rooms/${activeRoomId}/leave`,{method:'POST',body:'{}'}); roomServerSnapshot=result.room; roomCards=result.room.myCards||[]; roomCardCount=oldCount; render(); showToast('از صف خارج شدی.'); } catch(error){showToast(error.message);} return;
@@ -835,7 +863,16 @@ document.addEventListener('submit', async event => {
 
 render();
 loadAuthenticatedUser();
-// Always refresh the authenticated account when the app returns to the foreground so wallet data comes from D1, not stale browser storage.
-document.addEventListener('visibilitychange', () => { if (!document.hidden && currentUser) loadAuthenticatedUser(); });
-window.addEventListener('focus', () => { if (currentUser) loadAuthenticatedUser(); });
+// Refresh the authenticated account and the active room when a mobile browser/WebView
+// returns to the foreground. Background tabs can throttle timers, so rely on an
+// immediate authoritative read when visibility or focus returns.
+async function refreshAppAfterForeground() {
+  if (document.hidden) return;
+  if (currentUser) await loadAuthenticatedUser();
+  if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) {
+    pollCurrentRoom();
+  }
+}
+document.addEventListener('visibilitychange', refreshAppAfterForeground);
+window.addEventListener('focus', refreshAppAfterForeground);
 setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom(); }, 2200);
