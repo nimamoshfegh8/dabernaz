@@ -165,7 +165,7 @@ function renderHome() {
     <button class="shortcut" data-page="wallet"><span class="symbol">👛</span><b>کیف پول</b><small>موجودی سکه</small></button>
   </div>
   <div class="promo"><div class="promo-art">🎯</div><div class="promo-copy"><b>بازی‌های دابرناز</b><p>بازی مورد علاقه‌ات را انتخاب کن و مهارتت را محک بزن.</p></div><button class="btn btn-outline" data-page="games">مشاهده</button></div>
-  <section class="room-teaser"><div class="room-teaser-art">🎱</div><div class="room-teaser-copy"><span>اتاق‌های آنلاین دبرنا</span><b>۴ سطح اتاق</b><small>ظرفیت ۳۰ نفر · شروع و قرعه‌کشی خودکار</small></div><button class="btn btn-gold" data-page="games">انتخاب اتاق <span>←</span></button></section>
+  <section class="room-teaser"><div class="room-teaser-art">🎱</div><div class="room-teaser-copy"><span>اتاق‌های آنلاین دبرنا</span><b>۴ سطح اتاق</b><small>ظرفیت ۳۰ کارت · شروع و قرعه‌کشی خودکار</small></div><button class="btn btn-gold" data-page="games">انتخاب اتاق <span>←</span></button></section>
   ${section('بازی‌های محبوب', 'همه بازی‌ها', 'games')}
   <div class="game-grid">${roomGameCard()}${gameCard('rps','✊✋✌️','سنگ، کاغذ، قیچی','مسابقه خودکار تا رسیدن یکی از طرفین به ۳ برد','بازی مهارتی · بدون شرط‌بندی','game-cover-rps')}${gameCard('tic','⭕❌','دوز حرفه‌ای','صفحه ۳×۳ با حریف هوشمند و تصمیم‌های تاکتیکی','بازی مهارتی · بدون شرط‌بندی','game-cover-tic')}</div>
   ${section('وضعیت حساب', 'حساب کاربری', 'account')}
@@ -176,7 +176,7 @@ function gameCard(id, symbol, name, desc, price, coverClass = '') {
   return `<article class="game-card"><div class="game-cover ${coverClass}">${symbol}</div><h3>${name}</h3><p>${desc}</p><button class="btn btn-primary" data-game="${id}">ورود به بازی</button><div class="price">${price}</div></article>`;
 }
 function roomGameCard() {
-  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>چهار سطح اتاق · ظرفیت ۳۰ نفر</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
+  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>چهار سطح اتاق · ظرفیت ۳۰ کارت</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
 }
 function renderGames() {
   const tiers = ['red','silver','gold','purple'];
@@ -184,11 +184,11 @@ function renderGames() {
   return `<section class="games-page">
     <header class="games-lobby-heading">
       <div class="games-lobby-title"><span class="games-lobby-icon">🎮</span><div><h1>اتاق بازی</h1><p>وارد صف شو، بازی خودکار شروع می‌شود.</p></div></div>
-      <div class="games-online-badge"><span class="online-people-icon">♟</span><div><small>اتاق‌های چندنفره</small><b>ظرفیت ۳۰ نفر</b></div><i aria-label="صف واقعی"></i></div>
+      <div class="games-online-badge"><span class="online-people-icon">♟</span><div><small>اتاق‌های چندنفره</small><b>ظرفیت ۳۰ کارت</b></div><i aria-label="صف واقعی"></i></div>
     </header>
 
     <section class="games-lobby-hero">
-      <div class="games-lobby-callout"><small>بازی گروهی ۳۰ نفره</small><h2>شروع خودکار!</h2><p>با ورود به صف، پس از تکمیل ۳۰ بازیکن واقعی، قرعه‌کشی به‌صورت خودکار آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
+      <div class="games-lobby-callout"><small>بازی گروهی ۳۰ کارتی</small><h2>شروع خودکار!</h2><p>با ورود به صف، پس از تکمیل ۳۰ کارت خریداری‌شده، قرعه‌کشی به‌صورت خودکار آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
       <div class="games-lobby-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
       <div class="games-lobby-features">
         <div><span>▤</span><p>ظرفیت هر اتاق<strong>۳۰ بازیکن</strong></p></div>
@@ -204,7 +204,7 @@ function renderGames() {
         <div class="games-price-card-art" aria-hidden="true"><span class="mini-bingo-card card-a">BINGO</span><span class="mini-bingo-card card-b">BINGO</span><span class="mini-bingo-card card-c">BINGO</span><span class="mini-bingo-crown">${cardIcons[index]}</span></div>
         <b class="games-price-name">اتاق سطح ${index+1}</b>
         <button class="games-price-button" data-page="${room.id}">ورود به اتاق</button>
-        <small class="games-price-caption">ظرفیت ۳۰ بازیکن · حداکثر ۴ کارت</small>
+        <small class="games-price-caption">ظرفیت ۳۰ کارت · حداکثر ۴ کارت</small>
       </article>`).join('')}</div>
     </section>
 
@@ -230,6 +230,9 @@ function roomCardMarkup(card, index) {
       : `<span class="daberna-cell ${roomCalledNumbers.includes(number) ? 'called-cell' : ''}" data-number="${number}" aria-label="${number}${roomCalledNumbers.includes(number) ? ' اعلام شده' : ''}">${number}</span>`).join('')).join('')}</div>
     <div class="room-ticket-foot"><span>۱۵ عدد در ۳ ردیف</span><span>${full ? 'هر ۱۵ عدد اعلام شده' : line ? 'یک ردیف کامل شده' : 'منتظر اعلام شماره'}</span></div>
   </article>`;
+}
+function roomHasWinner(value) {
+  return Array.isArray(value) ? value.length > 0 : !!value;
 }
 function roomStageMarkup() {
   const stages = [
@@ -340,7 +343,7 @@ async function pollCurrentRoom() {
     roomServerSnapshot=result.room;
     if(result.room.joined && Array.isArray(result.room.myCards)) roomCards=result.room.myCards;
     roomCalledNumbers=Array.isArray(result.room.allCalledNumbers)?result.room.allCalledNumbers:(result.room.calledNumbers||[]);
-    roomStages={one:!!result.room.winners?.line,full:!!result.room.winners?.full};
+    roomStages={one:roomHasWinner(result.room.winners?.line),full:roomHasWinner(result.room.winners?.full)};
     if (Number.isFinite(Number(result.room.myBingoCoins))) { state.bingoCoins=Math.max(0,Number(result.room.myBingoCoins)); state.coinTransactions=Array.isArray(result.room.myCoinTransactions)?result.room.myCoinTransactions.slice(0,50):state.coinTransactions; saveState(); updateHeader(); }
     if (result.room.status==='finished' && currentUser) {
       try {
@@ -368,7 +371,7 @@ function updateRoomCardDisplay() {
 }
 function detectRoomStages() {
   const winners=roomServerSnapshot?.winners||{};
-  roomStages={one:!!winners.line,full:!!winners.full};
+  roomStages={one:roomHasWinner(winners.line),full:roomHasWinner(winners.full)};
   const stages=$('#roomStagesList'); if(stages) stages.innerHTML=roomStageMarkup();
 }
 function updateRoomDrawDisplay() {
