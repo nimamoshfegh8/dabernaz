@@ -123,6 +123,21 @@ function applyAuthenticatedUser(user) {
   saveState(); updateHeader();
 }
 async function loadAuthenticatedUser() {
+  // Probe the route first so a stale login cookie or account error is never shown
+  // to the user as a generic "API disconnected" message.
+  try {
+    await apiRequest('/api/health', { method:'GET', headers:{} });
+  } catch (error) {
+    apiReady = false;
+    apiErrorMessage = error?.message || 'ارتباط با API برقرار نشد.';
+    currentUser = null;
+    state = { ...cloneData(defaultState), settings:state.settings };
+    authReady = true;
+    saveState();
+    render();
+    showToast(apiErrorMessage);
+    return;
+  }
   try {
     const result = await apiRequest('/api/auth/me', { method:'GET', headers:{} });
     if (result.user) applyAuthenticatedUser(result.user);
