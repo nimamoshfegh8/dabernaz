@@ -129,15 +129,18 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     const accountRoom = await roomFor(account, roomId);
     assert.equal(accountRoom.myCards.length, 4, roomId + ': each account can add cards up to four');
   }
-  const balanceAtCardLimit = Number((await accountMe(accounts[0])).balance);
+  const balanceBeforeFifthCard = Number((await accountMe(accounts[0])).balance);
   const fifthCardResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
     method: 'POST',
     headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
     body: JSON.stringify({ cardsCount: 1 }),
   });
-  assert.equal(fifthCardResponse.status, 409, roomId + ': fifth card must be rejected');
-  assert.equal(Number((await accountMe(accounts[0])).balance), balanceAtCardLimit,
-    roomId + ': fifth card rejection must not charge the wallet');
+  assert.equal(fifthCardResponse.status, 200, roomId + ': temporary per-player card cap must be removed');
+  const fifthCardData = await fifthCardResponse.json();
+  assert.equal(fifthCardData.room.cardCount, 17, roomId + ': fifth card must increment the shared room count');
+  assert.equal(fifthCardData.room.myCards.length, 5, roomId + ': same player must own five cards during the temporary test');
+  assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeFifthCard - economics.price,
+    roomId + ': fifth card must be charged exactly once');
 
   // Regression: logging out after a card purchase must not remove the paid
   // entry from the shared room. A second account must see the global counts,
@@ -177,15 +180,15 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.equal(snapshot.playerCount, 4);
   assert.equal(snapshot.cardCount, 16);
 
-  // Three further players buy four cards each: 28 cards in total.
+  // Three further players buy four cards each: 29 cards in total.
   for (const account of accounts.slice(4, 7)) await join(account, roomId, 4);
   snapshot = await roomFor(accounts[0], roomId);
   assert.equal(snapshot.playerCount, 7);
-  assert.equal(snapshot.cardCount, 28);
+  assert.equal(snapshot.cardCount, 29);
   assert.equal(snapshot.status, 'waiting');
 
-  // Player eight requests four cards, but only two fit. Exactly two cards and
-  // exactly two card fees are accepted; the room starts at precisely 30 cards.
+  // Player eight requests four cards, but only one fits. Exactly one card and
+  // exactly one card fee are accepted; the room starts at precisely 30 cards.
   const lastPlayerRoom = await join(accounts[7], roomId, 4);
   assert.equal(lastPlayerRoom.status, 'playing');
   assert.equal(lastPlayerRoom.capacity, 30);
@@ -193,13 +196,13 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.equal(lastPlayerRoom.queueCount, 8);
   assert.equal(lastPlayerRoom.cardCount, 30);
   assert.equal(lastPlayerRoom.players.length, 8);
-  assert.equal(lastPlayerRoom.myCards.length, 2);
+  assert.equal(lastPlayerRoom.myCards.length, 1);
   assert.equal(lastPlayerRoom.finance.totalPlayers, 8);
   assert.equal(lastPlayerRoom.finance.totalCards, 30);
   assert.equal(lastPlayerRoom.finance.grossRevenue, 30 * economics.price);
 
   for (let index = 0; index < accounts.length; index++) {
-    const expectedCards = index === 7 ? 2 : 4;
+    const expectedCards = index === 0 ? 5 : index === 7 ? 1 : 4;
     const accountRoom = await roomFor(accounts[index], roomId);
     assert.equal(accountRoom.status, 'playing');
     assert.equal(accountRoom.playerCount, 8);
@@ -269,4 +272,4 @@ for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
 
-console.log('PASS: all rooms start at 30 sold cards (not 30 users), each player can buy up to 4, the final purchase is limited to remaining cards, player count is separate, queue cancellation is rejected, wallet deductions are immediate, prizes and per-round site commission are correct.');
+console.log('PASS: all rooms start at 30 sold cards (not 30 users), a player can temporarily buy more than four cards, the final purchase is limited to remaining capacity, player count is separate, queue cancellation is rejected, wallet deductions are immediate, prizes and per-round site commission are correct.');
