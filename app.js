@@ -677,24 +677,23 @@ function updateHomeMiniStats() {
   if ($('#homeGamesPlayed')) $('#homeGamesPlayed').textContent = money(state.gamesPlayed);
   if ($('#homeWins')) $('#homeWins').textContent = money(state.wins);
 }
-function recordMiniGameResult(gameType, result) {
-  if (!currentUser) return;
-  apiRequest('/api/games/result',{method:'POST',body:JSON.stringify({gameType,result})})
-    .then(data=>{
-      const user=data.user;
-      if(user){
-        currentUser=user;
-        state.username=user.name; state.memberId=user.memberId;
-        state.balance=Math.max(0,Number(user.balance)||0);
-        state.bingoCoins=Math.max(0,Number(user.bingoCoins)||0);
-        state.coinTransactions=Array.isArray(user.coinTransactions)?user.coinTransactions.slice(0,50):[];
-        state.gamesPlayed=Number(user.stats?.gamesPlayed)||0;
-        state.wins=Number(user.stats?.wins)||0;
-        state.points=Number(user.stats?.points)||0;
-        saveState(); updateHeader(); updateHomeMiniStats();
-      }
-    })
-    .catch(error=>showToast(error.message || 'ثبت آمار بازی ناموفق بود.'));
+function applyMiniGameUser(user) {
+  if (!user || !currentUser) return;
+  currentUser=user;
+  state.username=user.name; state.memberId=user.memberId;
+  state.balance=Math.max(0,Number(user.balance)||0);
+  state.bingoCoins=Math.max(0,Number(user.bingoCoins)||0);
+  state.coinTransactions=Array.isArray(user.coinTransactions)?user.coinTransactions.slice(0,50):[];
+  state.gamesPlayed=Number(user.stats?.gamesPlayed)||0;
+  state.wins=Number(user.stats?.wins)||0;
+  state.points=Number(user.stats?.points)||0;
+  saveState(); updateHeader(); updateHomeMiniStats();
+}
+async function loadOrStartServerGame(gameType) {
+  const active=await apiRequest('/api/games/active?gameType='+encodeURIComponent(gameType),{method:'GET',headers:{}});
+  if(active.match) return active.match;
+  const started=await apiRequest('/api/games/start',{method:'POST',body:JSON.stringify({gameType})});
+  return started.match;
 }
 function launchGame(game) {
   if (game === 'rps') {
@@ -730,9 +729,12 @@ function launchGame(game) {
   const icons = ['🍒','🍋','🍇','🍒','🍋','🍇'];
   openModal('🧠 حافظه طلایی', `<p class="muted-note">کارت‌ها رو یکی‌یکی باز کن و جفت‌های مشابه رو پیدا کن.</p><div class="bingo-board" id="memoryBoard">${[...icons].sort(() => Math.random()-.5).map((v,i) => `<button class="bingo-cell" data-action="memory-card" data-value="${v}" data-index="${i}">✦</button>`).join('')}</div><p id="memoryStatus" class="muted-note" style="text-align:center">جفت‌های پیدا شده: ۰</p>`);
 }
-function startRpsMatch() {
-  rpsMatch = { round:1, player:0, bot:0, draws:0, rounds:[], history:loadRpsPlayerHistory(), finished:false, awaitingNext:false, last:null };
-  renderRpsMatch();
+async function startRpsMatch() {
+  try {
+    const match=await loadOrStartServerGame('rps');
+    rpsMatch={...match,awaitingNext:false,last:null};
+    renderRpsMatch();
+  } catch(error) { showToast(error.message || 'شروع مسابقه ممکن نشد.'); }
 }
 function renderRpsMatch(lastRound = null) {
   if (!rpsMatch) return;
@@ -752,34 +754,20 @@ function renderRpsMatch(lastRound = null) {
   body += `<p class="muted-note" style="text-align:center">حریف تطبیقی فعال است · الگوهای قبلی انتخاب‌ها را بررسی می‌کند و برای جلوگیری از پیش‌بینی قطعی، گاهی تصادفی انتخاب می‌کند. سابقه ذخیره‌شده: ${faDigits(rpsMatch.history.length)} انتخاب.</p>`;
   openModal('✊ سنگ، کاغذ، قیچی · رقابت تا ۳ برد', body);
 }
-function playRps(choice) {
+async function playRps(choice) {
   if (!rpsMatch || rpsMatch.finished || rpsMatch.awaitingNext || !RPS_CHOICES[choice]) return;
-  const history = rpsMatch.history;
-  const computer = adaptiveRpsComputerChoice(history);
-  const beats = { rock:'scissors', paper:'rock', scissors:'paper' };
-  rpsMatch.history.push(choice);
-  saveRpsPlayerChoice(choice);
-  const outcome = choice === computer ? 'draw' : beats[choice] === computer ? 'win' : 'lose';
-  if (outcome === 'win') rpsMatch.player++;
-  else if (outcome === 'lose') rpsMatch.bot++;
-  else rpsMatch.draws++;
-  const roundNumber = rpsMatch.round;
-  const text = outcome === 'win' ? 'این دور را بردی؛ یک امتیاز گرفتی.' : outcome === 'lose' ? 'این دور را رایانه برد؛ یک امتیاز گرفت.' : 'مساوی؛ این دور امتیازی نداشت.';
-  rpsMatch.rounds.push({player:choice,bot:computer,outcome});
-  rpsMatch.last = {player:choice,bot:computer,outcome,text,round:roundNumber};
-  if (rpsMatch.player >= 3 || rpsMatch.bot >= 3) {
-    rpsMatch.finished = true;
-    recordMiniGameResult('rps', rpsMatch.player === 3 ? 'win' : 'lose');
-  } else {
-    rpsMatch.awaitingNext = true;
-  }
-  renderRpsMatch(rpsMatch.last);
+  try {
+    const result=await apiRequest('/api/games/move',{method:'POST',body:JSON.stringify({matchId:rpsMatch.id,choice})});
+    rpsMatch={...result.match,awaitingNext:!result.match.finished,last:result.lastRound||null};
+    saveRpsPlayerChoice(choice);
+    if(result.user) applyMiniGameUser(result.user);
+    renderRpsMatch(result.lastRound||null);
+  } catch(error) { showToast(error.message || 'ثبت حرکت ناموفق بود.'); }
 }
 function nextRpsRound() {
   if (!rpsMatch || !rpsMatch.awaitingNext || rpsMatch.finished) return;
   rpsMatch.awaitingNext = false;
-  rpsMatch.round++;
-  renderRpsMatch();
+  renderRpsMatch(rpsMatch.last);
 }
 
 // Tic-tac-toe: adaptive opponent with tactical wins/blocks and controlled exploration.
@@ -823,14 +811,16 @@ function ticBotMove(board) {
   const pool = preferred.length && secureRandomInt(100)<68 ? preferred : available;
   return pool[secureRandomInt(pool.length)];
 }
-function startTicMatch() {
-  ticMatch={board:Array(9).fill(''),moves:0,finished:false,result:null};
-  renderTicMatch();
+async function startTicMatch() {
+  try {
+    const match=await loadOrStartServerGame('tic');
+    ticMatch={...match};
+    renderTicMatch();
+  } catch(error) { showToast(error.message || 'شروع بازی دوز ممکن نشد.'); }
 }
 function finishTicMatch(result) {
   if (!ticMatch || ticMatch.finished) return;
   ticMatch.finished=true; ticMatch.result=result;
-  recordMiniGameResult('tic', result);
   renderTicMatch();
 }
 function renderTicMatch() {
@@ -849,16 +839,14 @@ function renderTicMatch() {
   }
   openModal('⭕ دوز حرفه‌ای · حریف هوشمند',body);
 }
-function playTicMove(index) {
+async function playTicMove(index) {
   if (!ticMatch || ticMatch.finished || ticMatch.board[index] || !Number.isInteger(index) || index<0 || index>8) return;
-  ticMatch.board[index]='X'; ticMatch.moves++;
-  if (ticWinner(ticMatch.board)==='X') { finishTicMatch('win'); return; }
-  if (ticMatch.board.every(Boolean)) { finishTicMatch('draw'); return; }
-  const botIndex=ticBotMove(ticMatch.board);
-  if (botIndex>=0) { ticMatch.board[botIndex]='O'; ticMatch.moves++; }
-  if (ticWinner(ticMatch.board)==='O') { finishTicMatch('lose'); return; }
-  if (ticMatch.board.every(Boolean)) { finishTicMatch('draw'); return; }
-  renderTicMatch();
+  try {
+    const result=await apiRequest('/api/games/move',{method:'POST',body:JSON.stringify({matchId:ticMatch.id,index})});
+    ticMatch={...result.match};
+    if(result.user) applyMiniGameUser(result.user);
+    renderTicMatch();
+  } catch(error) { showToast(error.message || 'ثبت حرکت دوز ناموفق بود.'); }
 }
 let bingoLastCall = null;
 let memoryOpen = [];
@@ -1015,7 +1003,7 @@ function callBingo() {
   const cell = [...document.querySelectorAll('.bingo-cell')].find(el => Number(el.dataset.num) === number);
   cell?.classList.add('marked');
   if (!bingoGame.marked.includes(number)) bingoGame.marked.push(number);
-  if (!bingoGame.won && checkBingoWin()) { bingoGame.won = true; $('#bingoCall').textContent = `${number} · بینگو!`; showToast('آفرین! یک خط کامل کردی.'); recordMiniGameResult('bingo','win'); }
+  if (!bingoGame.won && checkBingoWin()) { bingoGame.won = true; $('#bingoCall').textContent = `${number} · بینگو!`; showToast('آفرین! بینگو تمرینی را کامل کردی؛ در آمار رسمی ثبت نمی‌شود.'); }
 }
 function markBingo(number) {
   if (!bingoGame || !bingoGame.called?.includes(number)) { showToast('اول صبر کن این عدد اعلام بشه'); return; }
@@ -1030,7 +1018,7 @@ function revealMemory(button) {
     const pair = memoryOpen.slice(); memoryOpen = [];
     if (pair[0].value === pair[1].value) {
       memoryMatched.push(pair[0].index,pair[1].index); $('#memoryStatus').textContent = `جفت‌های پیدا شده: ${memoryMatched.length/2}`;
-      if (memoryMatched.length === 6) { showToast('آفرین! همه جفت‌ها پیدا شدند.'); recordMiniGameResult('memory','win'); }
+      if (memoryMatched.length === 6) { showToast('آفرین! همه جفت‌ها پیدا شدند؛ این بازی تمرینی است و در آمار رسمی ثبت نمی‌شود.'); }
     } else setTimeout(() => pair.forEach(x => { if (x.button.isConnected) { x.button.textContent='✦'; x.button.classList.remove('marked'); } }), 700);
   }
 }
