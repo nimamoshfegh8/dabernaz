@@ -256,9 +256,9 @@ function renderRoomPurchasePage() {
   const selectedCount=joined ? roomCards.length : roomCardCount;
   const waiting=queue.status==='waiting';
   const ownedCardCount=joined ? roomCards.length : 0;
-  const additionalCardsAvailable=Math.min(Math.max(0,4-ownedCardCount),remainingCards);
+  const additionalCardsAvailable=remainingCards;
   const purchaseControls=joined && waiting
-    ? `<small>کارت‌های خریداری‌شده</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(ownedCardCount)} از ۴ کارت</b></div>`
+    ? `<small>کارت‌های خریداری‌شده</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(ownedCardCount)} کارت</b></div>`
     : `<small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${selectedCount<=1?'disabled':''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${selectedCount>=4?'disabled':''}>+</button></div>`;
   const purchaseTotal=joined && waiting
     ? `<div class="purchase-total"><span>هزینه ۱ کارت اضافی</span><b>${faDigits(room.price)} تومان</b></div>`
@@ -270,17 +270,17 @@ function renderRoomPurchasePage() {
       : queue.status==='playing'
         ? `<button class="btn btn-muted btn-block" disabled>سانس در حال اجراست</button>`
         : joined && waiting
-          ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${additionalCardsAvailable<1?'disabled':''}>${additionalCardsAvailable>0?'افزودن و خرید یک کارت':ownedCardCount>=4?'حداکثر ۴ کارت خریداری شده':'ظرفیت اتاق تکمیل شده'}</button>`
+          ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${additionalCardsAvailable<1?'disabled':''}>${additionalCardsAvailable>0?'افزودن و خرید یک کارت':'ظرفیت اتاق تکمیل شده'}</button>`
           : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">${queue.status==='finished'?'ورود به سانس بعدی':'ورود به صف واقعی'}</button>`;
   return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}`, 'با خرید ۳۰ کارت، بازی به‌صورت خودکار آغاز می‌شود.', 'DABERNAZ · LIVE ROOM')}
   <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
-  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>حداکثر ۴ کارت برای هر بازیکن</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div></section>
+  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>خرید کارت تا تکمیل ظرفیت اتاق</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div></section>
   <section class="purchase-wait-hero"><div class="purchase-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
     <div class="purchase-box"><div class="purchase-box-top"><span class="live-dot"></span> سالن آنلاین <b>${room.code}</b></div>
       ${purchaseControls}
       ${purchaseTotal}
       ${purchaseAction}
-      <small class="purchase-disclaimer">هزینه هر کارت از کیف پول کسر می‌شود. پس از خرید، کارت‌های ثبت‌شده قابل کاهش یا لغو نیستند. هر حساب حداکثر ۴ کارت و هر سانس ۳۰ کارت دارد.</small>
+      <small class="purchase-disclaimer">هزینه هر کارت از کیف پول کسر می‌شود. پس از خرید، کارت‌های ثبت‌شده قابل کاهش یا لغو نیستند. هر سانس حداکثر ۳۰ کارت دارد.</small>
     </div></section>
   <section class="room-wait-panel" id="roomWaitPanel"><div class="wait-panel-heading"><div><span class="eyebrow">ONLINE WAITING ROOM</span><h2>${queue.status==='playing'?'بازی شروع شده':queue.status==='finished'?'سانس پایان یافته':joined?'در صف انتظار هستی':'منتظر بازیکنان باش'}</h2><p>${queue.status==='playing'?'قرعه‌کشی خودکار در حال اجراست.':queue.status==='finished'?'برندگان ثبت شده‌اند؛ برای سانس بعدی دوباره وارد صف شو.':`با ورود ${faDigits(remainingCards)} کارت دیگر، بازی آغاز می‌شود.`}</p></div><div class="wait-hourglass">${queue.status==='playing'?'🎱':'⌛'}</div></div>
     <div class="wait-stats"><div><b id="queuePlayers">${faDigits(playerCount)}</b><small>بازیکنان ثبت‌نام‌کرده</small></div><div><b id="queueCardCount">${faDigits(cardsSold)} / ۳۰</b><small>کارت‌های فروخته‌شده</small></div><div><b>۳۰ کارت</b><small>ظرفیت هر سانس</small></div></div>
