@@ -991,6 +991,17 @@ async function routeRequest(request, env) {
     return json({ ok: true, entries: result.results || [] });
   }
 
+  if (request.method === 'POST' && path === '/api/games/result') {
+    validateWriteOrigin(request);
+    const body = await readJson(request);
+    const gameType = String(body.gameType || ''); const result = String(body.result || '');
+    if (!['rps','tic'].includes(gameType) || !['win','lose','draw'].includes(result)) throw new HttpError(400, 'نتیجه بازی معتبر نیست.');
+    const nowText = new Date().toISOString();
+    await env.DB.prepare('INSERT INTO game_results (user_id, game_type, result, prize, bingo_coins_earned, created_at) VALUES (?, ?, ?, 0, 0, ?)').bind(user.id, gameType, result, nowText).run();
+    const updated = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
+    return json({ ok: true, user: await publicUser(env.DB, updated) });
+  }
+
   if (request.method === 'POST' && path === '/api/tournaments/register') {
     validateWriteOrigin(request);
     const body = await readJson(request);
