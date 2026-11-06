@@ -123,7 +123,17 @@ async function loadAuthenticatedUser() {
     if (result.user) applyAuthenticatedUser(result.user);
     else { currentUser=null; state=cloneData(defaultState); }
   } catch (error) { apiReady=false; apiErrorMessage=error?.message || 'سرور حساب کاربری در دسترس نیست.'; currentUser=null; state=cloneData(defaultState); showToast(apiErrorMessage); }
-  authReady=true; render();
+  authReady=true;
+  if (currentUser) {
+    try {
+      const referral = await apiRequest('/api/referrals',{method:'GET',headers:{}});
+      state.inviteCount=Number(referral.count)||0;
+      state.referralCode=referral.referralCode||state.referralCode;
+      state.inviteRewardMilestones=Array.from({length:Math.floor(state.inviteCount/5)},(_,i)=>i+1);
+      saveState();
+    } catch (_) {}
+  }
+  render();
 }
 function requireLogin() { if (currentUser) return true; authMode='login'; setPage('account'); showToast('برای ادامه ابتدا ثبت‌نام کن یا وارد حساب شو.'); return false; }
 function showToast(message) {
@@ -328,7 +338,7 @@ function renderRoomGame() {
       <small class="room-safe-caption">${isFinished?'این سانس به پایان رسیده است.':'قرعه‌کشی توسط سرور انجام می‌شود؛ نیازی به فشردن دکمه نیست.'}</small>
     </section>
     <section class="room-game-layout"><div class="room-game-ticket"><div class="room-panel-heading"><div><span class="eyebrow">MY TICKETS</span><h3>کارت‌های من</h3></div><span class="ticket-count-badge">${faDigits(roomCards.length)} کارت</span></div><div id="roomTicketsList" class="room-tickets-list">${roomCards.map(roomCardMarkup).join('')}</div></div>
-      <aside class="room-panel stages-panel"><div class="room-panel-heading"><div><span class="eyebrow">WINNING PATTERNS</span><h3>برندگان سانس</h3></div><span class="trophy-mark">🏆</span></div><div class="room-stages-list" id="roomStagesList">${roomStageMarkup()}</div><div class="room-rules-tip"><b>فقط دو برنده ثبت می‌شود</b><p>یک برنده برای یک خط و یک برنده برای کارت کامل؛ نام و شناسه هر نفر در بالای صفحه می‌آید.</p></div></aside>
+      <aside class="room-panel stages-panel"><div class="room-panel-heading"><div><span class="eyebrow">WINNING PATTERNS</span><h3>برندگان سانس</h3></div><span class="trophy-mark">🏆</span></div><div class="room-stages-list" id="roomStagesList">${roomStageMarkup()}</div><div class="room-rules-tip"><b>برد هم‌زمان پشتیبانی می‌شود</b><p>یک یا چند نفر می‌توانند در یک شماره هم‌زمان برنده یک خط یا دبرنای کامل شوند؛ جایزه همان مرحله بین برندگان تقسیم می‌شود.</p></div></aside>
     </section>
     <section class="room-panel"><div class="room-panel-heading"><div><span class="eyebrow">SESSION HISTORY</span><h3>برندگان سانس‌های اخیر</h3></div><span class="trophy-mark">🏆</span></div><div id="recentSessionWinners">${recentSessionWinnersMarkup()}</div></section>
     ${isFinished?'<button class="btn btn-primary btn-block" data-action="room-back-lobby">بازگشت به اتاق‌ها</button>':''}`;
@@ -397,7 +407,7 @@ function renderTournaments() {
     <button class="tournament-subpage-card" data-page="tournamentRoom"><span>🏆</span><b>اتاق تورنومنت</b><small>ظرفیت ۳۰ نفر · رقابت گروهی</small><em>مشاهده اتاق ←</em></button>
     <button class="tournament-subpage-card" data-page="bingoTournament"><span>🎱</span><b>اتاق بینگو تورنومنت</b><small>ظرفیت ۳۰ نفر · بینگوی رقابتی</small><em>مشاهده اتاق ←</em></button>
   </div>
-  <p class="muted-note">اتاق‌های تورنومنت هنوز به صف و ثبت‌نام سروری متصل نشده‌اند؛ تا فعال‌سازی نهایی امکان ثبت‌نام ندارند.</p>`;
+  <p class="muted-note">ثبت‌نام با بینگوکوین روی سرور ثبت می‌شود. شروع و زمان‌بندی مسابقه در مرحله بعدی توسط سیستم مسابقات مدیریت خواهد شد.</p>`;
 }
 function renderTournamentDetail(bingo=false) {
   const title = bingo ? 'اتاق بینگو تورنومنت' : 'اتاق تورنومنت';
@@ -405,7 +415,7 @@ function renderTournamentDetail(bingo=false) {
   const cost = bingo ? 100 : 20;
   const entered = state.joined.includes(id);
   return `${heading(title, 'برای حضور در رقابت، هزینه ورود را با بینگوکوین پرداخت کن.', 'TOURNAMENT ROOM')}
-  <section class="room-panel tournament-room-detail"><div class="tournament-emblem">${bingo ? '🎱' : '🏆'}</div><h2>${title}</h2><p>ظرفیت این اتاق ۳۰ نفر است. با تکمیل ظرفیت، وضعیت اتاق آماده شروع می‌شود.</p><div class="coin-entry-cost"><img class="bingocoin-icon-img" src="./assets/bingocoin.svg" alt="سکه بینگوکوین"><b>${cost.toLocaleString('fa-IR')} بینگوکوین</b><small>هزینه ورود</small></div><div class="wait-stats"><div><b>۳۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${state.bingoCoins.toLocaleString('fa-IR')}</b><small>موجودی بینگوکوین تو</small></div><div><b>${entered ? 'ثبت‌نام شد' : 'آماده'}</b><small>وضعیت</small></div></div><button class="btn btn-muted btn-block" disabled>ثبت‌نام فعلاً غیرفعال است</button><small class="room-safe-caption">این بخش تا اتصال صف مسابقه و ثبت‌نام سروری غیرفعال است؛ بینگوکوین از حساب کسر نمی‌شود.</small></section>`;
+  <section class="room-panel tournament-room-detail"><div class="tournament-emblem">${bingo ? '🎱' : '🏆'}</div><h2>${title}</h2><p>ظرفیت این اتاق ۳۰ نفر است. با تکمیل ظرفیت، وضعیت اتاق آماده شروع می‌شود.</p><div class="coin-entry-cost"><img class="bingocoin-icon-img" src="./assets/bingocoin.svg" alt="سکه بینگوکوین"><b>${cost.toLocaleString('fa-IR')} بینگوکوین</b><small>هزینه ورود</small></div><div class="wait-stats"><div><b>۳۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${state.bingoCoins.toLocaleString('fa-IR')}</b><small>موجودی بینگوکوین تو</small></div><div><b>${entered ? 'ثبت‌نام شد' : 'آماده'}</b><small>وضعیت</small></div></div><button class="btn btn-primary btn-block" data-action="join-tournament" data-tournament="${bingo?'bingo':'simple'}" ${entered?'disabled':''}>${entered?'ثبت‌نام شد':'ثبت‌نام با بینگوکوین'}</button><small class="room-safe-caption">ثبت‌نام روی سرور ذخیره می‌شود و هزینه ورود از بینگوکوین کسر می‌گردد.</small></section>`;
 }
 function renderInvite() {
   const nextMilestone = (Math.floor(state.inviteCount / 5) + 1) * 5;
@@ -415,7 +425,7 @@ function renderInvite() {
   <section class="invite-hero"><div class="invite-visual">👥</div><span class="eyebrow">پاداش دعوت دوستان</span><h2>۵ دعوت موفق، جایزه بگیر!</h2><div class="invite-reward-pair"><div><b>۲۰٬۰۰۰ تومان</b><small>اعتبار کیف پول</small></div><div><b>۵ BGC</b><small>بینگوکوین</small></div></div><div class="ref-box"><input id="refCode" value="${escapeHTML(state.referralCode)}" readonly aria-label="کد دعوت"><button class="btn btn-primary" data-action="copy-ref">کپی کد</button></div><button class="btn btn-gold btn-block" style="margin-top:9px" data-action="share-ref">اشتراک‌گذاری لینک دعوت</button></section>
   <section class="panel invite-progress-panel"><div class="section-title"><h2>پیشرفت دعوت‌ها</h2><span class="gold-text">${state.inviteCount.toLocaleString('fa-IR')} دعوت موفق</span></div><div class="invite-progress-track"><span style="width:${progress/5*100}%"></span></div><div class="invite-progress-label"><b>${progress.toLocaleString('fa-IR')} از ۵</b><small>تا دریافت جایزه بعدی · ${Math.max(0,nextMilestone-state.inviteCount).toLocaleString('fa-IR')} دعوت مانده</small></div><div class="mini-stats"><div class="stat-card"><b>${state.inviteCount.toLocaleString('fa-IR')}</b><small>دعوت موفق</small></div><div class="stat-card"><b>${rewards.toLocaleString('fa-IR')}</b><small>جایزه دریافت‌شده</small></div><div class="stat-card"><b>${(rewards*5).toLocaleString('fa-IR')}</b><small>بینگوکوین کسب‌شده</small></div></div></section>
   <div class="steps"><div class="step"><i>🔗</i><b>۱. کد رو کپی کن</b><small>کد اختصاصی خودت رو بفرست.</small></div><div class="step"><i>📨</i><b>۲. دوستت ثبت‌نام کنه</b><small>با لینک یا کد دعوت تو عضو بشه.</small></div><div class="step"><i>🎉</i><b>۳. جایزه بگیر</b><small>با هر ۵ دعوت موفق، جایزه دریافت کن.</small></div></div>
-  <p class="muted-note">شمارش دعوت و پرداخت پاداش پس از اتصال ثبت‌نام و سامانه ضدتقلب سمت سرور فعال می‌شود؛ دعوت آزمایشی قابل ثبت نیست.</p>`;
+  <p class="muted-note">دعوت موفق هنگام ثبت‌نام با کد اختصاصی روی سرور ثبت می‌شود و پاداش هر ۵ دعوت موفق به‌صورت خودکار اعمال می‌گردد.</p>`;
 }
 function renderWallet() {
   const rows = state.transactions.length ? state.transactions.map(tx => `<div class="transaction"><div class="transaction-icon ${tx.amount < 0 ? 'out' : ''}">${tx.amount < 0 ? '↗' : '↙'}</div><div class="transaction-info"><b>${escapeHTML(tx.title)}</b><small>${escapeHTML(tx.date)}</small></div><span class="transaction-amount ${tx.amount < 0 ? 'negative' : 'positive'}">${tx.amount > 0 ? '+' : ''}${money(tx.amount)} تومان</span></div>`).join('') : `<div class="empty"><span>🪙</span>هنوز تراکنش تومانی ثبت نشده است.</div>`;
@@ -444,7 +454,7 @@ function renderAuthPage() {
       ${authReady && !apiReady ? `<div class="mini-game-info-notice" role="status">اتصال API برقرار نشد: ${escapeHTML(apiErrorMessage || 'خطای نامشخص')}<br>نشانی بررسی سلامت: <a href="/api/health" target="_blank" rel="noopener">/api/health</a></div>` : authReady && apiReady ? '<div class="mini-game-info-notice" role="status">اتصال به سرور برقرار است؛ ثبت‌نام و ورود آماده است.</div>' : '<div class="mini-game-info-notice" role="status">در حال بررسی اتصال سرور…</div>'}
       <div class="auth-tabs"><button class="${register?'':'active'}" data-auth-mode="login">ورود</button><button class="${register?'active':''}" data-auth-mode="register">ثبت‌نام</button></div>
       <form id="authForm" class="form-stack" autocomplete="on">
-        ${register?'<label class="muted-note" for="authName">نام نمایشی</label><input id="authName" class="form-control" name="name" minlength="2" maxlength="32" autocomplete="name" placeholder="نامی که در بازی نمایش داده می‌شود" required>':''}
+        ${register?'<label class="muted-note" for="authName">نام نمایشی</label><input id="authName" class="form-control" name="name" minlength="2" maxlength="32" autocomplete="name" placeholder="نامی که در بازی نمایش داده می‌شود" required><label class="muted-note" for="authReferral">کد دعوت (اختیاری)</label><input id="authReferral" class="form-control" name="referralCode" maxlength="40" autocomplete="off" placeholder="کد دعوت دوستت">':''}
         <label class="muted-note" for="authEmail">ایمیل</label><input id="authEmail" class="form-control" name="email" type="email" maxlength="190" autocomplete="email" placeholder="name@example.com" required>
         <label class="muted-note" for="authPassword">رمز عبور</label><input id="authPassword" class="form-control" name="password" type="password" minlength="8" maxlength="128" autocomplete="${register?'new-password':'current-password'}" placeholder="حداقل ۸ نویسه" required>
         <button class="btn btn-primary btn-block" type="submit">${register?'ساخت حساب کاربری':'ورود به حساب'}</button>
@@ -476,7 +486,7 @@ function renderSupport() {
   ${section('سوالات متداول')}
   ${faqs.map((f,i) => `<div class="faq-item"><button class="faq-question" data-action="faq" data-id="${i}"><span>${f[0]}</span><span class="chevron">⌄</span></button><div class="faq-answer">${f[1]}</div></div>`).join('')}
   ${section('ارسال پیام به پشتیبانی')}
-  <form id="supportForm" class="panel form-stack" style="padding:13px"><input class="form-control" name="subject" maxlength="70" placeholder="موضوع پیام" required><textarea class="form-control" name="message" rows="4" maxlength="1000" placeholder="پیام خودت رو بنویس..." required></textarea><button class="btn btn-primary btn-block" type="submit">ارسال پیام</button><small class="muted-note">فرم در این نسخه نمایشی است و پیام به سرور ارسال نمی‌شود.</small></form>`;
+  <form id="supportForm" class="panel form-stack" style="padding:13px"><input class="form-control" name="subject" maxlength="70" placeholder="موضوع پیام" required><textarea class="form-control" name="message" rows="4" maxlength="1000" placeholder="پیام خودت رو بنویس..." required></textarea><button class="btn btn-primary btn-block" type="submit">ارسال پیام</button><small class="muted-note">پیام پس از ارسال با شماره پیگیری در سامانه پشتیبانی ذخیره می‌شود.</small></form>`;
 }
 function render() {
   const pages = {
@@ -602,16 +612,10 @@ function updateHomeMiniStats() {
   if ($('#homeGamesPlayed')) $('#homeGamesPlayed').textContent = money(state.gamesPlayed);
   if ($('#homeWins')) $('#homeWins').textContent = money(state.wins);
 }
-function recordMiniGameResult(won) {
-  // Authoritative totals are read back from the account API, not kept as local demo counters.
-  apiRequest('/api/games/result',{method:'POST',body:JSON.stringify({won:!!won})})
-    .then(result=>{
-      state.gamesPlayed=Number(result.stats?.gamesPlayed ?? state.gamesPlayed);
-      state.wins=Number(result.stats?.wins ?? state.wins);
-      state.points=Number(result.stats?.points ?? state.points);
-      saveState(); updateHomeMiniStats();
-    })
-    .catch(()=>showToast('مسابقه انجام شد، اما آمار آن در سرور ذخیره نشد. اتصال سرور را بررسی کن.'));
+function recordMiniGameResult() {
+  // Browser-side results are intentionally not accepted by the server.
+  // This prevents forged requests such as { won: true } from changing account statistics.
+  showToast('نتیجه این بازی فقط پس از اعتبارسنجی سمت سرور در آمار رسمی ثبت می‌شود.');
 }
 function launchGame(game) {
   if (game === 'rps') {
@@ -890,14 +894,19 @@ document.addEventListener('click', async event => {
     try { await navigator.clipboard.writeText(state.referralCode); showToast('کد دعوت کپی شد'); }
     catch (_) { const input = $('#refCode'); input?.select(); showToast('کد دعوت را به‌صورت دستی کپی کن'); }
   } else if (action === 'share-ref') {
-    const shareData = { title:'دعوت به دابرناز', text:`با کد ${state.referralCode} به دابرناز بیا!`, url:location.href };
+    const inviteUrl = new URL(location.href); inviteUrl.searchParams.set('ref', state.referralCode); const shareData = { title:'دعوت به دابرناز', text:`با کد ${state.referralCode} به دابرناز بیا!`, url:inviteUrl.toString() };
     if (navigator.share) { try { await navigator.share(shareData); } catch (_) {} }
     else { try { await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`); showToast('متن دعوت کپی شد'); } catch (_) { showToast('اشتراک‌گذاری در این مرورگر پشتیبانی نمی‌شود'); } }
   } else if (action === 'demo-credit') {
     showToast('برای شارژ واقعی، اتصال درگاه پرداخت لازم است.');
   } else if (action === 'wallet-info') showToast('شارژ و برداشت تا اتصال درگاه پرداخت در دسترس نیست.');
   else if (action === 'join-tournament') {
-    showToast('ثبت‌نام تورنومنت تا اتصال سرور غیرفعال است.');
+    if(!requireLogin() || actionEl.disabled) return;
+    actionEl.disabled=true;
+    apiRequest('/api/tournaments/register',{method:'POST',body:JSON.stringify({type:actionEl.dataset.tournament})})
+      .then(result=>{ applyAuthenticatedUser(result.user); const entryId=result.tournament==='bingo'?'bingoTournamentEntry':'simpleTournamentEntry'; if(!state.joined.includes(entryId)) state.joined.push(entryId); saveState(); render(); showToast('ثبت‌نام تورنومنت با موفقیت انجام شد.'); })
+      .catch(error=>showToast(error.message))
+      .finally(()=>{ if(actionEl.isConnected) actionEl.disabled=false; });
   } else if (action === 'invite-demo-success') {
     showToast('ثبت دعوت آزمایشی غیرفعال است؛ ثبت واقعی از سرور انجام می‌شود.');
   } else if (action === 'faq') actionEl.parentElement.classList.toggle('open');
@@ -963,7 +972,7 @@ document.addEventListener('submit', async event => {
   if (event.target.id === 'authForm') {
     event.preventDefault(); const data=new FormData(event.target); const register=authMode==='register';
     const payload={email:String(data.get('email')||'').trim(),password:String(data.get('password')||'')};
-    if(register) payload.name=String(data.get('name')||'').trim();
+    if(register) { payload.name=String(data.get('name')||'').trim(); payload.referralCode=String(data.get('referralCode')||new URLSearchParams(location.search).get('ref')||'').trim(); }
     const submit=event.target.querySelector('button[type=submit]'); if(submit) submit.disabled=true;
     try { const result=await apiRequest(register?'/api/auth/register':'/api/auth/login',{method:'POST',body:JSON.stringify(payload)}); applyAuthenticatedUser(result.user); currentPage='home'; render(); showToast(register?'حساب با موفقیت ساخته شد.':'با موفقیت وارد شدی.'); }
     catch(error){showToast(error.message);} finally { if(submit?.isConnected) submit.disabled=false; }
@@ -976,7 +985,12 @@ document.addEventListener('submit', async event => {
   if (event.target.id === 'supportForm') {
     event.preventDefault(); const data = new FormData(event.target);
     if (!data.get('subject').toString().trim() || !data.get('message').toString().trim()) return;
-    event.target.reset(); showToast('پیام در نسخه نمایشی ثبت شد؛ به سرور ارسال نشده است.');
+    if(!requireLogin()) return;
+    const submit=event.target.querySelector('button[type=submit]'); if(submit) submit.disabled=true;
+    apiRequest('/api/support',{method:'POST',body:JSON.stringify({subject:String(data.get('subject')).trim(),message:String(data.get('message')).trim()})})
+      .then(result=>{ event.target.reset(); showToast(`پیام ثبت شد. شماره پیگیری: ${faDigits(result.ticketId)}`); })
+      .catch(error=>showToast(error.message))
+      .finally(()=>{ if(submit?.isConnected) submit.disabled=false; });
   }
 });
 
