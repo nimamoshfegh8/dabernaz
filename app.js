@@ -44,7 +44,7 @@ const ROOM_CONFIGS = [
   { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrize:20000, fullPrize:115000, commissionMode:'revenue_minus_prizes' },
   { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrize:40000, fullPrize:230000, commissionMode:'revenue_minus_prizes' },
   { id:'room20000', price:20000, label:'۲۰,۰۰۰', code:'DB-20000', linePrize:80000, fullPrize:460000, commissionMode:'revenue_minus_prizes' },
-  { id:'room50000', price:50000, label:'۵۰,۰۰۰', code:'DB-50000', linePrize:200000, fullPrize:1150000, commissionMode:'revenue_minus_prizes'0 }
+  { id:'room50000', price:50000, label:'۵۰,۰۰۰', code:'DB-50000', linePrize:200000, fullPrize:1150000, commissionMode:'revenue_minus_prizes' }
 ];
 function currentRoomConfig() { const id = currentPage === 'roomGame' ? activeRoomId : currentPage; return ROOM_CONFIGS.find(room => room.id === id) || ROOM_CONFIGS[0]; }
 const ROOM_CAPACITY = 30;
