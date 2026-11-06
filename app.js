@@ -238,7 +238,7 @@ function roomCalledMarkup() {
   return roomCalledNumbers.slice(-12).reverse().map((number, index) => `<span class="called-ball ${index === 0 ? 'latest-ball' : ''}">${number}</span>`).join('');
 }
 function roomQueueSlots(count) {
-  return Array.from({length:ROOM_CAPACITY}, (_,i) => `<span class="queue-avatar ${i < count ? 'occupied' : ''}" title="${i < count ? 'بازیکن ثبت‌نام‌شده' : 'جایگاه خالی'}">${i < count ? '●' : ''}</span>`).join('');
+  return Array.from({length:ROOM_CAPACITY}, (_,i) => `<span class="queue-avatar ${i < count ? 'occupied' : ''}" title="${i < count ? 'کارت خریداری‌شده' : 'ظرفیت خالی کارت'}">${i < count ? '●' : ''}</span>`).join('');
 }
 function roomWinnerBanner() {
   const winners = roomServerSnapshot?.winners || {};
@@ -248,28 +248,31 @@ function roomWinnerBanner() {
 }
 function renderRoomPurchasePage() {
   const room=currentRoomConfig(); const queue=getRoomQueueState();
-  const count=Number(queue.queueCount||0); const joined=!!queue.joined;
+  const playerCount=Number(queue.playerCount ?? queue.queueCount ?? 0);
+  const cardsSold=Number(queue.cardCount || 0);
+  const joined=!!queue.joined;
+  const remainingCards=Math.max(0,ROOM_CAPACITY-cardsSold);
   if (Array.isArray(queue.myCards) && queue.myCards.length) { roomCards=queue.myCards; roomCardCount=queue.myCards.length; }
   const selectedCount=joined ? roomCards.length : roomCardCount;
   const waiting=queue.status==='waiting';
-  return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}`, 'وارد صف بازیکنان واقعی شو؛ بازی با تکمیل ظرفیت به‌صورت خودکار شروع می‌شود.', 'DABERNAZ · LIVE ROOM')}
+  return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}`, 'با خرید ۳۰ کارت، بازی به‌صورت خودکار آغاز می‌شود.', 'DABERNAZ · LIVE ROOM')}
   <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
-  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>حداکثر ۴ کارت برای هر بازیکن</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div><div><b>🏛️ پول باقیمانده</b><small>پس از پرداخت جوایز هر دور بازی</small></div></section>
+  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>حداکثر ۴ کارت برای هر بازیکن</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div></section>
   <section class="purchase-wait-hero"><div class="purchase-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
     <div class="purchase-box"><div class="purchase-box-top"><span class="live-dot"></span> سالن آنلاین <b>${room.code}</b></div>
       <small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${joined||selectedCount<=1?'disabled':''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${joined||selectedCount>=4?'disabled':''}>+</button></div>
       <div class="purchase-total"><span>هزینه کل ${faDigits(selectedCount)} کارت</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>
-      ${!currentUser ? `<button class="btn btn-primary btn-block" data-page="account">ورود / ثبت‌نام برای بازی</button>` : queue.status==='playing' && joined ? `<button class="btn btn-primary btn-block" data-action="room-open-game">ورود به بازی زنده</button>` : queue.status==='playing' ? `<button class="btn btn-muted btn-block" disabled>سانس در حال اجراست</button>` : joined && waiting ? `<button class="btn btn-muted btn-block" data-action="room-leave">خروج از صف</button>` : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">${queue.status==='finished'?'ورود به سانس بعدی':'ورود به صف واقعی'}</button>`}
-      <small class="purchase-disclaimer">هزینه ورود از کیف پول پس از ثبت قطعی در صف کسر می‌شود و جایزه‌ها پس از ثبت برنده توسط سرور به کیف پول برندگان اضافه می‌شود.</small>
+      ${!currentUser ? `<button class="btn btn-primary btn-block" data-page="account">ورود / ثبت‌نام برای بازی</button>` : queue.status==='playing' && joined ? `<button class="btn btn-primary btn-block" data-action="room-open-game">ورود به بازی زنده</button>` : queue.status==='playing' ? `<button class="btn btn-muted btn-block" disabled>سانس در حال اجراست</button>` : joined && waiting ? `<button class="btn btn-muted btn-block" disabled>کارت ثبت شده؛ امکان لغو وجود ندارد</button>` : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">${queue.status==='finished'?'ورود به سانس بعدی':'ورود به صف واقعی'}</button>`}
+      <small class="purchase-disclaimer">هزینه کارت از کیف پول کسر می‌شود. پس از خرید، لغو و خروج از صف امکان‌پذیر نیست. با تکمیل ۳۰ کارت بازی آغاز می‌شود.</small>
     </div></section>
-  <section class="room-wait-panel" id="roomWaitPanel"><div class="wait-panel-heading"><div><span class="eyebrow">ONLINE WAITING ROOM</span><h2>${queue.status==='playing'?'بازی شروع شده':queue.status==='finished'?'سانس پایان یافته':joined?'در صف انتظار هستی':'منتظر بازیکنان باش'}</h2><p>${queue.status==='playing'?'قرعه‌کشی خودکار در حال اجراست.':queue.status==='finished'?'برندگان ثبت شده‌اند؛ برای سانس بعدی دوباره وارد صف شو.':`با ورود ${Math.max(0,ROOM_CAPACITY-count).toLocaleString('fa-IR')} بازیکن دیگر، بازی آغاز می‌شود.`}</p></div><div class="wait-hourglass">${queue.status==='playing'?'🎱':'⌛'}</div></div>
-    <div class="wait-stats"><div><b id="queueCount">${faDigits(count)} / ۳۰</b><small>بازیکنان حاضر</small></div><div><b>۳۰ نفر</b><small>ظرفیت اتاق</small></div><div><b>${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}</b><small>سطح اتاق</small></div></div>
-    <div class="queue-progress"><span id="queueProgress" style="width:${count/ROOM_CAPACITY*100}%"></span></div><div class="queue-avatars" id="queueAvatars">${roomQueueSlots(count)}</div>
-    <div class="queue-wait-hint">${joined?'اتصال صف به سرور برقرار است؛ وضعیت بازیکنان به‌طور خودکار به‌روزرسانی می‌شود.':'پس از ورود به صف، تعداد بازیکنان به‌صورت زنده از سرور خوانده می‌شود.'}</div>
-    <p class="muted-note room-session-note">توجه: خروج از حساب، حضور همان حساب را از صف حذف می‌کند. تب‌های یک مرورگر نشست مشترک دارند؛ برای آزمایش هم‌زمان چند حساب، هر حساب را در مرورگر یا دستگاه جداگانه باز کن.</p>
+  <section class="room-wait-panel" id="roomWaitPanel"><div class="wait-panel-heading"><div><span class="eyebrow">ONLINE WAITING ROOM</span><h2>${queue.status==='playing'?'بازی شروع شده':queue.status==='finished'?'سانس پایان یافته':joined?'در صف انتظار هستی':'منتظر بازیکنان باش'}</h2><p>${queue.status==='playing'?'قرعه‌کشی خودکار در حال اجراست.':queue.status==='finished'?'برندگان ثبت شده‌اند؛ برای سانس بعدی دوباره وارد صف شو.':`با ورود ${faDigits(remainingCards)} کارت دیگر، بازی آغاز می‌شود.`}</p></div><div class="wait-hourglass">${queue.status==='playing'?'🎱':'⌛'}</div></div>
+    <div class="wait-stats"><div><b id="queuePlayers">${faDigits(playerCount)}</b><small>بازیکنان ثبت‌نام‌کرده</small></div><div><b id="queueCardCount">${faDigits(cardsSold)} / ۳۰</b><small>کارت‌های فروخته‌شده</small></div><div><b>۳۰ کارت</b><small>ظرفیت هر سانس</small></div></div>
+    <div class="queue-progress"><span id="queueProgress" style="width:${cardsSold/ROOM_CAPACITY*100}%"></span></div><div class="queue-avatars" id="queueAvatars">${roomQueueSlots(cardsSold)}</div>
+    <div class="queue-wait-hint">${joined?'کارت‌های تو ثبت شده‌اند و تا شروع بازی در صف باقی می‌مانند.':'تعداد بازیکنان و کارت‌های خریداری‌شده از سرور به‌روزرسانی می‌شود.'}</div>
+    <p class="muted-note room-session-note">هر حساب یک جایگاه بازیکن دارد و می‌تواند حداکثر ۴ کارت بخرد. ظرفیت سانس بر اساس تعداد کارت‌ها محاسبه می‌شود.</p>
   </section>
   <section class="room-info-strip"><div><b>🏅 یک خط</b><small>اولین بازیکن با تکمیل یک ردیف</small></div><div><b>👑 دبرنای کامل</b><small>اولین بازیکن با تکمیل ۱۵ عدد</small></div><div><b>🎱 ۹۰ مهره</b><small>اعلام خودکار بدون تکرار</small></div></section>
-  <section class="room-panel ticket-selection"><div class="room-panel-heading"><div><span class="eyebrow">YOUR TICKETS</span><h3>کارت‌های تو</h3><p>کارت‌ها هنگام ثبت‌نام صف روی سرور ساخته و نگهداری می‌شوند.</p></div><span class="ticket-count-badge" id="roomTicketCount">${faDigits(selectedCount)} کارت</span></div><div class="room-tickets-list" id="roomTicketsList">${joined&&roomCards.length?roomCards.map(roomCardMarkup).join(''):'<div class="empty"><span>🎟️</span>کارت نهایی پس از ورود به صف، به‌صورت تصادفی و روی سرور ساخته می‌شود.</div>'}</div></section>`;
+  <section class="room-panel ticket-selection"><div class="room-panel-heading"><div><span class="eyebrow">YOUR TICKETS</span><h3>کارت‌های تو</h3><p>کارت‌ها هنگام خرید روی سرور ساخته و نگهداری می‌شوند.</p></div><span class="ticket-count-badge" id="roomTicketCount">${faDigits(selectedCount)} کارت</span></div><div class="room-tickets-list" id="roomTicketsList">${joined&&roomCards.length?roomCards.map(roomCardMarkup).join(''):'<div class="empty"><span>🎟️</span>کارت نهایی پس از ورود به صف، به‌صورت تصادفی و روی سرور ساخته می‌شود.</div>'}</div></section>`;
 }
 function renderRoomGame() {
   const room=currentRoomConfig();
@@ -772,6 +775,7 @@ document.addEventListener('click', async event => {
           await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
         }
       }
+      const requestedCardCount=roomCardCount;
       roomServerSnapshot=result.room;
       roomCards=result.room.myCards||[];
       roomCardCount=roomCards.length||roomCardCount;
@@ -780,13 +784,16 @@ document.addEventListener('click', async event => {
         roomCalledNumbers=result.room.allCalledNumbers||[];
         currentPage='roomGame';
       }
-      showToast(result.room.status==='playing'?'ظرفیت تکمیل شد؛ بازی آغاز شد.':'وارد صف واقعی شدی.');
+      // Refresh the authenticated profile from D1 immediately after payment.
+      await loadAuthenticatedUser();
+      if(roomCards.length < requestedCardCount) {
+        showToast(`فقط ${faDigits(roomCards.length)} کارت باقی مانده بود؛ همان تعداد ثبت و از کیف پول کسر شد.`);
+      } else {
+        showToast(result.room.status==='playing'?'ظرفیت ۳۰ کارت تکمیل شد؛ بازی آغاز شد.':'کارت‌ها خریداری و در صف ثبت شدند.');
+      }
       render();
     } catch(error) { showToast(error.message); }
     return;
-  }
-  if (action === 'room-leave') {
-    try { const oldCount=roomCards.length||roomCardCount; const result=await apiRequest(`/api/rooms/${activeRoomId}/leave`,{method:'POST',body:'{}'}); roomServerSnapshot=result.room; roomCards=result.room.myCards||[]; roomCardCount=oldCount; render(); showToast('از صف خارج شدی.'); } catch(error){showToast(error.message);} return;
   }
   if (action === 'room-open-game') { if(roomServerSnapshot?.status==='playing'){setPage('roomGame');} else showToast('این سانس هنوز شروع نشده است.'); return; }
   if (action === 'room-back-lobby') { setPage(activeRoomId); return; }
