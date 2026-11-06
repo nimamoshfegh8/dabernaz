@@ -60,23 +60,45 @@ const faDigits = value => Number(value).toLocaleString('fa-IR');
 const escapeHTML = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 function saveState() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) { showToast('فضای ذخیره‌سازی مرورگر در دسترس نیست'); } }
 async function apiRequest(path, options = {}) {
-  const requestOptions = { ...options, credentials:'same-origin', headers:{ 'Content-Type':'application/json', ...(options.headers||{}) } };
+  const method = String(options.method || 'GET').toUpperCase();
+  const requestOptions = {
+    ...options,
+    credentials:'same-origin',
+    headers:{ 'Content-Type':'application/json', ...(options.headers||{}) },
+    ...(path.startsWith('/api/') && method === 'GET' ? { cache:'no-store' } : {})
+  };
   let response;
-  try { response = await fetch(path, requestOptions); }
-  catch (firstError) {
-    if (!path.startsWith('/api/')) throw firstError;
-    try { response = await fetch(`/api.php?path=${encodeURIComponent(path)}`, requestOptions); }
-    catch (_) { throw new Error('به سرور سایت وصل نشدم. فایل‌ها باید روی هاست PHP یا سرور Node.js اجرا شوند؛ بازکردن مستقیم فایل HTML کافی نیست.'); }
+  let networkError = null;
+  const attempts = path.startsWith('/api/') && method === 'GET' ? 3 : 1;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      response = await fetch(path, requestOptions);
+      networkError = null;
+      break;
+    } catch (error) {
+      networkError = error;
+      if (attempt + 1 < attempts) {
+        await new Promise(resolve => setTimeout(resolve, 350 * (attempt + 1)));
+      }
+    }
   }
+  if (!response && networkError) {
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    throw new Error(offline
+      ? 'اتصال اینترنت دستگاه قطع است. بعد از وصل شدن اینترنت دوباره تلاش کن.'
+      : 'ارتباط با سرور دابرناز موقتاً برقرار نشد. اینترنت را بررسی کن و دوباره تلاش کن.');
+  }
+
   const contentType = response.headers.get('content-type') || '';
-  // cPanel installations without mod_rewrite can still use the PHP endpoint directly.
+  // PHP fallback is only for an HTTP response indicating that the pretty API route is unavailable.
+  // A transient network error must not be mislabeled as a missing PHP/Node installation.
   if (path.startsWith('/api/') && (!contentType.includes('application/json') || response.status === 404)) {
     try {
       const fallback = await fetch(`/api.php?path=${encodeURIComponent(path)}`, requestOptions);
       if ((fallback.headers.get('content-type') || '').includes('application/json')) response = fallback;
-    } catch (_) { /* Keep the original response and report its error below. */ }
+    } catch (_) { /* Preserve the primary Cloudflare/Pages response. */ }
   }
-  const data = await response.json().catch(()=>({error:'پاسخ سرور قابل خواندن نیست. فایل api.php یا سرویس Node.js را بررسی کن.'}));
+  const data = await response.json().catch(()=>({error:'پاسخ سرور قابل خواندن نیست. اتصال API دابرناز را بررسی کن.'}));
   if (!response.ok) throw new Error(data.error || 'در ارتباط با سرور خطایی رخ داد.');
   apiReady = true;
   return data;
@@ -172,12 +194,12 @@ function renderGames() {
     </section>
 
     <section class="games-purchase-section">
-      <div class="games-section-heading"><div><span class="games-section-symbol">▧</span><h2>انتخاب اتاق</h2></div><p>سطح اتاق را انتخاب کن؛ فعلاً ورود بدون پرداخت انجام می‌شود.</p></div>
+      <div class="games-section-heading"><div><span class="games-section-symbol">▧</span><h2>انتخاب اتاق</h2></div><p>اتاق را انتخاب کن؛ قیمت کارت، جایزه‌ها و کمیسیون در صفحه همان اتاق نمایش داده می‌شود.</p></div>
       <div class="games-price-grid">${ROOM_CONFIGS.map((room, index) => `<article class="games-price-card tier-${tiers[index]}">
         <div class="games-price-card-art" aria-hidden="true"><span class="mini-bingo-card card-a">BINGO</span><span class="mini-bingo-card card-b">BINGO</span><span class="mini-bingo-card card-c">BINGO</span><span class="mini-bingo-crown">${cardIcons[index]}</span></div>
         <b class="games-price-name">اتاق سطح ${index+1}</b>
         <button class="games-price-button" data-page="${room.id}">ورود به اتاق</button>
-        <small class="games-price-caption">ظرفیت ۳۰ بازیکن · ۱ کارت</small>
+        <small class="games-price-caption">ظرفیت ۳۰ بازیکن · حداکثر ۴ کارت</small>
       </article>`).join('')}</div>
     </section>
 
@@ -232,11 +254,11 @@ function renderRoomPurchasePage() {
   const waiting=queue.status==='waiting';
   return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}`, 'وارد صف بازیکنان واقعی شو؛ بازی با تکمیل ظرفیت به‌صورت خودکار شروع می‌شود.', 'DABERNAZ · LIVE ROOM')}
   <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
-  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>هر بازیکن یک کارت</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div><div><b>🏛️ ${faDigits(room.commission)} تومان</b><small>کمیسیون سایت</small></div></section>
+  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>حداکثر ۴ کارت برای هر بازیکن</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div><div><b>🏛️ ${faDigits(room.commission)} تومان</b><small>کمیسیون سایت</small></div></section>
   <section class="purchase-wait-hero"><div class="purchase-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
     <div class="purchase-box"><div class="purchase-box-top"><span class="live-dot"></span> سالن آنلاین <b>${room.code}</b></div>
       <small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${joined||selectedCount<=1?'disabled':''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${joined||selectedCount>=4?'disabled':''}>+</button></div>
-      <div class="purchase-total"><span>هزینه ورود</span><b>رایگان تا اتصال درگاه</b></div>
+      <div class="purchase-total"><span>هزینه کل ${faDigits(selectedCount)} کارت</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>
       ${!currentUser ? `<button class="btn btn-primary btn-block" data-page="account">ورود / ثبت‌نام برای بازی</button>` : queue.status==='playing' && joined ? `<button class="btn btn-primary btn-block" data-action="room-open-game">ورود به بازی زنده</button>` : queue.status==='playing' ? `<button class="btn btn-muted btn-block" disabled>سانس در حال اجراست</button>` : joined && waiting ? `<button class="btn btn-muted btn-block" data-action="room-leave">خروج از صف</button>` : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">${queue.status==='finished'?'ورود به سانس بعدی':'ورود به صف واقعی'}</button>`}
       <small class="purchase-disclaimer">هزینه ورود از کیف پول پس از ثبت قطعی در صف کسر می‌شود و جایزه‌ها پس از ثبت برنده توسط سرور به کیف پول برندگان اضافه می‌شود.</small>
     </div></section>
@@ -876,4 +898,9 @@ async function refreshAppAfterForeground() {
 }
 document.addEventListener('visibilitychange', refreshAppAfterForeground);
 window.addEventListener('focus', refreshAppAfterForeground);
+window.addEventListener('online', () => {
+  loadAuthenticatedUser().then(() => {
+    if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom();
+  });
+});
 setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom(); }, 2200);
