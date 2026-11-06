@@ -1,0 +1,8 @@
+name = "dabernaz-ci"
+compatibility_date = "2026-11-06"
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dabernaz-ci"
+database_id = "00000000-0000-0000-0000-000000000000"
