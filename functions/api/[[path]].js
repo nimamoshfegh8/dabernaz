@@ -1,5 +1,11 @@
 /* Dabernaz Cloudflare Pages Function: authentication, D1 accounts and live Daberna rooms. */
-const CAPACITY = 20;
+const CAPACITY = 30;
+const ROOM_ECONOMICS = Object.freeze({
+  room5000: { price: 5000, linePrize: 20000, fullPrize: 115000, commission: 15000 },
+  room10000: { price: 10000, linePrize: 40000, fullPrize: 230000, commission: 30000 },
+  room20000: { price: 20000, linePrize: 80000, fullPrize: 460000, commission: 60000 },
+  room50000: { price: 50000, linePrize: 200000, fullPrize: 1150000, commission: 150000 },
+});
 const DRAW_INTERVAL_MS = 3000;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const PASSWORD_ITERATIONS = 100000;
@@ -413,6 +419,7 @@ function newRoom(roomId) {
     queue: [],
     cardCounts: {},
     queuedCards: {},
+    entryPayments: {},
     players: [],
     calledNumbers: [],
     winners: { line: null, full: null },
@@ -426,7 +433,13 @@ function newRoom(roomId) {
 async function loadRoom(db, roomId) {
   const row = await db.prepare('SELECT payload FROM room_states WHERE room_id = ?').bind(roomId).first();
   if (row?.payload) {
-    try { return JSON.parse(row.payload); }
+    try {
+      const room = JSON.parse(row.payload);
+      room.entryPayments ||= {};
+      room.cardCounts ||= {};
+      room.queuedCards ||= {};
+      return room;
+    }
     catch (error) {
       console.error('[dabernaz-room-state-corrupt]', JSON.stringify({ roomId, message:String(error?.message || error) }));
       throw new HttpError(500, 'اطلاعات اتاق قابل خواندن نیست؛ برای جلوگیری از پاک شدن صف، اتاق بازنشانی نشد.');
@@ -443,9 +456,15 @@ async function saveRoom(db, room, awards = []) {
     ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
     .bind(room.id, JSON.stringify(room), room.updatedAt)];
   for (const award of awards) {
-    statements.push(db.prepare('UPDATE users SET bingo_coins = bingo_coins + ? WHERE id = ?').bind(award.amount, award.userId));
-    statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
-      VALUES (?, 'bingo_coin', ?, ?, ?)` ).bind(award.userId, award.amount, award.description, award.createdAt));
+    if (award.kind === 'balance') {
+      statements.push(db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(award.amount, award.userId));
+      statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
+        VALUES (?, 'balance', ?, ?, ?)`).bind(award.userId, award.amount, award.description, award.createdAt));
+    } else {
+      statements.push(db.prepare('UPDATE users SET bingo_coins = bingo_coins + ? WHERE id = ?').bind(award.amount, award.userId));
+      statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
+        VALUES (?, 'bingo_coin', ?, ?, ?)`).bind(award.userId, award.amount, award.description, award.createdAt));
+    }
   }
   // D1 batch is transactional: room winner state and its BGC rewards commit together.
   await db.batch(statements);
@@ -546,7 +565,7 @@ async function startRoom(db, room) {
       cards: room.queuedCards[String(id)] || [makeCard()],
     });
   }
-  if (players.length < CAPACITY) throw new HttpError(409, 'تعداد حساب‌های معتبر اتاق به ۲۰ نفر نرسیده است.');
+  if (players.length < CAPACITY) throw new HttpError(409, 'تعداد حساب‌های معتبر اتاق به ۳۰ نفر نرسیده است.');
   room.players = players;
   room.queue = [];
   room.queuedCards = {};
@@ -585,7 +604,8 @@ function advanceRoom(room) {
         for (const card of player.cards) {
           if (lineComplete(card, called)) {
             room.winners.line = { name: player.name, memberId: player.memberId, number, at: Math.floor(Date.now() / 1000) };
-            awards.push({ userId: player.userId, amount: 1, description: 'پاداش برنده یک خط دبرنا', createdAt: new Date().toISOString() });
+            const prize = ROOM_ECONOMICS[room.id]?.linePrize || 0;
+            if (prize) awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه یک خط دبرنا', createdAt: new Date().toISOString() });
             break outerLine;
           }
         }
@@ -596,7 +616,8 @@ function advanceRoom(room) {
         for (const card of player.cards) {
           if (fullComplete(card, called)) {
             room.winners.full = { name: player.name, memberId: player.memberId, number, at: Math.floor(Date.now() / 1000) };
-            awards.push({ userId: player.userId, amount: 2, description: 'پاداش برنده دبرنای کامل', createdAt: new Date().toISOString() });
+            const prize = ROOM_ECONOMICS[room.id]?.fullPrize || 0;
+            if (prize) awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه دبرنای کامل', createdAt: new Date().toISOString() });
             break outerFull;
           }
         }
@@ -621,6 +642,7 @@ async function publicRoom(db, room, userId) {
     id: room.id,
     status: room.status,
     capacity: CAPACITY,
+    economics: ROOM_ECONOMICS[room.id] || null,
     queueCount: room.status === 'waiting' ? room.queue.length : room.players.length,
     players: room.players.map((player) => ({ name: player.name, memberId: player.memberId })),
     calledNumbers: room.calledNumbers.slice(-15),
@@ -659,20 +681,35 @@ async function handleRoom(db, request, user, path) {
   if (request.method === 'POST' && action === 'join') {
     validateWriteOrigin(request);
     const body = await readJson(request);
-    const cardsCount = Math.max(1, Math.min(4, Math.floor(Number(body.cardsCount) || 1)));
+    const cardsCount = 1;
     const result = await withRoomLock(db, roomId, async () => {
       let room = await loadRoom(db, roomId);
+      const economics = ROOM_ECONOMICS[roomId];
+      if (!economics) throw new HttpError(500, 'تنظیمات مالی این اتاق پیدا نشد.');
       const advanced = advanceRoom(room);
       if (advanced.changed) await saveRoom(db, room, advanced.awards);
       if (room.status === 'finished') room = newRoom(roomId);
       if (room.status === 'playing') return { conflict: true, room: await publicRoom(db, room, userId) };
       if (room.queue.some((id) => Number(id) === userId)) return { room: await publicRoom(db, room, userId) };
       if (room.queue.length >= CAPACITY) throw new HttpError(409, 'ظرفیت این اتاق تکمیل شده است.');
+
+      const account = await db.prepare('SELECT balance FROM users WHERE id = ?').bind(userId).first();
+      if ((Number(account?.balance) || 0) < economics.price) throw new HttpError(400, 'موجودی کیف پول برای خرید این کارت کافی نیست.');
+
       room.cardCounts[String(userId)] = cardsCount;
-      room.queuedCards[String(userId)] = Array.from({ length: cardsCount }, () => makeCard());
+      room.queuedCards[String(userId)] = [makeCard()];
+      room.entryPayments[String(userId)] = economics.price;
       room.queue.push(userId);
       if (room.queue.length >= CAPACITY) await startRoom(db, room);
-      await saveRoom(db, room);
+      room.updatedAt = Date.now();
+      await db.batch([
+        db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').bind(economics.price, userId),
+        db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
+          VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -economics.price, 'خرید کارت دبرنا', new Date().toISOString()),
+        db.prepare(`INSERT INTO room_states (room_id, payload, updated_at) VALUES (?, ?, ?)
+          ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
+          .bind(room.id, JSON.stringify(room), room.updatedAt),
+      ]);
       return { room: await publicRoom(db, room, userId) };
     });
     if (result.conflict) return json({ error: 'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.', room: result.room }, 409);
@@ -684,10 +721,14 @@ async function handleRoom(db, request, user, path) {
     const result = await withRoomLock(db, roomId, async () => {
       const room = await loadRoom(db, roomId);
       if (room.status === 'waiting') {
+        const payment = Number(room.entryPayments?.[String(userId)] || 0);
         room.queue = room.queue.filter((id) => Number(id) !== userId);
         delete room.queuedCards[String(userId)];
         delete room.cardCounts[String(userId)];
-        await saveRoom(db, room);
+        if (room.entryPayments) delete room.entryPayments[String(userId)];
+        if (payment > 0) {
+          await saveRoom(db, room, [{ kind:'balance', userId, amount:payment, description:'بازگشت هزینه کارت دبرنا', createdAt:new Date().toISOString() }]);
+        } else await saveRoom(db, room);
       }
       return await publicRoom(db, room, userId);
     });
