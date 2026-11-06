@@ -608,7 +608,7 @@ async function startRoom(db, room) {
   room.cardCounts = {};
   room.status = 'playing';
   room.calledNumbers = [];
-  room.winners = { line: null, full: null };
+  room.winners = { line: [], full: [] };
   room.startedAt = Math.floor(Date.now() / 1000);
   room.finishedAt = null;
   room.nextDrawAt = Date.now() + DRAW_INTERVAL_MS;
@@ -635,39 +635,63 @@ function advanceRoom(room) {
     room.calledNumbers.push(number);
     const called = new Set(room.calledNumbers);
 
-    if (!room.winners.line) {
-      outerLine: for (const player of room.players) {
-        for (const card of player.cards) {
-          if (lineComplete(card, called)) {
-            room.winners.line = { name: player.name, memberId: player.memberId, number, at: Math.floor(Date.now() / 1000) };
-            const prize = ROOM_ECONOMICS[room.id]?.linePrize || 0;
-            if (prize) {
-              room.linePrizePaid = prize;
-              awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه یک خط دبرنا', createdAt: new Date().toISOString() });
-            }
-            break outerLine;
-          }
+    room.winners ||= { line: [], full: [] };
+    if (!Array.isArray(room.winners.line)) room.winners.line = room.winners.line ? [room.winners.line] : [];
+    if (!Array.isArray(room.winners.full)) room.winners.full = room.winners.full ? [room.winners.full] : [];
+
+    // Everyone whose card first becomes complete on the same announced number wins together.
+    // Winners are unique players, even if one player owns multiple completed cards.
+    const collectWinners = (checkComplete) => {
+      const byUser = new Map();
+      for (const player of room.players) {
+        if ((player.cards || []).some((card) => checkComplete(card, called))) {
+          byUser.set(String(player.userId), {
+            userId: player.userId,
+            name: player.name,
+            memberId: player.memberId,
+            number,
+            at: Math.floor(Date.now() / 1000),
+          });
         }
       }
+      return Array.from(byUser.values());
+    };
+    const splitPrize = (totalPrize, winners, description) => {
+      const total = Math.max(0, Number(totalPrize) || 0);
+      if (!total || !winners.length) return [];
+      const base = Math.floor(total / winners.length);
+      const remainder = total % winners.length;
+      const createdAt = new Date().toISOString();
+      return winners.map((winner, index) => ({
+        kind:'balance',
+        userId:winner.userId,
+        amount:base + (index < remainder ? 1 : 0),
+        description,
+        createdAt,
+      })).filter((award) => award.amount > 0);
+    };
+
+    if (!room.winners.line.length) {
+      const lineWinners = collectWinners(lineComplete);
+      if (lineWinners.length) {
+        room.winners.line = lineWinners;
+        const prize = ROOM_ECONOMICS[room.id]?.linePrize || 0;
+        room.linePrizePaid = prize;
+        awards.push(...splitPrize(prize, lineWinners, 'سهم جایزه یک خط دبرنا'));
+      }
     }
-    if (!room.winners.full) {
-      outerFull: for (const player of room.players) {
-        for (const card of player.cards) {
-          if (fullComplete(card, called)) {
-            room.winners.full = { name: player.name, memberId: player.memberId, number, at: Math.floor(Date.now() / 1000) };
-            const prize = ROOM_ECONOMICS[room.id]?.fullPrize || 0;
-            if (prize) {
-              room.fullPrizePaid = prize;
-              awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه دبرنای کامل', createdAt: new Date().toISOString() });
-            }
-            break outerFull;
-          }
-        }
+    if (!room.winners.full.length) {
+      const fullWinners = collectWinners(fullComplete);
+      if (fullWinners.length) {
+        room.winners.full = fullWinners;
+        const prize = ROOM_ECONOMICS[room.id]?.fullPrize || 0;
+        room.fullPrizePaid = prize;
+        awards.push(...splitPrize(prize, fullWinners, 'سهم جایزه دبرنای کامل'));
       }
     }
     room.nextDrawAt += DRAW_INTERVAL_MS;
     changed = true;
-    if ((room.winners.line && room.winners.full) || room.calledNumbers.length >= 90) {
+    if ((room.winners.line?.length && room.winners.full?.length) || room.calledNumbers.length >= 90) {
       room.status = 'finished';
       room.finishedAt = Math.floor(Date.now() / 1000);
       room.nextDrawAt = null;
