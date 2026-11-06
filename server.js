@@ -27,7 +27,7 @@ const MIME = {
   '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.ico':'image/x-icon'
 };
 
-let db = { users: [], sessions: [], rooms: {} };
+let db = { users: [], sessions: [], rooms: {}, roomHistory: [] };
 let writeChain = Promise.resolve();
 const drawTimers = new Map();
 const authAttempts = new Map();
@@ -86,7 +86,7 @@ async function persist() {
 async function loadDb() {
   try {
     const saved = JSON.parse(await fs.promises.readFile(DB_FILE, 'utf8'));
-    db = { users:Array.isArray(saved.users)?saved.users:[], sessions:Array.isArray(saved.sessions)?saved.sessions:[], rooms:saved.rooms && typeof saved.rooms==='object'?saved.rooms:{} };
+    db = { users:Array.isArray(saved.users)?saved.users:[], sessions:Array.isArray(saved.sessions)?saved.sessions:[], rooms:saved.rooms && typeof saved.rooms==='object'?saved.rooms:{}, roomHistory:Array.isArray(saved.roomHistory)?saved.roomHistory:[] };
   } catch (error) {
     if (error.code === 'ENOENT') {
       await persist();
@@ -102,7 +102,7 @@ async function loadDb() {
   for (const room of Object.values(db.rooms)) if (room.status === 'playing') startDrawTimer(room.id);
 }
 function freshRoom(id) {
-  return { id, status:'waiting', queue:[], cardCounts:{}, queuedCards:{}, players:[], calledNumbers:[], winners:{line:null,full:null}, startedAt:null, finishedAt:null, updatedAt:Date.now() };
+  return { id, status:'waiting', queue:[], cardCounts:{}, queuedCards:{}, players:[], calledNumbers:[], winners:{line:null,full:null}, startedAt:null, finishedAt:null, updatedAt:Date.now(), resultsRecorded:false };
 }
 function secureShuffle(items) {
   for (let i = items.length - 1; i > 0; i--) {
@@ -151,7 +151,9 @@ function publicRoom(room, userId) {
     latestNumber:room.calledNumbers.at(-1) ?? null, winners:{line:room.winners.line?{name:room.winners.line.name,memberId:room.winners.line.memberId,number:room.winners.line.number,at:room.winners.line.at}:null,full:room.winners.full?{name:room.winners.full.name,memberId:room.winners.full.memberId,number:room.winners.full.number,at:room.winners.full.at}:null},
     myCards:me ? me.cards : (queued ? (room.queuedCards?.[userId] || []) : []), joined:queued || !!me,
     startedAt:room.startedAt, finishedAt:room.finishedAt,
-    myBingoCoins:Number(account?.bingoCoins)||0, myCoinTransactions:Array.isArray(account?.coinTransactions)?account.coinTransactions.slice(0,50):[]
+    myBingoCoins:Number(account?.bingoCoins)||0,
+    myCoinTransactions:Array.isArray(account?.coinTransactions)?account.coinTransactions.slice(0,50):[],
+    recentSessions:(db.roomHistory||[]).filter(item=>item.roomId===room.id).slice(-8).reverse()
   };
 }
 function awardBingoCoins(userId, amount, title) {
@@ -185,7 +187,38 @@ function drawOne(room) {
   persist().catch(error=>console.error('Persist draw failed:',error.message));
 }
 function finishRoom(room) {
+  if (room.status === 'finished') return;
   room.status = 'finished'; room.finishedAt = Date.now(); room.updatedAt = Date.now();
+
+  // Account the completed round once: every participant gets a played game,
+  // and every distinct line/full winner gets a win and points.
+  if (!room.resultsRecorded) {
+    const winnerIds = new Set();
+    for (const winner of [room.winners?.line, room.winners?.full]) {
+      if (winner?.userId) winnerIds.add(winner.userId);
+    }
+    for (const player of room.players) {
+      const user = db.users.find(item=>item.id===player.userId);
+      if (!user) continue;
+      user.stats=user.stats||{gamesPlayed:0,wins:0,points:0};
+      user.stats.gamesPlayed=Math.min(100000000,Number(user.stats.gamesPlayed||0)+1);
+      if (winnerIds.has(user.id)) {
+        user.stats.wins=Math.min(100000000,Number(user.stats.wins||0)+1);
+        user.stats.points=Math.min(1000000000,Number(user.stats.points||0)+10);
+      }
+    }
+    db.roomHistory=Array.isArray(db.roomHistory)?db.roomHistory:[];
+    db.roomHistory.push({
+      roomId:room.id,
+      startedAt:room.startedAt,
+      finishedAt:room.finishedAt,
+      line:room.winners?.line ? {name:room.winners.line.name,memberId:room.winners.line.memberId} : null,
+      full:room.winners?.full ? {name:room.winners.full.name,memberId:room.winners.full.memberId} : null
+    });
+    if (db.roomHistory.length>200) db.roomHistory=db.roomHistory.slice(-200);
+    room.resultsRecorded=true;
+  }
+
   stopDrawTimer(room.id); persist().catch(error=>console.error('Persist finish failed:',error.message));
 }
 function startDrawTimer(roomId) {
@@ -203,7 +236,7 @@ function startRoom(room) {
     return { userId, name:user?.name || 'بازیکن', memberId:user?.memberId || '—', cards:room.queuedCards?.[userId] || [makeCard()] };
   });
   room.queue = []; room.queuedCards = {}; room.status = 'playing'; room.calledNumbers = [];
-  room.winners = {line:null,full:null}; room.startedAt = Date.now(); room.finishedAt=null; room.updatedAt=Date.now();
+  room.winners = {line:null,full:null}; room.resultsRecorded=false; room.startedAt = Date.now(); room.finishedAt=null; room.updatedAt=Date.now();
   persist().catch(error=>console.error('Persist room start failed:',error.message));
   startDrawTimer(room.id);
 }
