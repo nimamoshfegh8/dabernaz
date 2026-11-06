@@ -28,3 +28,41 @@ jobs:
         run: npm run check
       - name: Build Cloudflare Pages assets
         run: npm run build:pages
+
+      - name: Install Wrangler for isolated D1 integration tests
+        run: npm install --global wrangler@4
+
+      - name: Run live-room integration test against local D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          wrangler pages dev dist --local --ip 127.0.0.1 --port 8788 \
+            --persist-to .wrangler/test-state --config wrangler.test.toml \
+            > /tmp/dabernaz-pages.log 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "$server_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=false
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:8788/api/health >/tmp/dabernaz-health.json; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat /tmp/dabernaz-pages.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != true ]; then
+            cat /tmp/dabernaz-pages.log
+            echo "Cloudflare Pages local server did not become ready."
+            exit 1
+          fi
+
+          cat /tmp/dabernaz-health.json
+          BASE_URL=http://127.0.0.1:8788 node scripts/room-integration-smoke.mjs
