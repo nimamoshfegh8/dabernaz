@@ -587,7 +587,8 @@ function fullComplete(card, called) {
 
 async function startRoom(db, room) {
   const ids = room.queue.map(Number);
-  if (ids.length < CAPACITY) return false;
+  const queuedCardCount = ids.reduce((total, id) => total + Math.max(0, Number(room.cardCounts?.[String(id)]) || 0), 0);
+  if (queuedCardCount < CAPACITY) return false;
   const placeholders = ids.map(() => '?').join(',');
   const query = await db.prepare(`SELECT id, username, member_id FROM users WHERE id IN (${placeholders})`).bind(...ids).all();
   const byId = new Map((query.results || []).map((row) => [Number(row.id), row]));
@@ -602,10 +603,12 @@ async function startRoom(db, room) {
       cards: room.queuedCards[String(id)] || [makeCard()],
     });
   }
-  if (players.length < CAPACITY) throw new HttpError(409, 'تعداد حساب‌های معتبر اتاق به ۳۰ نفر نرسیده است.');
+  const actualCardCount = players.reduce((total, player) => total + player.cards.length, 0);
+  if (actualCardCount < CAPACITY) return false;
+  if (actualCardCount > CAPACITY) throw new HttpError(500, 'تعداد کارت‌های اتاق از ظرفیت ۳۰ کارت بیشتر شده است.');
   room.players = players;
   room.totalPlayers = players.length;
-  room.totalCards = players.reduce((total, player) => total + player.cards.length, 0);
+  room.totalCards = actualCardCount;
   room.grossRevenue = Object.values(room.entryPayments || {}).reduce((total, amount) => total + Math.max(0, Number(amount) || 0), 0);
   room.roundId = randomToken(16);
   room.linePrizePaid = 0;
@@ -729,6 +732,10 @@ async function publicRoom(db, room, userId) {
       siteCommission: room.commissionFinalized ? Number(room.siteCommission) || 0 : null,
       finalized: !!room.commissionFinalized,
     } : null,
+    playerCount: room.status === 'waiting' ? room.queue.length : room.players.length,
+    cardCount: room.status === 'waiting'
+      ? Object.values(room.cardCounts || {}).reduce((total, count) => total + Math.max(0, Number(count) || 0), 0)
+      : (Number(room.totalCards) || room.players.reduce((total, player) => total + (player.cards?.length || 0), 0)),
     queueCount: room.status === 'waiting' ? room.queue.length : room.players.length,
     players: room.players.map((player) => ({ name: player.name, memberId: player.memberId })),
     calledNumbers: room.calledNumbers.slice(-15),
@@ -767,7 +774,7 @@ async function handleRoom(db, request, user, path) {
   if (request.method === 'POST' && action === 'join') {
     validateWriteOrigin(request);
     const body = await readJson(request);
-    const cardsCount = Math.max(1, Math.min(4, Math.floor(Number(body.cardsCount) || 1)));
+    const requestedCardsCount = Math.max(1, Math.min(4, Math.floor(Number(body.cardsCount) || 1)));
     const result = await withRoomLock(db, roomId, async () => {
       let room = await loadRoom(db, roomId);
       const economics = ROOM_ECONOMICS[roomId];
@@ -777,17 +784,22 @@ async function handleRoom(db, request, user, path) {
       if (room.status === 'finished') room = newRoom(roomId);
       if (room.status === 'playing') return { conflict: true, room: await publicRoom(db, room, userId) };
       if (room.queue.some((id) => Number(id) === userId)) return { room: await publicRoom(db, room, userId) };
-      if (room.queue.length >= CAPACITY) throw new HttpError(409, 'ظرفیت این اتاق تکمیل شده است.');
+
+      const soldCards = Object.values(room.cardCounts || {}).reduce((total, count) => total + Math.max(0, Number(count) || 0), 0);
+      const remainingCards = Math.max(0, CAPACITY - soldCards);
+      if (remainingCards === 0) throw new HttpError(409, 'ظرفیت ۳۰ کارت این سانس تکمیل شده است.');
+      const cardsCount = Math.min(requestedCardsCount, remainingCards);
 
       const account = await db.prepare('SELECT balance FROM users WHERE id = ?').bind(userId).first();
       const totalPrice = economics.price * cardsCount;
-      if ((Number(account?.balance) || 0) < totalPrice) throw new HttpError(400, 'موجودی کیف پول برای خرید تعداد کارت انتخاب‌شده کافی نیست.');
+      if ((Number(account?.balance) || 0) < totalPrice) throw new HttpError(400, 'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
 
       room.cardCounts[String(userId)] = cardsCount;
       room.queuedCards[String(userId)] = Array.from({ length: cardsCount }, () => makeCard());
       room.entryPayments[String(userId)] = totalPrice;
       room.queue.push(userId);
-      if (room.queue.length >= CAPACITY) await startRoom(db, room);
+      const newSoldCardCount = soldCards + cardsCount;
+      if (newSoldCardCount === CAPACITY) await startRoom(db, room);
       room.updatedAt = Date.now();
       await db.batch([
         db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').bind(totalPrice, userId),
@@ -805,21 +817,7 @@ async function handleRoom(db, request, user, path) {
 
   if (request.method === 'POST' && action === 'leave') {
     validateWriteOrigin(request);
-    const result = await withRoomLock(db, roomId, async () => {
-      const room = await loadRoom(db, roomId);
-      if (room.status === 'waiting') {
-        const payment = Number(room.entryPayments?.[String(userId)] || 0);
-        room.queue = room.queue.filter((id) => Number(id) !== userId);
-        delete room.queuedCards[String(userId)];
-        delete room.cardCounts[String(userId)];
-        if (room.entryPayments) delete room.entryPayments[String(userId)];
-        if (payment > 0) {
-          await saveRoom(db, room, [{ kind:'balance', userId, amount:payment, description:'بازگشت هزینه کارت دبرنا', createdAt:new Date().toISOString() }]);
-        } else await saveRoom(db, room);
-      }
-      return await publicRoom(db, room, userId);
-    });
-    return json({ ok: true, room: result });
+    throw new HttpError(409, 'پس از خرید کارت، امکان لغو خرید یا خروج از صف وجود ندارد.');
   }
   return json({ error: 'روش درخواست برای این مسیر پشتیبانی نمی‌شود.' }, 405);
 }
