@@ -113,15 +113,31 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const balancesBeforeBuy = new Map();
   for (const account of accounts) balancesBeforeBuy.set(account.memberId, Number((await accountMe(account)).balance));
 
-  // Four separate accounts join simultaneously with four cards each: 16 cards.
-  await Promise.all(accounts.slice(0, 4).map(account => join(account, roomId, 4)));
+  // Four separate accounts first buy one card, then each purchases three additional cards.
+  await Promise.all(accounts.slice(0, 4).map(account => join(account, roomId, 1)));
+  for (let extra = 0; extra < 3; extra++) {
+    await Promise.all(accounts.slice(0, 4).map(account => join(account, roomId, 1)));
+  }
   let snapshot = await roomFor(accounts[0], roomId);
   assert.equal(snapshot.capacity, 30);
   assert.equal(snapshot.playerCount, 4, roomId + ': four registered players');
   assert.equal(snapshot.queueCount, 4, roomId + ': queue count is players, not cards');
-  assert.equal(snapshot.cardCount, 16, roomId + ': 16 cards after four players');
+  assert.equal(snapshot.cardCount, 16, roomId + ': additional card purchases must update shared count');
   assert.equal(snapshot.status, 'waiting');
   assert.deepEqual(snapshot.economics, economics);
+  for (const account of accounts.slice(0, 4)) {
+    const accountRoom = await roomFor(account, roomId);
+    assert.equal(accountRoom.myCards.length, 4, roomId + ': each account can add cards up to four');
+  }
+  const balanceAtCardLimit = Number((await accountMe(accounts[0])).balance);
+  const fifthCardResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
+    method: 'POST',
+    headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ cardsCount: 1 }),
+  });
+  assert.equal(fifthCardResponse.status, 409, roomId + ': fifth card must be rejected');
+  assert.equal(Number((await accountMe(accounts[0])).balance), balanceAtCardLimit,
+    roomId + ': fifth card rejection must not charge the wallet');
 
   // Regression: logging out after a card purchase must not remove the paid
   // entry from the shared room. A second account must see the global counts,
