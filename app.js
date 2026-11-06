@@ -741,7 +741,7 @@ document.addEventListener('click', async event => {
         try {
           result = await apiRequest(`/api/rooms/${activeRoomId}/join`, {
             method:'POST',
-            body:JSON.stringify({cardsCount:1})
+            body:JSON.stringify({cardsCount:roomCardCount})
           });
           break;
         } catch (error) {
