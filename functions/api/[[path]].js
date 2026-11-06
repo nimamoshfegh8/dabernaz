@@ -771,28 +771,42 @@ async function handleRoom(db, request, user, path) {
       if (advanced.changed) await saveRoom(db, room, advanced.awards);
       if (room.status === 'finished') room = newRoom(roomId);
       if (room.status === 'playing') return { conflict: true, room: await publicRoom(db, room, userId) };
-      if (room.queue.some((id) => Number(id) === userId)) return { room: await publicRoom(db, room, userId) };
+
+      const userKey = String(userId);
+      const alreadyQueued = room.queue.some((id) => Number(id) === userId);
+      const previouslyOwned = alreadyQueued
+        ? Math.max(0, Number(room.cardCounts?.[userKey]) || room.queuedCards?.[userKey]?.length || 0)
+        : 0;
+      const playerRemainingCards = Math.max(0, 4 - previouslyOwned);
+      if (alreadyQueued && playerRemainingCards === 0) {
+        throw new HttpError(409, 'هر بازیکن حداکثر ۴ کارت می‌تواند داشته باشد.');
+      }
 
       const soldCards = Object.values(room.cardCounts || {}).reduce((total, count) => total + Math.max(0, Number(count) || 0), 0);
       const remainingCards = Math.max(0, CAPACITY - soldCards);
       if (remainingCards === 0) throw new HttpError(409, 'ظرفیت ۳۰ کارت این سانس تکمیل شده است.');
-      const cardsCount = Math.min(requestedCardsCount, remainingCards);
+      const cardsCount = Math.min(requestedCardsCount, remainingCards, playerRemainingCards || (alreadyQueued ? 0 : 4));
+      if (cardsCount < 1) throw new HttpError(409, 'در این اتاق امکان خرید کارت بیشتری وجود ندارد.');
 
       const account = await db.prepare('SELECT balance FROM users WHERE id = ?').bind(userId).first();
       const totalPrice = economics.price * cardsCount;
       if ((Number(account?.balance) || 0) < totalPrice) throw new HttpError(400, 'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
 
-      room.cardCounts[String(userId)] = cardsCount;
-      room.queuedCards[String(userId)] = Array.from({ length: cardsCount }, () => makeCard());
-      room.entryPayments[String(userId)] = totalPrice;
-      room.queue.push(userId);
+      const existingCards = Array.isArray(room.queuedCards?.[userKey]) ? room.queuedCards[userKey] : [];
+      room.cardCounts[userKey] = previouslyOwned + cardsCount;
+      room.queuedCards[userKey] = [
+        ...existingCards,
+        ...Array.from({ length: cardsCount }, () => makeCard()),
+      ];
+      room.entryPayments[userKey] = (Math.max(0, Number(room.entryPayments?.[userKey]) || 0)) + totalPrice;
+      if (!alreadyQueued) room.queue.push(userId);
       const newSoldCardCount = soldCards + cardsCount;
       if (newSoldCardCount === CAPACITY) await startRoom(db, room);
       room.updatedAt = Date.now();
       await db.batch([
         db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').bind(totalPrice, userId),
         db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
-          VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -totalPrice, `خرید ${cardsCount} کارت دبرنا`, new Date().toISOString()),
+          VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -totalPrice, alreadyQueued ? `خرید ${cardsCount} کارت اضافی دبرنا` : `خرید ${cardsCount} کارت دبرنا`, new Date().toISOString()),
         db.prepare(`INSERT INTO room_states (room_id, payload, updated_at) VALUES (?, ?, ?)
           ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
           .bind(room.id, JSON.stringify(room), room.updatedAt),
