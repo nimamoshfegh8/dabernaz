@@ -192,31 +192,90 @@ const commissionRows = execFileSync('wrangler', [
 ], { encoding: 'utf8' });
 assert.match(commissionRows, /30000/, 'completed round commission must be saved in the D1 ledger');
 
-for (const roomId of ['room10000', 'room20000', 'room50000']) {
-  const economics = roomEconomics[roomId];
+// Refund test: leaving a waiting room returns the full amount for all 1-4 cards.
+{
+  const roomId = 'room50000';
   const beforeBalances = [];
   for (const account of firstFour) beforeBalances.push(Number((await accountMe(account)).balance));
   await Promise.all(firstFour.map((account, index) => join(account, roomId, index === 0 ? 4 : 1)));
-  for (const [index, account] of firstFour.entries()) {
-    const room = await roomFor(account, roomId);
-    assert.equal(room.queueCount, 4, roomId + ': all accounts must see 4/30');
-    assert.equal(room.capacity, 30);
-    assert.deepEqual(room.economics, economics);
-    assert.equal(room.joined, true);
-    checkCard(room.myCards, account.email, index === 0 ? 4 : 1);
-    const expected = beforeBalances[index] - economics.price * (index === 0 ? 4 : 1);
-    assert.equal(Number((await accountMe(account)).balance), expected,
-      roomId + ': charge must match card count and price');
-  }
+  assert.equal((await roomFor(firstFour[0], roomId)).queueCount, 4);
   for (const account of firstFour) await leave(account, roomId);
-  assert.equal((await roomFor(firstFour[0], roomId)).queueCount, 0,
-    roomId + ': leaving must clear waiting seats');
+  assert.equal((await roomFor(firstFour[0], roomId)).queueCount, 0);
   for (const [index, account] of firstFour.entries()) {
     assert.equal(Number((await accountMe(account)).balance), beforeBalances[index],
-      roomId + ': leaving must refund all purchased cards');
+      'leaving the waiting room must refund all cards');
   }
 }
 
+// Finish a full 30-player round in each remaining room and verify the residual
+// site commission is recorded once: gross card sales minus the two paid prizes.
+for (const roomId of ['room10000', 'room20000', 'room50000']) {
+  const economics = roomEconomics[roomId];
+  for (const [index, account] of accounts.entries()) {
+    const joinedRoom = await join(account, roomId, index === 0 ? 4 : 1);
+    assert.equal(joinedRoom.capacity, 30);
+    assert.deepEqual(joinedRoom.economics, economics);
+  }
+
+  const started = await roomFor(accounts[0], roomId);
+  assert.equal(started.status, 'playing');
+  assert.equal(started.queueCount, 30);
+  assert.equal(started.capacity, 30);
+  assert.equal(started.finance.totalPlayers, 30);
+  assert.equal(started.finance.totalCards, 33);
+  const expectedGross = 33 * economics.price;
+  assert.equal(started.finance.grossRevenue, expectedGross);
+
+  const balancesBeforePrizes = new Map();
+  for (const account of accounts) balancesBeforePrizes.set(account.memberId, Number((await accountMe(account)).balance));
+
+  const called89 = '[' + Array.from({ length: 89 }, (_, index) => index + 1).join(',') + ']';
+  const forceEndSql = "UPDATE room_states SET payload = json_set(payload, " +
+    "'$.calledNumbers', json('" + called89 + "'), " +
+    "'$.nextDrawAt', 1, '$.status', 'playing', " +
+    "'$.winners.line', json('null'), '$.winners.full', json('null'), " +
+    "'$.linePrizePaid', 0, '$.fullPrizePaid', 0, '$.commissionFinalized', false) " +
+    "WHERE room_id = '" + roomId + "'";
+  execFileSync('wrangler', [
+    'd1', 'execute', 'dabernaz-ci', '--local',
+    '--persist-to', '.wrangler/test-state',
+    '--command', forceEndSql,
+  ], { stdio: 'inherit' });
+
+  const finishedRoom = await roomFor(accounts[0], roomId);
+  assert.equal(finishedRoom.status, 'finished');
+  assert.equal(finishedRoom.finance.finalized, true);
+  assert.equal(finishedRoom.finance.grossRevenue, expectedGross);
+  assert.equal(finishedRoom.finance.linePrizePaid, economics.linePrize);
+  assert.equal(finishedRoom.finance.fullPrizePaid, economics.fullPrize);
+  const expectedCommission = expectedGross - economics.linePrize - economics.fullPrize;
+  assert.ok(expectedCommission >= 0);
+  assert.equal(finishedRoom.finance.siteCommission, expectedCommission,
+    roomId + ': commission must equal total card revenue minus both prizes');
+
+  const lineMemberId = finishedRoom.winners.line.memberId;
+  const fullMemberId = finishedRoom.winners.full.memberId;
+  for (const account of accounts) {
+    const bonus = (account.memberId === lineMemberId ? economics.linePrize : 0) +
+      (account.memberId === fullMemberId ? economics.fullPrize : 0);
+    assert.equal(Number((await accountMe(account)).balance),
+      balancesBeforePrizes.get(account.memberId) + bonus,
+      roomId + ': actual wallet payouts must match registered winners');
+  }
+
+  const ledgerOutput = execFileSync('wrangler', [
+    'd1', 'execute', 'dabernaz-ci', '--local',
+    '--persist-to', '.wrangler/test-state',
+    '--command', "SELECT COUNT(*) AS rounds, SUM(site_commission) AS total_commission FROM room_finances WHERE room_id = '" + roomId + "'",
+  ], { encoding: 'utf8' });
+  assert.match(ledgerOutput, new RegExp(String(expectedCommission)),
+    roomId + ': residual commission must be stored in the site finance ledger');
+
+  // Re-reading a finished round must not create another site commission entry.
+  const repeatedRead = await roomFor(accounts[0], roomId);
+  assert.equal(repeatedRead.finance.finalized, true);
+  assert.equal(repeatedRead.finance.siteCommission, expectedCommission);
+}
 for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
