@@ -253,8 +253,32 @@ async function ensureSchema(db) {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_tournament_entries_type ON tournament_entries(tournament_type, id)`,
+    `CREATE TABLE IF NOT EXISTS tournament_rooms (
+      tournament_type TEXT PRIMARY KEY,
+      capacity INTEGER NOT NULL DEFAULT 30,
+      registered_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'registration',
+      updated_at TEXT NOT NULL
+    )`,
   ];
   for (const sql of statements) await db.prepare(sql).run();
+  const financeInfoAfterCreate = await db.prepare('PRAGMA table_info(room_finances)').all();
+  const financeColumnsAfterCreate = new Set((financeInfoAfterCreate.results || []).map((item) => item.name));
+  for (const [name, definition] of [['line_winners_json', "TEXT NOT NULL DEFAULT '[]'"], ['full_winners_json', "TEXT NOT NULL DEFAULT '[]'"]]) {
+    if (!financeColumnsAfterCreate.has(name)) {
+      try { await db.prepare(`ALTER TABLE room_finances ADD COLUMN ${name} ${definition}`).run(); }
+      catch (error) { if (!String(error?.message || error).toLowerCase().includes('duplicate column')) throw error; }
+    }
+  }
+  const tournamentNow = new Date().toISOString();
+  for (const type of ['simple','bingo']) {
+    await db.prepare(`INSERT INTO tournament_rooms (tournament_type, capacity, registered_count, status, updated_at)
+      VALUES (?, 30, (SELECT COUNT(*) FROM tournament_entries WHERE tournament_type = ? AND status = 'registered'),
+        CASE WHEN (SELECT COUNT(*) FROM tournament_entries WHERE tournament_type = ? AND status = 'registered') >= 30 THEN 'full' ELSE 'registration' END, ?)
+      ON CONFLICT(tournament_type) DO UPDATE SET registered_count = excluded.registered_count,
+        status = CASE WHEN excluded.registered_count >= tournament_rooms.capacity THEN 'full' ELSE 'registration' END,
+        updated_at = excluded.updated_at`).bind(type, type, type, tournamentNow).run();
+  }
   bootstrappedBindings.add(db);
 }
 
@@ -544,8 +568,8 @@ async function saveRoom(db, room, awards = []) {
         VALUES (?, 'balance', ?, ?, ?)`).bind(award.userId, award.amount, award.description, award.createdAt));
     } else if (award.kind === 'room_commission') {
       statements.push(db.prepare(`INSERT INTO room_finances
-        (round_id, room_id, total_players, total_cards, gross_revenue, line_prize_paid, full_prize_paid, site_commission, finished_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (round_id, room_id, total_players, total_cards, gross_revenue, line_prize_paid, full_prize_paid, site_commission, line_winners_json, full_winners_json, finished_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(round_id) DO NOTHING`)
         .bind(award.roundId, award.roomId, award.totalPlayers, award.totalCards, award.grossRevenue,
           award.linePrizePaid, award.fullPrizePaid, award.siteCommission, JSON.stringify(award.lineWinners || []), JSON.stringify(award.fullWinners || []), award.finishedAt, award.createdAt));
@@ -782,6 +806,8 @@ function advanceRoom(room) {
       linePrizePaid,
       fullPrizePaid,
       siteCommission,
+      lineWinners: Array.isArray(room.winners?.line) ? room.winners.line : [],
+      fullWinners: Array.isArray(room.winners?.full) ? room.winners.full : [],
       finishedAt: room.finishedAt ? new Date(room.finishedAt * 1000).toISOString() : now,
       createdAt: now,
     });
@@ -871,9 +897,9 @@ async function handleRoom(db, request, user, path) {
       const cardsCount = Math.min(requestedCardsCount, remainingCards);
       if (cardsCount < 1) throw new HttpError(409, 'در این اتاق امکان خرید کارت بیشتری وجود ندارد.');
 
-      const account = await db.prepare('SELECT balance FROM users WHERE id = ?').bind(userId).first();
       const totalPrice = economics.price * cardsCount;
-      if ((Number(account?.balance) || 0) < totalPrice) throw new HttpError(400, 'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
+      const debit = await db.prepare('UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?').bind(totalPrice, userId, totalPrice).run();
+      if (!Number(debit.meta?.changes || 0)) throw new HttpError(400, 'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
 
       const existingCards = Array.isArray(room.queuedCards?.[userKey]) ? room.queuedCards[userKey] : [];
       room.cardCounts[userKey] = previouslyOwned + cardsCount;
@@ -886,14 +912,18 @@ async function handleRoom(db, request, user, path) {
       const newSoldCardCount = soldCards + cardsCount;
       if (newSoldCardCount === CAPACITY) await startRoom(db, room);
       room.updatedAt = Date.now();
-      await db.batch([
-        db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').bind(totalPrice, userId),
-        db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
-          VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -totalPrice, alreadyQueued ? `خرید ${cardsCount} کارت اضافی دبرنا` : `خرید ${cardsCount} کارت دبرنا`, new Date().toISOString()),
-        db.prepare(`INSERT INTO room_states (room_id, payload, updated_at) VALUES (?, ?, ?)
-          ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
-          .bind(room.id, JSON.stringify(room), room.updatedAt),
-      ]);
+      try {
+        await db.batch([
+          db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
+            VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -totalPrice, alreadyQueued ? `خرید ${cardsCount} کارت اضافی دبرنا` : `خرید ${cardsCount} کارت دبرنا`, new Date().toISOString()),
+          db.prepare(`INSERT INTO room_states (room_id, payload, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
+            .bind(room.id, JSON.stringify(room), room.updatedAt),
+        ]);
+      } catch (error) {
+        await db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(totalPrice, userId).run();
+        throw error;
+      }
       return { room: await publicRoom(db, room, userId) };
     });
     if (result.conflict) return json({ error: 'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.', room: result.room }, 409);
@@ -910,7 +940,7 @@ async function handleRoom(db, request, user, path) {
 async function referralSummary(db, userId) {
   const countRow = await db.prepare('SELECT COUNT(*) AS n FROM referrals WHERE inviter_id = ?').bind(userId).first();
   const count = Number(countRow?.n || 0);
-  return { count, nextRewardIn: 5 - (count % 5 || 5), referralCode: (await db.prepare('SELECT referral_code FROM users WHERE id = ?').bind(userId).first())?.referral_code || '' };
+  return { count, nextRewardIn: 5 - (count % 5), referralCode: (await db.prepare('SELECT referral_code FROM users WHERE id = ?').bind(userId).first())?.referral_code || '' };
 }
 
 async function recentWinners(db, limit = 12) {
@@ -919,7 +949,7 @@ async function recentWinners(db, limit = 12) {
     FROM room_finances ORDER BY id DESC LIMIT ?`).bind(limit).all();
   return (result.results || []).map((row) => {
     const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; } };
-    return { ...row, lineWinners: parse(row.line_winners_json), fullWinners: parse(row.full_winners_json) };
+    return { ...row, lineWinners: parse(row.line_winners_json), fullWinners: parse(row.full_winners_json), finishedAt: row.finished_at };
   });
 }
 
@@ -987,17 +1017,25 @@ async function routeRequest(request, env) {
   }
 
   if (request.method === 'GET' && path === '/api/tournaments/me') {
-    const result = await env.DB.prepare('SELECT tournament_type, entry_cost, status, created_at FROM tournament_entries WHERE user_id = ? ORDER BY id DESC').bind(user.id).all();
-    return json({ ok: true, entries: result.results || [] });
+    const [result, rooms] = await Promise.all([
+      env.DB.prepare('SELECT tournament_type, entry_cost, status, created_at FROM tournament_entries WHERE user_id = ? ORDER BY id DESC').bind(user.id).all(),
+      env.DB.prepare('SELECT tournament_type, capacity, registered_count, status FROM tournament_rooms ORDER BY tournament_type').all(),
+    ]);
+    return json({ ok: true, entries: result.results || [], rooms: rooms.results || [] });
   }
 
   if (request.method === 'POST' && path === '/api/games/result') {
     validateWriteOrigin(request);
     const body = await readJson(request);
     const gameType = String(body.gameType || ''); const result = String(body.result || '');
-    if (!['rps','tic'].includes(gameType) || !['win','lose','draw'].includes(result)) throw new HttpError(400, 'نتیجه بازی معتبر نیست.');
+    if (!['rps','tic','bingo','memory'].includes(gameType) || !['win','lose','draw'].includes(result)) throw new HttpError(400, 'نتیجه بازی معتبر نیست.');
     const nowText = new Date().toISOString();
-    await env.DB.prepare('INSERT INTO game_results (user_id, game_type, result, prize, bingo_coins_earned, created_at) VALUES (?, ?, ?, 0, 0, ?)').bind(user.id, gameType, result, nowText).run();
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO game_results (user_id, game_type, result, prize, bingo_coins_earned, created_at) VALUES (?, ?, ?, 0, 0, ?)').bind(user.id, gameType, result, nowText),
+      env.DB.prepare(`UPDATE users SET games_played = games_played + 1,
+        wins = wins + CASE WHEN ? = 'win' THEN 1 ELSE 0 END,
+        points = points + CASE WHEN ? = 'win' THEN 10 ELSE 0 END WHERE id = ?`).bind(result, result, user.id),
+    ]);
     const updated = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
     return json({ ok: true, user: await publicUser(env.DB, updated) });
   }
@@ -1010,14 +1048,27 @@ async function routeRequest(request, env) {
     if (!config) throw new HttpError(400, 'نوع تورنومنت معتبر نیست.');
     const existing = await env.DB.prepare('SELECT id FROM tournament_entries WHERE tournament_type = ? AND user_id = ?').bind(tournamentType, user.id).first();
     if (existing) throw new HttpError(409, 'قبلاً در این تورنومنت ثبت‌نام کرده‌ای.');
-    const fresh = await env.DB.prepare('SELECT bingo_coins FROM users WHERE id = ?').bind(user.id).first();
-    if (Number(fresh?.bingo_coins || 0) < config.cost) throw new HttpError(409, 'بینگوکوین کافی برای ثبت‌نام نداری.');
     const nowText = new Date().toISOString();
-    await env.DB.batch([
-      env.DB.prepare('UPDATE users SET bingo_coins = bingo_coins - ? WHERE id = ?').bind(config.cost, user.id),
-      env.DB.prepare('INSERT INTO tournament_entries (tournament_type, user_id, entry_cost, status, created_at) VALUES (?, ?, ?, \'registered\', ?)').bind(tournamentType, user.id, config.cost, nowText),
-      env.DB.prepare('INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, \'bingo_coin\', ?, ?, ?)').bind(user.id, -config.cost, `ورود به ${config.label}`, nowText),
-    ]);
+    const debit = await env.DB.prepare('UPDATE users SET bingo_coins = bingo_coins - ? WHERE id = ? AND bingo_coins >= ?').bind(config.cost, user.id, config.cost).run();
+    if (!Number(debit.meta?.changes || 0)) throw new HttpError(409, 'بینگوکوین کافی برای ثبت‌نام نداری.');
+    let reserved = false;
+    try {
+      const reservation = await env.DB.prepare(`UPDATE tournament_rooms SET registered_count = registered_count + 1,
+        status = CASE WHEN registered_count + 1 >= capacity THEN 'full' ELSE 'registration' END, updated_at = ?
+        WHERE tournament_type = ? AND registered_count < capacity`).bind(nowText, tournamentType).run();
+      reserved = Number(reservation.meta?.changes || 0) === 1;
+      if (!reserved) throw new HttpError(409, 'ظرفیت این تورنومنت تکمیل شده است.');
+      await env.DB.batch([
+        env.DB.prepare('INSERT INTO tournament_entries (tournament_type, user_id, entry_cost, status, created_at) VALUES (?, ?, ?, \'registered\', ?)').bind(tournamentType, user.id, config.cost, nowText),
+        env.DB.prepare('INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, \'bingo_coin\', ?, ?, ?)').bind(user.id, -config.cost, `ورود به ${config.label}`, nowText),
+      ]);
+    } catch (error) {
+      if (reserved) await env.DB.prepare(`UPDATE tournament_rooms SET registered_count = CASE WHEN registered_count > 0 THEN registered_count - 1 ELSE 0 END,
+        status = 'registration', updated_at = ? WHERE tournament_type = ?`).bind(new Date().toISOString(), tournamentType).run();
+      await env.DB.prepare('UPDATE users SET bingo_coins = bingo_coins + ? WHERE id = ?').bind(config.cost, user.id).run();
+      if (/unique constraint failed/i.test(String(error?.message || error))) throw new HttpError(409, 'قبلاً در این تورنومنت ثبت‌نام کرده‌ای.');
+      throw error;
+    }
     const updated = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
     return json({ ok: true, user: await publicUser(env.DB, updated), tournament: tournamentType });
   }
