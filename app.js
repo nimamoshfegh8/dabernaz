@@ -443,12 +443,14 @@ const tournaments = [
   { id:'t3', name:'چالش قهرمانان', kind:'مهارتی', prize:'۲,۵۰۰', players:'۳۲', time:'شنبه · ۱۸:۰۰', icon:'🥇' }
 ];
 function renderTournaments() {
-  return `${heading('تورنومنت', 'رقابت‌های ویژه دابرناز را انتخاب کن.', 'TOURNAMENTS')}
+  const queueCount = type => Number((state.tournamentRooms||[]).find(item=>item.tournament_type===type)?.registered_count)||0;
+  const simpleCount=queueCount('simple'), bingoCount=queueCount('bingo');
+  return `${heading('تورنومنت', 'صف ثبت‌نام رقابت‌ها را مشاهده و به‌صورت سروری ثبت‌نام کن.', 'TOURNAMENTS')}
   <div class="tournament-subpage-grid">
-    <button class="tournament-subpage-card" data-page="tournamentRoom"><span>🏆</span><b>اتاق تورنومنت</b><small>ظرفیت ۳۰ نفر · رقابت گروهی</small><em>مشاهده اتاق ←</em></button>
-    <button class="tournament-subpage-card" data-page="bingoTournament"><span>🎱</span><b>اتاق بینگو تورنومنت</b><small>ظرفیت ۳۰ نفر · بینگوی رقابتی</small><em>مشاهده اتاق ←</em></button>
+    <button class="tournament-subpage-card" data-page="tournamentRoom"><span>🏆</span><b>اتاق تورنومنت</b><small>${faDigits(simpleCount)} / ۳۰ ثبت‌نام · ورود ۲۰ BGC</small><em>مشاهده اتاق ←</em></button>
+    <button class="tournament-subpage-card" data-page="bingoTournament"><span>🎱</span><b>اتاق بینگو تورنومنت</b><small>${faDigits(bingoCount)} / ۳۰ ثبت‌نام · ورود ۱۰۰ BGC</small><em>مشاهده اتاق ←</em></button>
   </div>
-  <p class="muted-note">ثبت‌نام با بینگوکوین روی سرور ثبت می‌شود. شروع و زمان‌بندی مسابقه در مرحله بعدی توسط سیستم مسابقات مدیریت خواهد شد.</p>`;
+  <p class="muted-note">ثبت‌نام، شمارش ظرفیت و کسر بینگوکوین روی سرور انجام می‌شود. رسیدن به ظرفیت، صف را می‌بندد؛ اجرای خود مسابقه و تعیین جایزه به قوانین نهایی تورنمنت نیاز دارد.</p>`;
 }
 function renderTournamentDetail(bingo=false) {
   const title = bingo ? 'اتاق بینگو تورنومنت' : 'اتاق تورنومنت';
@@ -678,7 +680,20 @@ function updateHomeMiniStats() {
 function recordMiniGameResult(gameType, result) {
   if (!currentUser) return;
   apiRequest('/api/games/result',{method:'POST',body:JSON.stringify({gameType,result})})
-    .then(data=>{ if(data.user) applyAuthenticatedUser(data.user); updateHomeMiniStats(); })
+    .then(data=>{
+      const user=data.user;
+      if(user){
+        currentUser=user;
+        state.username=user.name; state.memberId=user.memberId;
+        state.balance=Math.max(0,Number(user.balance)||0);
+        state.bingoCoins=Math.max(0,Number(user.bingoCoins)||0);
+        state.coinTransactions=Array.isArray(user.coinTransactions)?user.coinTransactions.slice(0,50):[];
+        state.gamesPlayed=Number(user.stats?.gamesPlayed)||0;
+        state.wins=Number(user.stats?.wins)||0;
+        state.points=Number(user.stats?.points)||0;
+        saveState(); updateHeader(); updateHomeMiniStats();
+      }
+    })
     .catch(error=>showToast(error.message || 'ثبت آمار بازی ناموفق بود.'));
 }
 function launchGame(game) {
