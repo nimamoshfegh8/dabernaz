@@ -9,10 +9,10 @@ const password = 'Dabernaz-QA-2026!';
 const accounts = [];
 const startingBalance = 5000000;
 const roomEconomics = {
-  room5000: { price: 5000, linePrize: 20000, fullPrize: 115000, commission: 15000 },
-  room10000: { price: 10000, linePrize: 40000, fullPrize: 230000, commission: 30000 },
-  room20000: { price: 20000, linePrize: 80000, fullPrize: 460000, commission: 60000 },
-  room50000: { price: 50000, linePrize: 200000, fullPrize: 1150000, commission: 150000 },
+  room5000: { price: 5000, linePrize: 20000, fullPrize: 115000, commissionMode: 'revenue_minus_prizes' },
+  room10000: { price: 10000, linePrize: 40000, fullPrize: 230000, commissionMode: 'revenue_minus_prizes' },
+  room20000: { price: 20000, linePrize: 80000, fullPrize: 460000, commissionMode: 'revenue_minus_prizes' },
+  room50000: { price: 50000, linePrize: 200000, fullPrize: 1150000, commissionMode: 'revenue_minus_prizes' },
 };
 
 async function request(path, options = {}) {
@@ -160,6 +160,38 @@ assert.ok(afterDraw.drawCount >= 1, 'the live room should advance when participa
 assert.equal(new Set(afterDraw.allCalledNumbers).size, afterDraw.allCalledNumbers.length,
   'drawn numbers must never repeat');
 
+// Complete a deterministic local-only round by setting 1..89 as already called.
+// The next server poll calls 90, awards both configured prizes, and closes the round.
+const called89 = '[' + Array.from({ length: 89 }, (_, index) => index + 1).join(',') + ']';
+const forceEndSql = "UPDATE room_states SET payload = json_set(payload, " +
+  "'$.calledNumbers', json('" + called89 + "'), " +
+  "'$.nextDrawAt', 1, '$.status', 'playing', " +
+  "'$.winners.line', json('null'), '$.winners.full', json('null'), " +
+  "'$.linePrizePaid', 0, '$.fullPrizePaid', 0, '$.commissionFinalized', false) " +
+  "WHERE room_id = 'room5000'";
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', forceEndSql,
+], { stdio: 'inherit' });
+const finishedRoom = await roomFor(accounts[0], 'room5000');
+assert.equal(finishedRoom.status, 'finished');
+assert.equal(finishedRoom.finance.finalized, true);
+assert.equal(finishedRoom.finance.totalPlayers, 30);
+assert.equal(finishedRoom.finance.totalCards, 33);
+assert.equal(finishedRoom.finance.grossRevenue, 165000);
+assert.equal(finishedRoom.finance.linePrizePaid, roomEconomics.room5000.linePrize);
+assert.equal(finishedRoom.finance.fullPrizePaid, roomEconomics.room5000.fullPrize);
+assert.equal(finishedRoom.finance.siteCommission,
+  165000 - roomEconomics.room5000.linePrize - roomEconomics.room5000.fullPrize);
+assert.equal(finishedRoom.finance.siteCommission, 30000, 'commission must be the remaining round revenue');
+const commissionRows = execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', "SELECT COUNT(*) AS rounds, SUM(site_commission) AS total_commission FROM room_finances WHERE round_id = '" + finishedRoom.roundId + "'",
+], { encoding: 'utf8' });
+assert.match(commissionRows, /30000/, 'completed round commission must be saved in the D1 ledger');
+
 for (const roomId of ['room10000', 'room20000', 'room50000']) {
   const economics = roomEconomics[roomId];
   const beforeBalances = [];
@@ -189,4 +221,4 @@ for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
 
-console.log('PASS: all room prices/prizes/commission, 30-player capacity, 1-4 cards per player, card charges/refunds, concurrent queue, automatic start, unique draws, and session isolation.');
+console.log('PASS: 30-player rooms, 1-4 cards, exact entry charges/refunds, line/full payouts, residual site commission ledger, concurrent queue, automatic start, unique draws, and session isolation.');
