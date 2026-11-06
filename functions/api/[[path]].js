@@ -681,7 +681,7 @@ async function handleRoom(db, request, user, path) {
   if (request.method === 'POST' && action === 'join') {
     validateWriteOrigin(request);
     const body = await readJson(request);
-    const cardsCount = 1;
+    const cardsCount = Math.max(1, Math.min(4, Math.floor(Number(body.cardsCount) || 1)));
     const result = await withRoomLock(db, roomId, async () => {
       let room = await loadRoom(db, roomId);
       const economics = ROOM_ECONOMICS[roomId];
@@ -694,18 +694,19 @@ async function handleRoom(db, request, user, path) {
       if (room.queue.length >= CAPACITY) throw new HttpError(409, 'ظرفیت این اتاق تکمیل شده است.');
 
       const account = await db.prepare('SELECT balance FROM users WHERE id = ?').bind(userId).first();
-      if ((Number(account?.balance) || 0) < economics.price) throw new HttpError(400, 'موجودی کیف پول برای خرید این کارت کافی نیست.');
+      const totalPrice = economics.price * cardsCount;
+      if ((Number(account?.balance) || 0) < totalPrice) throw new HttpError(400, 'موجودی کیف پول برای خرید تعداد کارت انتخاب‌شده کافی نیست.');
 
       room.cardCounts[String(userId)] = cardsCount;
-      room.queuedCards[String(userId)] = [makeCard()];
-      room.entryPayments[String(userId)] = economics.price;
+      room.queuedCards[String(userId)] = Array.from({ length: cardsCount }, () => makeCard());
+      room.entryPayments[String(userId)] = totalPrice;
       room.queue.push(userId);
       if (room.queue.length >= CAPACITY) await startRoom(db, room);
       room.updatedAt = Date.now();
       await db.batch([
-        db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').bind(economics.price, userId),
+        db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').bind(totalPrice, userId),
         db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
-          VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -economics.price, 'خرید کارت دبرنا', new Date().toISOString()),
+          VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -totalPrice, `خرید ${cardsCount} کارت دبرنا`, new Date().toISOString()),
         db.prepare(`INSERT INTO room_states (room_id, payload, updated_at) VALUES (?, ?, ?)
           ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
           .bind(room.id, JSON.stringify(room), room.updatedAt),
