@@ -221,8 +221,8 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.equal(new Set(liveRoom.allCalledNumbers).size, liveRoom.allCalledNumbers.length);
 
   // Finish a deterministic local-only round: call 1..89 first, then the server's
-  // next draw is 90. All cards complete, so both prizes are paid to the first
-  // registered player and the remainder is recorded as this round's commission.
+  // next draw is 90. All cards become complete together, so simultaneous winner
+  // lists are used to verify the equal prize split and round commission.
   const called89 = '[' + Array.from({ length: 89 }, (_, index) => index + 1).join(',') + ']';
   const forceEndSql = "UPDATE room_states SET payload = json_set(payload, " +
     "'$.calledNumbers', json('" + called89 + "'), " +
@@ -250,12 +250,26 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.ok(finishedRoom.winners.line);
   assert.ok(finishedRoom.winners.full);
 
+  const expectedPrizes = new Map(accounts.map((account) => [String(account.id), 0]));
+  const addSplitPrize = (winners, prize) => {
+    assert.ok(Array.isArray(winners) && winners.length > 0, roomId + ': winner list must be non-empty');
+    const base = Math.floor(prize / winners.length);
+    const remainder = prize % winners.length;
+    winners.forEach((winner, index) => {
+      const key = String(winner.userId);
+      expectedPrizes.set(key, (expectedPrizes.get(key) || 0) + base + (index < remainder ? 1 : 0));
+    });
+  };
+  addSplitPrize(finishedRoom.winners.line, economics.linePrize);
+  addSplitPrize(finishedRoom.winners.full, economics.fullPrize);
+
   for (let index = 0; index < accounts.length; index++) {
-    const bonus = index === 0 ? economics.linePrize + economics.fullPrize : 0;
-    const expectedBalance = balancesBeforeBuy.get(accounts[index].memberId) -
-      economics.price * (index === 7 ? 2 : 4) + bonus;
-    assert.equal(Number((await accountMe(accounts[index])).balance), expectedBalance,
-      roomId + ': winner prizes and card charges must match the wallet');
+    const account = accounts[index];
+    const cardCount = index === 0 ? 5 : index === 7 ? 1 : 4;
+    const expectedBalance = balancesBeforeBuy.get(account.memberId) -
+      economics.price * cardCount + expectedPrizes.get(String(account.id));
+    assert.equal(Number((await accountMe(account)).balance), expectedBalance,
+      roomId + ': split winner prizes and card charges must match the wallet');
   }
 
   const ledgerOutput = execFileSync('wrangler', [
