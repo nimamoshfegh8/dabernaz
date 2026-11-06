@@ -92,7 +92,7 @@ const emailPrefix = 'qa-' + runId + '-%@example.test';
 execFileSync('wrangler', [
   'd1', 'execute', 'dabernaz-ci', '--local',
   '--persist-to', '.wrangler/test-state',
-  '--command', 'UPDATE users SET balance = ' + startingBalance + ', bingo_coins = 500 WHERE email LIKE \'" + emailPrefix + "\'',
+  '--command', "UPDATE users SET balance = " + startingBalance + ", bingo_coins = 500 WHERE email LIKE '" + emailPrefix + "'",
 ], { stdio: 'inherit' });
 
 for (const account of accounts) {
