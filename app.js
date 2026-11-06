@@ -34,6 +34,7 @@ state.transactions=[]; state.coinTransactions=[]; state.referralCode='';
 let currentUser = null;
 let authReady = false;
 let apiReady = false;
+let apiErrorMessage = '';
 let authMode = 'login';
 let roomServerSnapshot = null;
 let roomPollBusy = false;
@@ -99,8 +100,12 @@ async function apiRequest(path, options = {}) {
     } catch (_) { /* Preserve the primary Cloudflare/Pages response. */ }
   }
   const data = await response.json().catch(()=>({error:'پاسخ سرور قابل خواندن نیست. اتصال API دابرناز را بررسی کن.'}));
-  if (!response.ok) throw new Error(data.error || 'در ارتباط با سرور خطایی رخ داد.');
+  if (!response.ok) {
+    const details = [data.error || 'در ارتباط با سرور خطایی رخ داد.', `HTTP ${response.status}`, data.requestId ? `کد پیگیری: ${data.requestId}` : ''].filter(Boolean);
+    throw new Error(details.join(' · '));
+  }
   apiReady = true;
+  apiErrorMessage = '';
   return data;
 }
 function applyAuthenticatedUser(user) {
@@ -117,7 +122,7 @@ async function loadAuthenticatedUser() {
   try { const result = await apiRequest('/api/auth/me', { method:'GET', headers:{} });
     if (result.user) applyAuthenticatedUser(result.user);
     else { currentUser=null; state=cloneData(defaultState); }
-  } catch (error) { apiReady=false; currentUser=null; state=cloneData(defaultState); showToast(error.message || 'سرور حساب کاربری در دسترس نیست.'); }
+  } catch (error) { apiReady=false; apiErrorMessage=error?.message || 'سرور حساب کاربری در دسترس نیست.'; currentUser=null; state=cloneData(defaultState); showToast(apiErrorMessage); }
   authReady=true; render();
 }
 function requireLogin() { if (currentUser) return true; authMode='login'; setPage('account'); showToast('برای ادامه ابتدا ثبت‌نام کن یا وارد حساب شو.'); return false; }
@@ -433,7 +438,7 @@ function renderAuthPage() {
   const register=authMode==='register';
   return `${heading('حساب کاربری دابرناز', 'برای ذخیره حساب و ورود به بازی‌ها ثبت‌نام کن یا وارد شو.', 'SECURE PLAYER ACCOUNT')}
     <section class="panel auth-panel">
-      ${authReady && !apiReady ? '<div class="mini-game-info-notice" role="status">اتصال API برقرار نیست. برای ثبت‌نام و ورود، Cloudflare Pages باید با D1 و Binding دقیق DB منتشر شده باشد. تنظیمات Pages و اتصال دیتابیس را بررسی کن.</div>' : authReady && apiReady ? '<div class="mini-game-info-notice" role="status">اتصال به سرور برقرار است؛ ثبت‌نام و ورود آماده است.</div>' : '<div class="mini-game-info-notice" role="status">در حال بررسی اتصال سرور…</div>'}
+      ${authReady && !apiReady ? `<div class="mini-game-info-notice" role="status">اتصال API برقرار نشد: ${escapeHTML(apiErrorMessage || 'خطای نامشخص')}<br>نشانی بررسی سلامت: <a href="/api/health" target="_blank" rel="noopener">/api/health</a></div>` : authReady && apiReady ? '<div class="mini-game-info-notice" role="status">اتصال به سرور برقرار است؛ ثبت‌نام و ورود آماده است.</div>' : '<div class="mini-game-info-notice" role="status">در حال بررسی اتصال سرور…</div>'}
       <div class="auth-tabs"><button class="${register?'':'active'}" data-auth-mode="login">ورود</button><button class="${register?'active':''}" data-auth-mode="register">ثبت‌نام</button></div>
       <form id="authForm" class="form-stack" autocomplete="on">
         ${register?'<label class="muted-note" for="authName">نام نمایشی</label><input id="authName" class="form-control" name="name" minlength="2" maxlength="32" autocomplete="name" placeholder="نامی که در بازی نمایش داده می‌شود" required>':''}
