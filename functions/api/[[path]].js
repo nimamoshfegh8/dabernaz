@@ -177,6 +177,8 @@ async function ensureSchema(db) {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_member_id ON users(member_id) WHERE member_id IS NOT NULL`,
     `CREATE INDEX IF NOT EXISTS idx_transactions_user_type ON transactions(user_id, type, id DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_game_results_user ON game_results(user_id, id DESC)`,
+    `CREATE TABLE IF NOT EXISTS game_sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, game_type TEXT NOT NULL, state_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'playing', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id))`,
+    `CREATE INDEX IF NOT EXISTS idx_game_sessions_user_status ON game_sessions(user_id,status,updated_at DESC)`,
     `CREATE TABLE IF NOT EXISTS auth_sessions (
       token_hash TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -936,6 +938,113 @@ async function recentWinners(db, limit = 12) {
   });
 }
 
+const GAME_RPS_CHOICES = ['rock','paper','scissors'];
+const GAME_RPS_BEATS = { rock:'scissors', paper:'rock', scissors:'paper' };
+const GAME_TIC_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+function gameTicWinner(board) {
+  for (const [a,b,c] of GAME_TIC_LINES) if (board[a] && board[a] === board[b] && board[b] === board[c]) return board[a];
+  return null;
+}
+function gameTicBotMove(board) {
+  const winningMove = (mark) => {
+    for (let i=0;i<9;i++) if (!board[i]) {
+      board[i]=mark; const wins=gameTicWinner(board)===mark; board[i]='';
+      if(wins) return i;
+    }
+    return -1;
+  };
+  const win=winningMove('O'); if(win!==-1) return win;
+  const block=winningMove('X'); if(block!==-1 && randomInt(100)<82) return block;
+  const available=board.map((v,i)=>v?-1:i).filter(i=>i!==-1);
+  if(!available.length) return -1;
+  const preferred=available.filter(i=>[0,2,4,6,8].includes(i));
+  const pool=preferred.length&&randomInt(100)<68?preferred:available;
+  return pool[randomInt(pool.length)];
+}
+function gameRpsBotChoice(history) {
+  if(!history.length) return GAME_RPS_CHOICES[randomInt(3)];
+  const predicted={rock:1.25,paper:1.25,scissors:1.25};
+  history.forEach((choice,index)=>{predicted[choice]+=Math.pow(0.965,history.length-1-index);});
+  const last=history[history.length-1];
+  for(let i=0;i<history.length-1;i++) if(history[i]===last) predicted[history[i+1]]+=1.8*Math.pow(0.975,history.length-2-i);
+  if(history.length>=2){const previous=history[history.length-2];for(let i=0;i<history.length-2;i++) if(history[i]===previous&&history[i+1]===last) predicted[history[i+2]]+=2.6*Math.pow(0.98,history.length-3-i);}
+  if(randomInt(100)<32) return GAME_RPS_CHOICES[randomInt(3)];
+  const total=GAME_RPS_CHOICES.reduce((sum,c)=>sum+predicted[c],0), expected={};
+  for(const computer of GAME_RPS_CHOICES) expected[computer]=GAME_RPS_CHOICES.reduce((score,player)=>{
+    const probability=predicted[player]/total;
+    if(GAME_RPS_BEATS[computer]===player) return score+probability;
+    if(GAME_RPS_BEATS[player]===computer) return score-probability;
+    return score;
+  },0);
+  const best=Math.max(...Object.values(expected));
+  const replies=GAME_RPS_CHOICES.filter(choice=>Math.abs(expected[choice]-best)<1e-9);
+  return replies[randomInt(replies.length)];
+}
+function publicGameSession(row,state) { return {id:row.id,gameType:row.game_type,...state}; }
+async function advanceServerGame(db,user,request,path) {
+  if(!path.startsWith('/api/games/')) return null;
+  if(request.method==='POST'&&path==='/api/games/start'){
+    validateWriteOrigin(request);
+    const body=await readJson(request), gameType=String(body.gameType||'');
+    if(!['rps','tic'].includes(gameType)) throw new HttpError(400,'نوع بازی معتبر نیست.');
+    const active=await db.prepare("SELECT id FROM game_sessions WHERE user_id=? AND game_type=? AND status='playing' ORDER BY created_at DESC LIMIT 1").bind(user.id,gameType).first();
+    if(active) throw new HttpError(409,'یک مسابقه فعال از این نوع داری؛ آن را ادامه بده.',{matchId:active.id});
+    const id=randomToken(16), now=new Date().toISOString();
+    const state=gameType==='rps'?{round:1,player:0,bot:0,draws:0,history:[],rounds:[],finished:false,result:null}:{board:Array(9).fill(''),moves:0,finished:false,result:null};
+    await db.prepare("INSERT INTO game_sessions (id,user_id,game_type,state_json,status,created_at,updated_at) VALUES (?,?,?,?,'playing',?,?)").bind(id,user.id,gameType,JSON.stringify(state),now,now).run();
+    return json({ok:true,match:publicGameSession({id,game_type:gameType},state)});
+  }
+  if(request.method==='GET'&&path==='/api/games/active'){
+    const gameType=new URL(request.url).searchParams.get('gameType');
+    if(!['rps','tic'].includes(gameType||'')) throw new HttpError(400,'نوع بازی معتبر نیست.');
+    const row=await db.prepare("SELECT id,game_type,state_json FROM game_sessions WHERE user_id=? AND game_type=? AND status='playing' ORDER BY created_at DESC LIMIT 1").bind(user.id,gameType).first();
+    return json({ok:true,match:row?publicGameSession(row,JSON.parse(row.state_json)):null});
+  }
+  if(request.method==='POST'&&path==='/api/games/move'){
+    validateWriteOrigin(request);
+    const body=await readJson(request), matchId=String(body.matchId||'');
+    if(!/^[0-9a-f]{32}$/i.test(matchId)) throw new HttpError(400,'شناسه مسابقه معتبر نیست.');
+    const row=await db.prepare("SELECT id,game_type,state_json,status FROM game_sessions WHERE id=? AND user_id=? LIMIT 1").bind(matchId,user.id).first();
+    if(!row) throw new HttpError(404,'مسابقه پیدا نشد.');
+    if(row.status!=='playing') throw new HttpError(409,'این مسابقه قبلاً به پایان رسیده است.');
+    let state; try{state=JSON.parse(row.state_json);}catch(_){throw new HttpError(500,'وضعیت مسابقه قابل خواندن نیست.');}
+    let lastRound=null, finalResult=null;
+    if(row.game_type==='rps'){
+      const choice=String(body.choice||'');
+      if(!GAME_RPS_CHOICES.includes(choice)) throw new HttpError(400,'انتخاب سنگ، کاغذ یا قیچی معتبر نیست.');
+      const computer=gameRpsBotChoice(state.history||[]);
+      const outcome=choice===computer?'draw':GAME_RPS_BEATS[choice]===computer?'win':'lose';
+      if(outcome==='win') state.player++; else if(outcome==='lose') state.bot++; else state.draws++;
+      const round=Number(state.round)||1;
+      lastRound={player:choice,bot:computer,outcome,round,text:outcome==='win'?'این دور را بردی؛ یک امتیاز گرفتی.':outcome==='lose'?'این دور را رایانه برد؛ یک امتیاز گرفت.':'مساوی؛ این دور امتیازی نداشت.'};
+      state.history=[...(state.history||[]),choice].slice(-120); state.rounds=[...(state.rounds||[]),{player:choice,bot:computer,outcome}];
+      if(state.player>=3||state.bot>=3){state.finished=true;state.result=state.player===3?'win':'lose';finalResult=state.result;} else state.round=round+1;
+    }else if(row.game_type==='tic'){
+      const index=Number(body.index);
+      if(!Number.isInteger(index)||index<0||index>8||state.board[index]) throw new HttpError(400,'خانه انتخاب‌شده معتبر یا خالی نیست.');
+      state.board[index]='X';state.moves++;
+      if(gameTicWinner(state.board)==='X'){state.finished=true;state.result='win';finalResult='win';}
+      else if(state.board.every(Boolean)){state.finished=true;state.result='draw';finalResult='draw';}
+      else{
+        const botIndex=gameTicBotMove(state.board); if(botIndex>=0){state.board[botIndex]='O';state.moves++;}
+        if(gameTicWinner(state.board)==='O'){state.finished=true;state.result='lose';finalResult='lose';}
+        else if(state.board.every(Boolean)){state.finished=true;state.result='draw';finalResult='draw';}
+      }
+    }else throw new HttpError(400,'نوع مسابقه پشتیبانی نمی‌شود.');
+    const now=new Date().toISOString(), nextStatus=state.finished?'finished':'playing';
+    const statements=[db.prepare("UPDATE game_sessions SET state_json=?,status=?,updated_at=? WHERE id=? AND user_id=? AND status='playing' AND state_json=?").bind(JSON.stringify(state),nextStatus,now,matchId,user.id,row.state_json)];
+    if(finalResult){
+      statements.push(db.prepare("INSERT INTO game_results (user_id,game_type,result,prize,bingo_coins_earned,created_at) SELECT user_id,game_type,?,0,0,? FROM game_sessions WHERE id=? AND status='finished' AND updated_at=?").bind(finalResult,now,matchId,now));
+      statements.push(db.prepare(`UPDATE users SET games_played=games_played+1,wins=wins+CASE WHEN ?='win' THEN 1 ELSE 0 END,points=points+CASE WHEN ?='win' THEN 10 ELSE 0 END WHERE id=(SELECT user_id FROM game_sessions WHERE id=? AND status='finished' AND updated_at=?)`).bind(finalResult,finalResult,matchId,now));
+    }
+    const batch=await db.batch(statements);
+    if(!Number(batch[0]?.meta?.changes||0)) throw new HttpError(409,'حرکت هم‌زمان دیگری ثبت شده است؛ وضعیت مسابقه را دوباره دریافت کن.');
+    const updatedUser=finalResult?await publicUser(db,await db.prepare('SELECT * FROM users WHERE id=?').bind(user.id).first()):null;
+    return json({ok:true,match:publicGameSession(row,state),lastRound,user:updatedUser});
+  }
+  return null;
+}
+
 async function routeRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -958,7 +1067,7 @@ async function routeRequest(request, env) {
   const authResponse = await handleAuth(env.DB, request, path);
   if (authResponse) return authResponse;
 
-  const isProtected = path === '/api/profile' || path === '/api/games/result' || /^\/api\/rooms\//.test(path) || path === '/api/referrals' || path === '/api/support' || path === '/api/tickets' || path === '/api/tournaments/me' || path === '/api/tournaments/register';
+  const isProtected = path === '/api/profile' || path.startsWith('/api/games/') || /^\/api\/rooms\//.test(path) || path === '/api/referrals' || path === '/api/support' || path === '/api/tickets' || path === '/api/tournaments/me' || path === '/api/tournaments/register';
   if (!isProtected) return json({ error: 'مسیر API پیدا نشد.' }, 404);
   const user = await authenticatedUser(env.DB, request);
   if (!user) throw new HttpError(401, 'برای ادامه ابتدا وارد حساب کاربری شو.');
@@ -1007,21 +1116,8 @@ async function routeRequest(request, env) {
     return json({ ok: true, entries: result.results || [], rooms: rooms.results || [] });
   }
 
-  if (request.method === 'POST' && path === '/api/games/result') {
-    validateWriteOrigin(request);
-    const body = await readJson(request);
-    const gameType = String(body.gameType || ''); const result = String(body.result || '');
-    if (!['rps','tic','bingo','memory'].includes(gameType) || !['win','lose','draw'].includes(result)) throw new HttpError(400, 'نتیجه بازی معتبر نیست.');
-    const nowText = new Date().toISOString();
-    await env.DB.batch([
-      env.DB.prepare('INSERT INTO game_results (user_id, game_type, result, prize, bingo_coins_earned, created_at) VALUES (?, ?, ?, 0, 0, ?)').bind(user.id, gameType, result, nowText),
-      env.DB.prepare(`UPDATE users SET games_played = games_played + 1,
-        wins = wins + CASE WHEN ? = 'win' THEN 1 ELSE 0 END,
-        points = points + CASE WHEN ? = 'win' THEN 10 ELSE 0 END WHERE id = ?`).bind(result, result, user.id),
-    ]);
-    const updated = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(user.id).first();
-    return json({ ok: true, user: await publicUser(env.DB, updated) });
-  }
+  const gameResponse = await advanceServerGame(env.DB, user, request, path);
+  if (gameResponse) return gameResponse;
 
   if (request.method === 'POST' && path === '/api/tournaments/register') {
     validateWriteOrigin(request);
