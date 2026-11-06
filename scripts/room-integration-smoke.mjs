@@ -123,6 +123,30 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.equal(snapshot.status, 'waiting');
   assert.deepEqual(snapshot.economics, economics);
 
+  // Regression: logging out after a card purchase must not remove the paid
+  // entry from the shared room. A second account must see the global counts,
+  // and the first account must recover only its own cards after signing back in.
+  await request('/api/auth/logout', { account: accounts[0], method: 'POST', body: {} });
+  const afterLogoutFromOtherAccount = await roomFor(accounts[1], roomId);
+  assert.equal(afterLogoutFromOtherAccount.playerCount, 4,
+    roomId + ': logout must not remove a purchased player from the shared queue');
+  assert.equal(afterLogoutFromOtherAccount.cardCount, 16,
+    roomId + ': logout must not remove purchased cards from the shared queue');
+  const reloginResponse = await fetch(baseUrl + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin, accept: 'application/json' },
+    body: JSON.stringify({ email: accounts[0].email, password }),
+  });
+  const reloginData = await reloginResponse.json().catch(() => ({}));
+  assert.equal(reloginResponse.status, 200,
+    roomId + ': first player must be able to sign back in: ' + (reloginData.error || ''));
+  accounts[0].cookie = (reloginResponse.headers.get('set-cookie') || '').split(';', 1)[0];
+  const afterRelogin = await roomFor(accounts[0], roomId);
+  assert.equal(afterRelogin.joined, true, roomId + ': paid entry must survive logout and login');
+  assert.equal(afterRelogin.myCards.length, 4, roomId + ': own cards must be restored after login');
+  assert.equal(afterRelogin.playerCount, 4);
+  assert.equal(afterRelogin.cardCount, 16);
+
   // A purchased place cannot be cancelled or refunded.
   const beforeLeave = Number((await accountMe(accounts[0])).balance);
   const leaveResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/leave', {
