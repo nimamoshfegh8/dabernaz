@@ -188,7 +188,7 @@ assert.equal(finishedRoom.finance.siteCommission, 30000, 'commission must be the
 const commissionRows = execFileSync('wrangler', [
   'd1', 'execute', 'dabernaz-ci', '--local',
   '--persist-to', '.wrangler/test-state',
-  '--command', "SELECT COUNT(*) AS rounds, SUM(site_commission) AS total_commission FROM room_finances WHERE round_id = '" + finishedRoom.roundId + "'",
+  '--command', "SELECT COUNT(*) AS rounds, SUM(site_commission) AS total_commission FROM room_finances WHERE room_id = 'room5000'",
 ], { encoding: 'utf8' });
 assert.match(commissionRows, /30000/, 'completed round commission must be saved in the D1 ledger');
 
