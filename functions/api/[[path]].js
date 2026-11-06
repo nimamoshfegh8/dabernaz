@@ -153,21 +153,6 @@ async function ensureSchema(db) {
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
 
-  const roomFinanceInfo = await db.prepare('PRAGMA table_info(room_finances)').all();
-  const roomFinanceColumns = new Set((roomFinanceInfo.results || []).map((item) => item.name));
-  const roomFinanceAdditions = [
-    ['line_winners_json', "TEXT NOT NULL DEFAULT '[]'"],
-    ['full_winners_json', "TEXT NOT NULL DEFAULT '[]'"],
-  ];
-  for (const [name, definition] of roomFinanceAdditions) {
-    if (!roomFinanceColumns.has(name)) {
-      try { await db.prepare(`ALTER TABLE room_finances ADD COLUMN ${name} ${definition}`).run(); }
-      catch (error) {
-        if (!String(error?.message || error).toLowerCase().includes('duplicate column')) throw error;
-      }
-    }
-  }
-
   const info = await db.prepare('PRAGMA table_info(users)').all();
   const columns = new Set((info.results || []).map((item) => item.name));
   const additions = [
@@ -275,9 +260,7 @@ async function ensureSchema(db) {
     await db.prepare(`INSERT INTO tournament_rooms (tournament_type, capacity, registered_count, status, updated_at)
       VALUES (?, 30, (SELECT COUNT(*) FROM tournament_entries WHERE tournament_type = ? AND status = 'registered'),
         CASE WHEN (SELECT COUNT(*) FROM tournament_entries WHERE tournament_type = ? AND status = 'registered') >= 30 THEN 'full' ELSE 'registration' END, ?)
-      ON CONFLICT(tournament_type) DO UPDATE SET registered_count = excluded.registered_count,
-        status = CASE WHEN excluded.registered_count >= tournament_rooms.capacity THEN 'full' ELSE 'registration' END,
-        updated_at = excluded.updated_at`).bind(type, type, type, tournamentNow).run();
+      ON CONFLICT(tournament_type) DO NOTHING`).bind(type, type, type, tournamentNow).run();
   }
   bootstrappedBindings.add(db);
 }
