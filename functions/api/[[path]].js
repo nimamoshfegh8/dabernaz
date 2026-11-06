@@ -448,6 +448,9 @@ async function loadRoom(db, roomId) {
       room.entryPayments ||= {};
       room.cardCounts ||= {};
       room.queuedCards ||= {};
+      room.winners ||= { line: [], full: [] };
+      if (!Array.isArray(room.winners.line)) room.winners.line = room.winners.line ? [room.winners.line] : [];
+      if (!Array.isArray(room.winners.full)) room.winners.full = room.winners.full ? [room.winners.full] : [];
       room.roundId ??= null;
       room.totalPlayers ||= 0;
       room.totalCards ||= 0;
