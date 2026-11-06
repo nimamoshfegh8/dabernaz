@@ -341,21 +341,9 @@ async function handleAuth(db, request, path) {
     const token = parseCookies(request).dabernaz_session;
     if (token && /^[0-9a-f]{64}$/i.test(token)) {
       const hash = await sha256Hex(token);
-      const session = await db.prepare('SELECT user_id FROM auth_sessions WHERE token_hash = ?').bind(hash).first();
-      if (session) {
-        const userId = Number(session.user_id);
-        for (const roomId of ROOM_IDS) {
-          await withRoomLock(db, roomId, async () => {
-            const room = await loadRoom(db, roomId);
-            if (room.status === 'waiting') {
-              room.queue = room.queue.filter((id) => Number(id) !== userId);
-              delete room.queuedCards[String(userId)];
-              delete room.cardCounts[String(userId)];
-              await saveRoom(db, room);
-            }
-          }).catch(() => {});
-        }
-      }
+      // Logging out only ends authentication. A purchased room ticket remains
+      // committed to the shared round; it must not disappear from other players'
+      // room counters or be cancelled by switching accounts in the same browser.
       await db.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').bind(hash).run();
     }
     return json({ ok: true }, 200, { 'set-cookie': expiredCookie(request) });
