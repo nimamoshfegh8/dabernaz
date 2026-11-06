@@ -1058,7 +1058,7 @@ async function routeRequest(request, env) {
   // frontend can distinguish "API route is alive" from a D1/migration failure.
   if (request.method === 'GET' && path === '/api/health') {
     if (!env.DB) return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'missing', mode: 'misconfigured' }, 503);
-    return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'bound', mode: 'ready' });
+    return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', binding: 'bound', mode: 'ready' });
   }
 
   if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
