@@ -253,6 +253,16 @@ function roomWinnerBanner() {
   const rows = winnerRow('🏅 برنده یک خط', winners.line) + winnerRow('👑 برنده دبرنای کامل', winners.full);
   return rows ? `<section class="room-winner-banner"><h3>برندگان این سانس</h3>${rows}</section>` : '';
 }
+function recentSessionWinnersMarkup() {
+  const sessions=Array.isArray(roomServerSnapshot?.recentSessions)?roomServerSnapshot.recentSessions:[];
+  if(!sessions.length) return '<div class="empty"><span>🏆</span>هنوز سانس پایان‌یافته‌ای ثبت نشده است.</div>';
+  return sessions.map((session,index)=>{
+    const line=session.line ? escapeHTML(session.line.name||session.line.memberId||'—') : '—';
+    const full=session.full ? escapeHTML(session.full.name||session.full.memberId||'—') : '—';
+    const date=session.finishedAt ? new Date(session.finishedAt).toLocaleString('fa-IR') : '';
+    return '<div class="room-session-result"><div><b>سانس '+faDigits(sessions.length-index)+'</b><small>'+escapeHTML(date)+'</small></div><span>🏅 '+line+'</span><span>👑 '+full+'</span></div>';
+  }).join('');
+}
 function renderRoomPurchasePage() {
   const room=currentRoomConfig(); const queue=getRoomQueueState();
   const playerCount=Number(queue.playerCount ?? queue.queueCount ?? 0);
@@ -311,7 +321,9 @@ function renderRoomGame() {
     </section>
     <section class="room-game-layout"><div class="room-game-ticket"><div class="room-panel-heading"><div><span class="eyebrow">MY TICKETS</span><h3>کارت‌های من</h3></div><span class="ticket-count-badge">${faDigits(roomCards.length)} کارت</span></div><div id="roomTicketsList" class="room-tickets-list">${roomCards.map(roomCardMarkup).join('')}</div></div>
       <aside class="room-panel stages-panel"><div class="room-panel-heading"><div><span class="eyebrow">WINNING PATTERNS</span><h3>برندگان سانس</h3></div><span class="trophy-mark">🏆</span></div><div class="room-stages-list" id="roomStagesList">${roomStageMarkup()}</div><div class="room-rules-tip"><b>فقط دو برنده ثبت می‌شود</b><p>یک برنده برای یک خط و یک برنده برای کارت کامل؛ نام و شناسه هر نفر در بالای صفحه می‌آید.</p></div></aside>
-    </section>${isFinished?'<button class="btn btn-primary btn-block" data-action="room-back-lobby">بازگشت به اتاق‌ها</button>':''}`;
+    </section>
+    <section class="room-panel"><div class="room-panel-heading"><div><span class="eyebrow">SESSION HISTORY</span><h3>برندگان سانس‌های اخیر</h3></div><span class="trophy-mark">🏆</span></div><div id="recentSessionWinners">${recentSessionWinnersMarkup()}</div></section>
+    ${isFinished?'<button class="btn btn-primary btn-block" data-action="room-back-lobby">بازگشت به اتاق‌ها</button>':''}`;
 }
 async function pollCurrentRoom() {
   if (!currentUser || roomPollBusy) return;
@@ -325,12 +337,19 @@ async function pollCurrentRoom() {
     roomCalledNumbers=Array.isArray(result.room.allCalledNumbers)?result.room.allCalledNumbers:(result.room.calledNumbers||[]);
     roomStages={one:!!result.room.winners?.line,full:!!result.room.winners?.full};
     if (Number.isFinite(Number(result.room.myBingoCoins))) { state.bingoCoins=Math.max(0,Number(result.room.myBingoCoins)); state.coinTransactions=Array.isArray(result.room.myCoinTransactions)?result.room.myCoinTransactions.slice(0,50):state.coinTransactions; saveState(); updateHeader(); }
+    if (result.room.status==='finished' && currentUser) {
+      try {
+        const me=await apiRequest('/api/auth/me',{method:'GET',headers:{}});
+        if(me.user) applyAuthenticatedUser(me.user);
+      } catch (_) {}
+    }
     if (result.room.status==='playing' && result.room.joined && currentPage===roomId) { activeRoomId=roomId; currentPage='roomGame'; render(); }
     else if (currentPage==='roomGame' && result.room.status==='finished') render();
     else if (currentPage===roomId) render();
     if (currentPage==='roomGame') {
       const mount=$('#roomWinnerBannerMount'); if(mount) mount.innerHTML=roomWinnerBanner();
       updateRoomDrawDisplay();
+      const recent=$('#recentSessionWinners'); if(recent) recent.innerHTML=recentSessionWinnersMarkup();
     }
   } catch(error) { if (error.message.includes('وارد حساب')) { currentUser=null; setPage('account'); } else showToast(error.message); }
   finally { roomPollBusy=false; }
