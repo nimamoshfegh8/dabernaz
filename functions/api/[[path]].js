@@ -153,6 +153,21 @@ async function ensureSchema(db) {
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`).run();
 
+  const roomFinanceInfo = await db.prepare('PRAGMA table_info(room_finances)').all();
+  const roomFinanceColumns = new Set((roomFinanceInfo.results || []).map((item) => item.name));
+  const roomFinanceAdditions = [
+    ['line_winners_json', "TEXT NOT NULL DEFAULT '[]'"],
+    ['full_winners_json', "TEXT NOT NULL DEFAULT '[]'"],
+  ];
+  for (const [name, definition] of roomFinanceAdditions) {
+    if (!roomFinanceColumns.has(name)) {
+      try { await db.prepare(`ALTER TABLE room_finances ADD COLUMN ${name} ${definition}`).run(); }
+      catch (error) {
+        if (!String(error?.message || error).toLowerCase().includes('duplicate column')) throw error;
+      }
+    }
+  }
+
   const info = await db.prepare('PRAGMA table_info(users)').all();
   const columns = new Set((info.results || []).map((item) => item.name));
   const additions = [
@@ -533,7 +548,7 @@ async function saveRoom(db, room, awards = []) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(round_id) DO NOTHING`)
         .bind(award.roundId, award.roomId, award.totalPlayers, award.totalCards, award.grossRevenue,
-          award.linePrizePaid, award.fullPrizePaid, award.siteCommission, award.finishedAt, award.createdAt));
+          award.linePrizePaid, award.fullPrizePaid, award.siteCommission, JSON.stringify(award.lineWinners || []), JSON.stringify(award.fullWinners || []), award.finishedAt, award.createdAt));
     } else {
       statements.push(db.prepare('UPDATE users SET bingo_coins = bingo_coins + ? WHERE id = ?').bind(award.amount, award.userId));
       statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
@@ -899,9 +914,13 @@ async function referralSummary(db, userId) {
 }
 
 async function recentWinners(db, limit = 12) {
-  const result = await db.prepare(`SELECT room_id, round_id, total_players, total_cards, line_prize_paid, full_prize_paid, finished_at
+  const result = await db.prepare(`SELECT room_id, round_id, total_players, total_cards, line_prize_paid, full_prize_paid,
+    line_winners_json, full_winners_json, finished_at
     FROM room_finances ORDER BY id DESC LIMIT ?`).bind(limit).all();
-  return result.results || [];
+  return (result.results || []).map((row) => {
+    const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; } };
+    return { ...row, lineWinners: parse(row.line_winners_json), fullWinners: parse(row.full_winners_json) };
+  });
 }
 
 async function routeRequest(request, env) {
@@ -926,7 +945,7 @@ async function routeRequest(request, env) {
   const authResponse = await handleAuth(env.DB, request, path);
   if (authResponse) return authResponse;
 
-  const isProtected = path === '/api/profile' || path === '/api/games/result' || /^\/api\/rooms\//.test(path);
+  const isProtected = path === '/api/profile' || path === '/api/games/result' || /^\/api\/rooms\//.test(path) || path === '/api/referrals' || path === '/api/support' || path === '/api/tickets' || path === '/api/tournaments/me' || path === '/api/tournaments/register';
   if (!isProtected) return json({ error: 'مسیر API پیدا نشد.' }, 404);
   const user = await authenticatedUser(env.DB, request);
   if (!user) throw new HttpError(401, 'برای ادامه ابتدا وارد حساب کاربری شو.');
