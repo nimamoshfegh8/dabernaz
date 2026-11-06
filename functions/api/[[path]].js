@@ -1,10 +1,10 @@
 /* Dabernaz Cloudflare Pages Function: authentication, D1 accounts and live Daberna rooms. */
 const CAPACITY = 30;
 const ROOM_ECONOMICS = Object.freeze({
-  room5000: { price: 5000, linePrize: 20000, fullPrize: 115000, commission: 15000 },
-  room10000: { price: 10000, linePrize: 40000, fullPrize: 230000, commission: 30000 },
-  room20000: { price: 20000, linePrize: 80000, fullPrize: 460000, commission: 60000 },
-  room50000: { price: 50000, linePrize: 200000, fullPrize: 1150000, commission: 150000 },
+  room5000: { price: 5000, linePrize: 20000, fullPrize: 115000, commissionMode: 'revenue_minus_prizes' },
+  room10000: { price: 10000, linePrize: 40000, fullPrize: 230000, commissionMode: 'revenue_minus_prizes' },
+  room20000: { price: 20000, linePrize: 80000, fullPrize: 460000, commissionMode: 'revenue_minus_prizes' },
+  room50000: { price: 50000, linePrize: 200000, fullPrize: 1150000, commissionMode: 'revenue_minus_prizes' },
 });
 const DRAW_INTERVAL_MS = 3000;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
@@ -202,6 +202,20 @@ async function ensureSchema(db) {
       token TEXT NOT NULL,
       expires_at INTEGER NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS room_finances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      round_id TEXT NOT NULL UNIQUE,
+      room_id TEXT NOT NULL,
+      total_players INTEGER NOT NULL,
+      total_cards INTEGER NOT NULL,
+      gross_revenue INTEGER NOT NULL,
+      line_prize_paid INTEGER NOT NULL,
+      full_prize_paid INTEGER NOT NULL,
+      site_commission INTEGER NOT NULL,
+      finished_at TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_room_finances_room_created ON room_finances(room_id, id DESC)`,
   ];
   for (const sql of statements) await db.prepare(sql).run();
   bootstrappedBindings.add(db);
@@ -423,6 +437,14 @@ function newRoom(roomId) {
     players: [],
     calledNumbers: [],
     winners: { line: null, full: null },
+    roundId: null,
+    totalPlayers: 0,
+    totalCards: 0,
+    grossRevenue: 0,
+    linePrizePaid: 0,
+    fullPrizePaid: 0,
+    siteCommission: 0,
+    commissionFinalized: false,
     startedAt: null,
     finishedAt: null,
     nextDrawAt: null,
@@ -438,6 +460,14 @@ async function loadRoom(db, roomId) {
       room.entryPayments ||= {};
       room.cardCounts ||= {};
       room.queuedCards ||= {};
+      room.roundId ??= null;
+      room.totalPlayers ||= 0;
+      room.totalCards ||= 0;
+      room.grossRevenue ||= 0;
+      room.linePrizePaid ||= 0;
+      room.fullPrizePaid ||= 0;
+      room.siteCommission ||= 0;
+      room.commissionFinalized ||= false;
       return room;
     }
     catch (error) {
@@ -460,6 +490,13 @@ async function saveRoom(db, room, awards = []) {
       statements.push(db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(award.amount, award.userId));
       statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
         VALUES (?, 'balance', ?, ?, ?)`).bind(award.userId, award.amount, award.description, award.createdAt));
+    } else if (award.kind === 'room_commission') {
+      statements.push(db.prepare(`INSERT INTO room_finances
+        (round_id, room_id, total_players, total_cards, gross_revenue, line_prize_paid, full_prize_paid, site_commission, finished_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(round_id) DO NOTHING`)
+        .bind(award.roundId, award.roomId, award.totalPlayers, award.totalCards, award.grossRevenue,
+          award.linePrizePaid, award.fullPrizePaid, award.siteCommission, award.finishedAt, award.createdAt));
     } else {
       statements.push(db.prepare('UPDATE users SET bingo_coins = bingo_coins + ? WHERE id = ?').bind(award.amount, award.userId));
       statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
@@ -567,6 +604,14 @@ async function startRoom(db, room) {
   }
   if (players.length < CAPACITY) throw new HttpError(409, 'تعداد حساب‌های معتبر اتاق به ۳۰ نفر نرسیده است.');
   room.players = players;
+  room.totalPlayers = players.length;
+  room.totalCards = players.reduce((total, player) => total + player.cards.length, 0);
+  room.grossRevenue = Object.values(room.entryPayments || {}).reduce((total, amount) => total + Math.max(0, Number(amount) || 0), 0);
+  room.roundId = randomToken(16);
+  room.linePrizePaid = 0;
+  room.fullPrizePaid = 0;
+  room.siteCommission = 0;
+  room.commissionFinalized = false;
   room.queue = [];
   room.queuedCards = {};
   room.cardCounts = {};
@@ -605,7 +650,10 @@ function advanceRoom(room) {
           if (lineComplete(card, called)) {
             room.winners.line = { name: player.name, memberId: player.memberId, number, at: Math.floor(Date.now() / 1000) };
             const prize = ROOM_ECONOMICS[room.id]?.linePrize || 0;
-            if (prize) awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه یک خط دبرنا', createdAt: new Date().toISOString() });
+            if (prize) {
+              room.linePrizePaid = prize;
+              awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه یک خط دبرنا', createdAt: new Date().toISOString() });
+            }
             break outerLine;
           }
         }
@@ -617,7 +665,10 @@ function advanceRoom(room) {
           if (fullComplete(card, called)) {
             room.winners.full = { name: player.name, memberId: player.memberId, number, at: Math.floor(Date.now() / 1000) };
             const prize = ROOM_ECONOMICS[room.id]?.fullPrize || 0;
-            if (prize) awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه دبرنای کامل', createdAt: new Date().toISOString() });
+            if (prize) {
+              room.fullPrizePaid = prize;
+              awards.push({ kind:'balance', userId: player.userId, amount: prize, description: 'جایزه دبرنای کامل', createdAt: new Date().toISOString() });
+            }
             break outerFull;
           }
         }
@@ -631,6 +682,32 @@ function advanceRoom(room) {
       room.nextDrawAt = null;
     }
   }
+  if (room.status === 'finished' && room.roundId && !room.commissionFinalized) {
+    const grossRevenue = Math.max(0, Number(room.grossRevenue) || 0);
+    const linePrizePaid = Math.max(0, Number(room.linePrizePaid) || 0);
+    const fullPrizePaid = Math.max(0, Number(room.fullPrizePaid) || 0);
+    const siteCommission = grossRevenue - linePrizePaid - fullPrizePaid;
+    if (siteCommission < 0) {
+      throw new HttpError(500, 'جمع جوایز از درآمد کارت‌های این سانس بیشتر شده است؛ ثبت کمیسیون متوقف شد.');
+    }
+    room.siteCommission = siteCommission;
+    room.commissionFinalized = true;
+    const now = new Date().toISOString();
+    awards.push({
+      kind: 'room_commission',
+      roundId: room.roundId,
+      roomId: room.id,
+      totalPlayers: Number(room.totalPlayers) || room.players.length,
+      totalCards: Number(room.totalCards) || room.players.reduce((total, player) => total + (player.cards?.length || 0), 0),
+      grossRevenue,
+      linePrizePaid,
+      fullPrizePaid,
+      siteCommission,
+      finishedAt: room.finishedAt ? new Date(room.finishedAt * 1000).toISOString() : now,
+      createdAt: now,
+    });
+    changed = true;
+  }
   return { changed, awards };
 }
 
@@ -643,6 +720,15 @@ async function publicRoom(db, room, userId) {
     status: room.status,
     capacity: CAPACITY,
     economics: ROOM_ECONOMICS[room.id] || null,
+    finance: room.roundId ? {
+      totalPlayers: Number(room.totalPlayers) || room.players.length,
+      totalCards: Number(room.totalCards) || room.players.reduce((total, player) => total + (player.cards?.length || 0), 0),
+      grossRevenue: Number(room.grossRevenue) || 0,
+      linePrizePaid: Number(room.linePrizePaid) || 0,
+      fullPrizePaid: Number(room.fullPrizePaid) || 0,
+      siteCommission: room.commissionFinalized ? Number(room.siteCommission) || 0 : null,
+      finalized: !!room.commissionFinalized,
+    } : null,
     queueCount: room.status === 'waiting' ? room.queue.length : room.players.length,
     players: room.players.map((player) => ({ name: player.name, memberId: player.memberId })),
     calledNumbers: room.calledNumbers.slice(-15),
