@@ -1,6 +1,8 @@
 'use strict';
 
-const CACHE_NAME = 'dabernaz-shell-v1';
+// The service worker must not pin old app.js/styles.css after a Pages deployment.
+// Core code is network-first; cached copies are used only when the device is offline.
+const CACHE_NAME = 'dabernaz-shell-v2';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -28,6 +30,18 @@ self.addEventListener('activate', event => {
   })());
 });
 
+async function networkFirst(request, cacheKey = request) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    // Bypass the browser HTTP cache as well as the service-worker cache.
+    const response = await fetch(request, { cache: 'no-store' });
+    if (response && response.ok) await cache.put(cacheKey, response.clone());
+    return response;
+  } catch (_) {
+    return (await cache.match(cacheKey)) || Response.error();
+  }
+}
+
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
@@ -35,30 +49,23 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
 
+  // HTML, JavaScript and CSS must reflect the most recent Cloudflare deployment.
   if (request.mode === 'navigate') {
-    event.respondWith((async () => {
-      try {
-        const response = await fetch(request);
-        if (response && response.ok) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put('./index.html', response.clone());
-        }
-        return response;
-      } catch (_) {
-        return (await caches.match('./index.html')) || Response.error();
-      }
-    })());
+    event.respondWith(networkFirst(request, './index.html'));
+    return;
+  }
+  if (request.destination === 'script' || request.destination === 'style') {
+    event.respondWith(networkFirst(request));
     return;
   }
 
-  if (['script', 'style', 'image', 'font'].includes(request.destination)) {
+  // Images and fonts may remain cache-first for faster repeat visits.
+  if (request.destination === 'image' || request.destination === 'font') {
     event.respondWith((async () => {
-      const cached = await caches.match(request);
+      const cache = await caches.open(CACHE_NAME);
+      const cached = await cache.match(request);
       const network = fetch(request).then(async response => {
-        if (response && response.ok) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put(request, response.clone());
-        }
+        if (response && response.ok) await cache.put(request, response.clone());
         return response;
       });
       return cached || network;
