@@ -347,21 +347,60 @@ assert.equal(duplicateTournament.status, 409, 'duplicate tournament entry must b
 assert.equal(Number((await accountMe(accounts[0])).bingoCoins), Number(tournamentBalance.bingoCoins),
   'duplicate tournament entry must not deduct BGC');
 
-// Mini-game completion writes a result row and increments official account counters.
+// Client-supplied outcomes are rejected; only server-computed game sessions count.
 const statsBefore = await accountMe(accounts[0]);
-await request('/api/games/result', {
-  account: accounts[0], method: 'POST', body: { gameType: 'rps', result: 'win' },
+const forgedResult = await fetch(baseUrl + '/api/games/result', {
+  method: 'POST',
+  headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+  body: JSON.stringify({ gameType: 'rps', result: 'win' }),
 });
-await request('/api/games/result', {
-  account: accounts[0], method: 'POST', body: { gameType: 'tic', result: 'draw' },
-});
+assert.equal(forgedResult.status, 405, 'self-reported game outcomes must not be accepted');
+assert.equal(Number((await accountMe(accounts[0])).stats.gamesPlayed), Number(statsBefore.stats.gamesPlayed),
+  'forged outcomes must not change the account stats');
+
+// RPS server match owns the score and opponent choice; keep playing until a best-of-three result.
+let rpsMatch = (await request('/api/games/start', {
+  account: accounts[0], method: 'POST', body: { gameType: 'rps' },
+})).match;
+assert.ok(rpsMatch.id);
+const activeRps = await request('/api/games/active?gameType=rps', { account: accounts[0] });
+assert.equal(activeRps.match.id, rpsMatch.id, 'active RPS match must survive reload');
+for (let attempt = 0; attempt < 40 && !rpsMatch.finished; attempt++) {
+  const moved = await request('/api/games/move', {
+    account: accounts[0], method: 'POST',
+    body: { matchId: rpsMatch.id, choice: 'rock' },
+  });
+  assert.equal(moved.lastRound.player, 'rock');
+  assert.ok(['rock','paper','scissors'].includes(moved.lastRound.bot));
+  rpsMatch = moved.match;
+}
+assert.equal(rpsMatch.finished, true, 'server must finish best-of-three RPS');
+assert.ok(['win','lose'].includes(rpsMatch.result));
+
+// Tic-tac-toe server match validates legal moves and determines bot replies + final result.
+let ticMatch = (await request('/api/games/start', {
+  account: accounts[0], method: 'POST', body: { gameType: 'tic' },
+})).match;
+assert.ok(ticMatch.id);
+const activeTic = await request('/api/games/active?gameType=tic', { account: accounts[0] });
+assert.equal(activeTic.match.id, ticMatch.id);
+for (let attempt = 0; attempt < 9 && !ticMatch.finished; attempt++) {
+  const index = ticMatch.board.findIndex(value => !value);
+  assert.ok(index >= 0);
+  const moved = await request('/api/games/move', {
+    account: accounts[0], method: 'POST', body: { matchId: ticMatch.id, index },
+  });
+  ticMatch = moved.match;
+}
+assert.equal(ticMatch.finished, true, 'tic-tac-toe must finish based on server moves');
+assert.ok(['win','lose','draw'].includes(ticMatch.result));
 const statsAfter = await accountMe(accounts[0]);
 assert.equal(Number(statsAfter.stats.gamesPlayed), Number(statsBefore.stats.gamesPlayed) + 2);
-assert.equal(Number(statsAfter.stats.wins), Number(statsBefore.stats.wins) + 1);
-assert.equal(Number(statsAfter.stats.points), Number(statsBefore.stats.points) + 10);
+assert.equal(Number(statsAfter.stats.wins), Number(statsBefore.stats.wins) + (rpsMatch.result === 'win' ? 1 : 0) + (ticMatch.result === 'win' ? 1 : 0));
+assert.equal(Number(statsAfter.stats.points), Number(statsBefore.stats.points) + ((rpsMatch.result === 'win' ? 1 : 0) + (ticMatch.result === 'win' ? 1 : 0)) * 10);
 
 for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
 
-console.log('PASS: Daberna capacity, wallet debits, simultaneous winners, prize splits and winner history; referrals and milestone rewards; support ticket create/read; tournament queue registration and duplicate protection; mini-game history and official stats.');
+console.log('PASS: Daberna capacity, wallet debits, simultaneous winners, prize splits and winner history; referrals and milestone rewards; support ticket create/read; tournament queue registration and duplicate protection; server-authoritative RPS and tic-tac-toe with forged-result rejection.');
