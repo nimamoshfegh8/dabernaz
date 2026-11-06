@@ -41,10 +41,10 @@ let currentPage = 'home';
 let toastTimer = null;
 let bingoGame = null;
 const ROOM_CONFIGS = [
-  { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrize:20000, fullPrize:115000, commission:15000 },
-  { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrize:40000, fullPrize:230000, commission:30000 },
-  { id:'room20000', price:20000, label:'۲۰,۰۰۰', code:'DB-20000', linePrize:80000, fullPrize:460000, commission:60000 },
-  { id:'room50000', price:50000, label:'۵۰,۰۰۰', code:'DB-50000', linePrize:200000, fullPrize:1150000, commission:150000 }
+  { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrize:20000, fullPrize:115000, commissionMode:'revenue_minus_prizes' },
+  { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrize:40000, fullPrize:230000, commissionMode:'revenue_minus_prizes' },
+  { id:'room20000', price:20000, label:'۲۰,۰۰۰', code:'DB-20000', linePrize:80000, fullPrize:460000, commissionMode:'revenue_minus_prizes' },
+  { id:'room50000', price:50000, label:'۵۰,۰۰۰', code:'DB-50000', linePrize:200000, fullPrize:1150000, commissionMode:'revenue_minus_prizes'0 }
 ];
 function currentRoomConfig() { const id = currentPage === 'roomGame' ? activeRoomId : currentPage; return ROOM_CONFIGS.find(room => room.id === id) || ROOM_CONFIGS[0]; }
 const ROOM_CAPACITY = 30;
@@ -254,7 +254,7 @@ function renderRoomPurchasePage() {
   const waiting=queue.status==='waiting';
   return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}`, 'وارد صف بازیکنان واقعی شو؛ بازی با تکمیل ظرفیت به‌صورت خودکار شروع می‌شود.', 'DABERNAZ · LIVE ROOM')}
   <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
-  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>حداکثر ۴ کارت برای هر بازیکن</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div><div><b>🏛️ ${faDigits(room.commission)} تومان</b><small>کمیسیون سایت</small></div></section>
+  <section class="room-info-strip room-prize-strip"><div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>حداکثر ۴ کارت برای هر بازیکن</small></div><div><b>🏅 یک خط ${faDigits(room.linePrize)} تومان</b><small>جایزه خطی</small></div><div><b>👑 کامل ${faDigits(room.fullPrize)} تومان</b><small>جایزه کامل</small></div><div><b>🏛️ پول باقیمانده</b><small>پس از پرداخت جوایز هر دور بازی</small></div></section>
   <section class="purchase-wait-hero"><div class="purchase-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
     <div class="purchase-box"><div class="purchase-box-top"><span class="live-dot"></span> سالن آنلاین <b>${room.code}</b></div>
       <small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${joined||selectedCount<=1?'disabled':''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${joined||selectedCount>=4?'disabled':''}>+</button></div>
