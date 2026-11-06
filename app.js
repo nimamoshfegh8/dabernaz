@@ -201,7 +201,7 @@ function renderGames() {
       <div class="games-lobby-callout"><small>بازی گروهی ۳۰ کارتی</small><h2>شروع خودکار!</h2><p>با ورود به صف، پس از تکمیل ۳۰ کارت خریداری‌شده، قرعه‌کشی به‌صورت خودکار آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
       <div class="games-lobby-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
       <div class="games-lobby-features">
-        <div><span>▤</span><p>ظرفیت هر اتاق<strong>۳۰ بازیکن</strong></p></div>
+        <div><span>▤</span><p>ظرفیت هر اتاق<strong>۳۰ کارت</strong></p></div>
         <div><span>◷</span><p>شروع بازی<strong>پس از تکمیل ظرفیت</strong></p></div>
         <div><span>🎲</span><p>مهره‌ها<strong>شماره‌های ۱ تا ۹۰</strong></p></div>
         <div><span>♛</span><p>شرط برنده شدن<strong>یک خط و دبرنای کامل</strong></p></div>
@@ -272,11 +272,13 @@ function roomWinnerBanner() {
   return rows ? `<section class="room-winner-banner"><h3>برندگان این سانس</h3>${rows}</section>` : '';
 }
 function recentSessionWinnersMarkup() {
-  const sessions=Array.isArray(roomServerSnapshot?.recentSessions)?roomServerSnapshot.recentSessions:[];
+  const sessions=Array.isArray(roomServerSnapshot?.recentSessions)&&roomServerSnapshot.recentSessions.length?roomServerSnapshot.recentSessions:(Array.isArray(state.roomHistory)?state.roomHistory:[]);
   if(!sessions.length) return '<div class="empty"><span>🏆</span>هنوز سانس پایان‌یافته‌ای ثبت نشده است.</div>';
   return sessions.map((session,index)=>{
-    const line=session.line ? escapeHTML(session.line.name||session.line.memberId||'—') : '—';
-    const full=session.full ? escapeHTML(session.full.name||session.full.memberId||'—') : '—';
+    const lineList=Array.isArray(session.lineWinners)?session.lineWinners:(session.line?(Array.isArray(session.line)?session.line:[session.line]):[]);
+    const fullList=Array.isArray(session.fullWinners)?session.fullWinners:(session.full?(Array.isArray(session.full)?session.full:[session.full]):[]);
+    const line=lineList.length?lineList.map(x=>escapeHTML(x.name||x.memberId||'—')).join('، '):'—';
+    const full=fullList.length?fullList.map(x=>escapeHTML(x.name||x.memberId||'—')).join('، '):'—';
     const date=session.finishedAt ? new Date(session.finishedAt).toLocaleString('fa-IR') : '';
     return '<div class="room-session-result"><div><b>سانس '+faDigits(sessions.length-index)+'</b><small>'+escapeHTML(date)+'</small></div><span>🏅 '+line+'</span><span>👑 '+full+'</span></div>';
   }).join('');
@@ -474,8 +476,8 @@ function renderSettings() {
 const faqs = [
   ['چطور وارد اتاق بازی بشم؟','از صفحه خانه روی «اتاق بازی» بزن یا از کارت بازی مورد علاقه‌ات وارد شو.'],
   ['ورود به اتاق دبرنا هزینه دارد؟','فعلاً ورود به اتاق‌ها رایگان است. تا زمان اتصال درگاه، هیچ پولی دریافت یا جایزه نقدی پرداخت نمی‌شود.'],
-  ['تورنمنت‌ها و کیف پول فعال هستند؟','فعلاً این بخش‌ها به سیستم پرداخت و ثبت‌نام سروری متصل نیستند. حساب کاربری، اتاق دبرنا، سنگ‌کاغذقیچی و دوز فعال‌اند.'],
-  ['اطلاعات حساب من کجا ذخیره می‌شود؟','در استقرار فعلی Cloudflare، اطلاعات حساب و آمار در دیتابیس D1 نگهداری می‌شوند و رمز عبور فقط به‌شکل هش‌شده ذخیره می‌شود. در استقرار PHP/Node روش ذخیره‌سازی مخصوص همان بک‌اند است. تنظیمات ظاهری در مرورگر می‌مانند.'],
+  ['تورنمنت‌ها و کیف پول فعال هستند؟','ثبت‌نام تورنومنت با بینگوکوین روی سرور انجام می‌شود. شارژ و برداشت واقعی کیف پول تا اتصال درگاه پرداخت فعال نیست.'],
+  ['اطلاعات حساب من کجا ذخیره می‌شود؟','در نسخه فعلی Cloudflare، اطلاعات حساب و آمار در دیتابیس D1 نگهداری می‌شوند و رمز عبور فقط به‌شکل هش‌شده ذخیره می‌شود. تنظیمات ظاهری غیرحساس در مرورگر می‌مانند.'],
   ['چطور با پشتیبانی ارتباط بگیرم؟','فرم پایین صفحه را تکمیل کن. پیام روی سرور ذخیره می‌شود و شماره پیگیری دریافت می‌کنی.']
 ];
 function renderSupport() {
@@ -924,7 +926,7 @@ document.addEventListener('click', async event => {
   else if (action === 'memory-card') revealMemory(actionEl);
   else if (action === 'edit-profile') editProfile();
   else if (action === 'settings') setPage('settings');
-  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه Cloudflare رمز عبور با PBKDF2-SHA256 و salt اختصاصی هش می‌شود؛ نسخه PHP از password_hash و نسخه Node از scrypt استفاده می‌کند. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
+  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه فعلی Cloudflare رمز عبور با PBKDF2-SHA256 و salt اختصاصی هش می‌شود. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
   else if (action === 'reset-settings') { state.settings = { ...defaultState.settings }; saveState(); render(); showToast('تنظیمات بازنشانی شد'); }
