@@ -211,7 +211,7 @@ function renderGames() {
 }
 function getRoomQueueState() {
   const room = roomServerSnapshot;
-  return room || { joined:false, queueCount:0, status:'waiting', myCards:[], calledNumbers:[], winners:{line:null,full:null} };
+  return room || { joined:false, queueCount:0, status:'waiting', myCards:[], calledNumbers:[], winners:{line:[],full:[]} };
 }
 function roomCardMarkup(card, index) {
   const rowsDone = card.map(row => row.filter(n => n !== null && roomCalledNumbers.includes(n)).length === 5);
@@ -242,7 +242,14 @@ function roomQueueSlots(count) {
 }
 function roomWinnerBanner() {
   const winners = roomServerSnapshot?.winners || {};
-  const winnerRow = (label, item) => item ? `<div class="room-winner-line"><b>${label}</b><span>${escapeHTML(item.name)} · شناسه ${escapeHTML(item.memberId)}</span></div>` : '';
+  const normalize = (value) => Array.isArray(value) ? value : (value ? [value] : []);
+  const winnerRow = (label, value) => {
+    const items = normalize(value);
+    if (!items.length) return '';
+    const names = items.map((item) => `${escapeHTML(item.name)} · شناسه ${escapeHTML(item.memberId)}`).join('، ');
+    const plural = items.length > 1 ? ` (${faDigits(items.length)} نفر همزمان)` : '';
+    return `<div class="room-winner-line"><b>${label}${plural}</b><span>${names}</span></div>`;
+  };
   const rows = winnerRow('🏅 برنده یک خط', winners.line) + winnerRow('👑 برنده دبرنای کامل', winners.full);
   return rows ? `<section class="room-winner-banner"><h3>برندگان این سانس</h3>${rows}</section>` : '';
 }
