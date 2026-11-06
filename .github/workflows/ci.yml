@@ -36,9 +36,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cat > wrangler.jsonc <<'EOF'
+          {
+            "name": "dabernaz-ci",
+            "compatibility_date": "2026-11-06",
+            "pages_build_output_dir": "./dist",
+            "d1_databases": [
+              {
+                "binding": "DB",
+                "database_name": "dabernaz-ci",
+                "database_id": "00000000-0000-0000-0000-000000000000"
+              }
+            ]
+          }
+          EOF
+
           wrangler pages dev dist --local --ip 127.0.0.1 --port 8788 \
-            --persist-to .wrangler/test-state --config wrangler.test.toml \
-            > /tmp/dabernaz-pages.log 2>&1 &
+            --persist-to .wrangler/test-state > /tmp/dabernaz-pages.log 2>&1 &
           server_pid=$!
           cleanup() {
             kill "$server_pid" 2>/dev/null || true
