@@ -77,6 +77,18 @@ const health = await request('/api/health');
 assert.equal(health.ok, true);
 assert.equal(health.database, 'D1');
 
+const publicTournamentLobby = await request('/api/tournaments');
+assert.equal(publicTournamentLobby.ok, true);
+assert.deepEqual(
+  (publicTournamentLobby.rooms || []).map(room => room.tournament_type).sort(),
+  ['bingo', 'simple'],
+  'public tournament lobby must expose both tournament queues'
+);
+assert.ok(
+  publicTournamentLobby.rooms.every(room => Number.isFinite(Number(room.registered_count)) && Number(room.capacity) > 0),
+  'public tournament lobby must expose aggregate registration counts only'
+);
+
 for (let index = 0; index < 8; index++) {
   const email = 'qa-' + runId + '-' + (index + 1) + '@example.test';
   const registered = await request('/api/auth/register', {
