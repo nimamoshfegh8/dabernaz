@@ -1056,6 +1056,12 @@ async function routeRequest(request, env) {
     return json({ ok: true, rounds: await recentWinners(env.DB) });
   }
 
+  // Public tournament lobby data contains only aggregate counts, never player identities.
+  if (request.method === 'GET' && path === '/api/tournaments') {
+    const rooms = await env.DB.prepare('SELECT tournament_type, capacity, registered_count, status FROM tournament_rooms ORDER BY tournament_type').all();
+    return json({ ok: true, rooms: rooms.results || [] });
+  }
+
   const authResponse = await handleAuth(env.DB, request, path);
   if (authResponse) return authResponse;
 
