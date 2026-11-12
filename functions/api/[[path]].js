@@ -1,10 +1,11 @@
 /* Dabernaz Cloudflare Pages Function: authentication, D1 accounts and live Daberna rooms. */
-const CAPACITY = 30;
+const REGISTRATION_WINDOW_MS = 150000;
+const MAX_CARDS_PER_PLAYER = 5;
 const ROOM_ECONOMICS = Object.freeze({
-  room5000: { price: 5000, linePrize: 20000, fullPrize: 115000, commissionMode: 'revenue_minus_prizes' },
-  room10000: { price: 10000, linePrize: 40000, fullPrize: 230000, commissionMode: 'revenue_minus_prizes' },
-  room20000: { price: 20000, linePrize: 80000, fullPrize: 460000, commissionMode: 'revenue_minus_prizes' },
-  room50000: { price: 50000, linePrize: 200000, fullPrize: 1150000, commissionMode: 'revenue_minus_prizes' },
+  room5000: { price: 5000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
+  room10000: { price: 10000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
+  room20000: { price: 20000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
+  room50000: { price: 50000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
 });
 const DRAW_INTERVAL_MS = 3000;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
@@ -486,27 +487,12 @@ async function handleAuth(db, request, path) {
 
 function newRoom(roomId) {
   return {
-    id: roomId,
-    status: 'waiting',
-    queue: [],
-    cardCounts: {},
-    queuedCards: {},
-    entryPayments: {},
-    players: [],
-    calledNumbers: [],
-    winners: { line: null, full: null },
-    roundId: null,
-    totalPlayers: 0,
-    totalCards: 0,
-    grossRevenue: 0,
-    linePrizePaid: 0,
-    fullPrizePaid: 0,
-    siteCommission: 0,
-    commissionFinalized: false,
-    startedAt: null,
-    finishedAt: null,
-    nextDrawAt: null,
-    updatedAt: Date.now(),
+    id: roomId, status: 'waiting', queue: [], cardCounts: {}, queuedCards: {},
+    queuedNames: {}, entryPayments: {}, players: [], calledNumbers: [],
+    winners: { line: [], full: [] }, roundId: null, totalPlayers: 0, totalCards: 0,
+    grossRevenue: 0, linePrizePaid: 0, fullPrizePaid: 0, siteCommission: 0,
+    commissionFinalized: false, registrationStartedAt: null, registrationDeadline: null,
+    startedAt: null, finishedAt: null, nextDrawAt: null, updatedAt: Date.now(),
   };
 }
 
@@ -515,23 +501,23 @@ async function loadRoom(db, roomId) {
   if (row?.payload) {
     try {
       const room = JSON.parse(row.payload);
-      room.entryPayments ||= {};
-      room.cardCounts ||= {};
-      room.queuedCards ||= {};
+      room.queue ||= []; room.players ||= []; room.entryPayments ||= {};
+      room.cardCounts ||= {}; room.queuedCards ||= {}; room.queuedNames ||= {};
       room.winners ||= { line: [], full: [] };
       if (!Array.isArray(room.winners.line)) room.winners.line = room.winners.line ? [room.winners.line] : [];
       if (!Array.isArray(room.winners.full)) room.winners.full = room.winners.full ? [room.winners.full] : [];
-      room.roundId ??= null;
-      room.totalPlayers ||= 0;
-      room.totalCards ||= 0;
-      room.grossRevenue ||= 0;
-      room.linePrizePaid ||= 0;
-      room.fullPrizePaid ||= 0;
-      room.siteCommission ||= 0;
-      room.commissionFinalized ||= false;
+      room.roundId ??= null; room.totalPlayers ||= 0; room.totalCards ||= 0;
+      room.grossRevenue ||= 0; room.linePrizePaid ||= 0; room.fullPrizePaid ||= 0;
+      room.siteCommission ||= 0; room.commissionFinalized ||= false;
+      room.registrationStartedAt ??= null; room.registrationDeadline ??= null;
+      // One-time migration for a queue created by the previous room rules.
+      if (room.status === 'waiting' && room.queue.length && !room.registrationDeadline) {
+        room.registrationStartedAt = Date.now();
+        room.registrationDeadline = room.registrationStartedAt + REGISTRATION_WINDOW_MS;
+        await saveRoom(db, room);
+      }
       return room;
-    }
-    catch (error) {
+    } catch (error) {
       console.error('[dabernaz-room-state-corrupt]', JSON.stringify({ roomId, message:String(error?.message || error) }));
       throw new HttpError(500, 'اطلاعات اتاق قابل خواندن نیست؛ برای جلوگیری از پاک شدن صف، اتاق بازنشانی نشد.');
     }
@@ -647,41 +633,32 @@ function fullComplete(card, called) {
 }
 
 async function startRoom(db, room) {
-  const ids = room.queue.map(Number);
-  const queuedCardCount = ids.reduce((total, id) => total + Math.max(0, Number(room.cardCounts?.[String(id)]) || 0), 0);
-  if (queuedCardCount < CAPACITY) return false;
-  const placeholders = ids.map(() => '?').join(',');
-  const query = await db.prepare(`SELECT id, username, member_id FROM users WHERE id IN (${placeholders})`).bind(...ids).all();
-  const byId = new Map((query.results || []).map((row) => [Number(row.id), row]));
+  const ids = [...new Set((room.queue || []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) return false;
+  const byId = new Map();
+  // Chunk lookups so a room has no hidden bind-parameter capacity.
+  for (let offset = 0; offset < ids.length; offset += 80) {
+    const chunk = ids.slice(offset, offset + 80);
+    const placeholders = chunk.map(() => '?').join(',');
+    const query = await db.prepare(`SELECT id, username, member_id FROM users WHERE id IN (${placeholders})`).bind(...chunk).all();
+    for (const row of query.results || []) byId.set(Number(row.id), row);
+  }
   const players = [];
   for (const id of ids) {
     const row = byId.get(id);
-    if (!row) continue;
-    players.push({
-      userId: id,
-      name: row.username,
-      memberId: String(row.member_id || ''),
-      cards: room.queuedCards[String(id)] || [makeCard()],
-    });
+    const cards = Array.isArray(room.queuedCards?.[String(id)]) ? room.queuedCards[String(id)] : [];
+    if (row && cards.length) players.push({ userId:id, name:row.username, memberId:String(row.member_id || ''), cards });
   }
-  const actualCardCount = players.reduce((total, player) => total + player.cards.length, 0);
-  if (actualCardCount < CAPACITY) return false;
-  if (actualCardCount > CAPACITY) throw new HttpError(500, 'تعداد کارت‌های اتاق از ظرفیت ۳۰ کارت بیشتر شده است.');
+  const totalCards = players.reduce((sum, player) => sum + player.cards.length, 0);
+  if (!players.length || totalCards < 1) return false;
   room.players = players;
   room.totalPlayers = players.length;
-  room.totalCards = actualCardCount;
-  room.grossRevenue = Object.values(room.entryPayments || {}).reduce((total, amount) => total + Math.max(0, Number(amount) || 0), 0);
+  room.totalCards = totalCards;
+  room.grossRevenue = Object.values(room.entryPayments || {}).reduce((sum, amount) => sum + Math.max(0, Number(amount) || 0), 0);
   room.roundId = randomToken(16);
-  room.linePrizePaid = 0;
-  room.fullPrizePaid = 0;
-  room.siteCommission = 0;
-  room.commissionFinalized = false;
-  room.queue = [];
-  room.queuedCards = {};
-  room.cardCounts = {};
-  room.status = 'playing';
-  room.calledNumbers = [];
-  room.winners = { line: [], full: [] };
+  room.linePrizePaid = 0; room.fullPrizePaid = 0; room.siteCommission = 0; room.commissionFinalized = false;
+  room.queue = []; room.queuedCards = {}; room.queuedNames = {}; room.cardCounts = {};
+  room.status = 'playing'; room.calledNumbers = []; room.winners = { line: [], full: [] };
   room.startedAt = Math.floor(Date.now() / 1000);
   room.finishedAt = null;
   room.nextDrawAt = Date.now() + DRAW_INTERVAL_MS;
@@ -748,7 +725,7 @@ function advanceRoom(room) {
       const lineWinners = collectWinners(lineComplete);
       if (lineWinners.length) {
         room.winners.line = lineWinners;
-        const prize = ROOM_ECONOMICS[room.id]?.linePrize || 0;
+        const prize = Math.floor((Number(room.grossRevenue) || 0) * (Number(ROOM_ECONOMICS[room.id]?.linePrizePercent) || 0) / 100);
         room.linePrizePaid = prize;
         awards.push(...splitPrize(prize, lineWinners, 'سهم جایزه یک خط دبرنا'));
       }
@@ -757,7 +734,7 @@ function advanceRoom(room) {
       const fullWinners = collectWinners(fullComplete);
       if (fullWinners.length) {
         room.winners.full = fullWinners;
-        const prize = ROOM_ECONOMICS[room.id]?.fullPrize || 0;
+        const prize = Math.floor((Number(room.grossRevenue) || 0) * (Number(ROOM_ECONOMICS[room.id]?.fullPrizePercent) || 0) / 100);
         room.fullPrizePaid = prize;
         awards.push(...splitPrize(prize, fullWinners, 'سهم جایزه دبرنای کامل'));
       }
@@ -805,37 +782,43 @@ async function publicRoom(db, room, userId) {
   const me = room.players.find((player) => Number(player.userId) === Number(userId));
   const queued = room.queue.some((id) => Number(id) === Number(userId));
   const account = await db.prepare('SELECT bingo_coins FROM users WHERE id = ?').bind(userId).first();
+  const grossRevenue = room.roundId
+    ? Math.max(0, Number(room.grossRevenue) || 0)
+    : Object.values(room.entryPayments || {}).reduce((sum, amount) => sum + Math.max(0, Number(amount) || 0), 0);
+  const economics = ROOM_ECONOMICS[room.id] || null;
+  const linePrize = economics ? Math.floor(grossRevenue * economics.linePrizePercent / 100) : 0;
+  const fullPrize = economics ? Math.floor(grossRevenue * economics.fullPrizePercent / 100) : 0;
+  const commission = grossRevenue - linePrize - fullPrize;
   return {
-    id: room.id,
-    status: room.status,
-    capacity: CAPACITY,
-    economics: ROOM_ECONOMICS[room.id] || null,
-    finance: room.roundId ? {
-      totalPlayers: Number(room.totalPlayers) || room.players.length,
-      totalCards: Number(room.totalCards) || room.players.reduce((total, player) => total + (player.cards?.length || 0), 0),
-      grossRevenue: Number(room.grossRevenue) || 0,
-      linePrizePaid: Number(room.linePrizePaid) || 0,
-      fullPrizePaid: Number(room.fullPrizePaid) || 0,
-      siteCommission: room.commissionFinalized ? Number(room.siteCommission) || 0 : null,
-      finalized: !!room.commissionFinalized,
+    id:room.id, status:room.status, capacity:null, maxCardsPerPlayer:MAX_CARDS_PER_PLAYER,
+    registrationWindowMs:REGISTRATION_WINDOW_MS,
+    registrationStartedAt:room.registrationStartedAt || null,
+    registrationDeadline:room.registrationDeadline || null,
+    registrationRemainingMs:room.status === 'waiting' && room.registrationDeadline
+      ? Math.max(0, Number(room.registrationDeadline) - Date.now()) : null,
+    economics, grossRevenue, estimatedPrizes:{line:linePrize,full:fullPrize,commission},
+    finance:room.roundId ? {
+      totalPlayers:Number(room.totalPlayers) || room.players.length,
+      totalCards:Number(room.totalCards) || room.players.reduce((sum, player) => sum + (player.cards?.length || 0), 0),
+      grossRevenue, linePrizePaid:Number(room.linePrizePaid) || 0, fullPrizePaid:Number(room.fullPrizePaid) || 0,
+      siteCommission:room.commissionFinalized ? Number(room.siteCommission) || 0 : null,
+      finalized:!!room.commissionFinalized,
     } : null,
-    playerCount: room.status === 'waiting' ? room.queue.length : room.players.length,
-    cardCount: room.status === 'waiting'
-      ? Object.values(room.cardCounts || {}).reduce((total, count) => total + Math.max(0, Number(count) || 0), 0)
-      : (Number(room.totalCards) || room.players.reduce((total, player) => total + (player.cards?.length || 0), 0)),
-    queueCount: room.status === 'waiting' ? room.queue.length : room.players.length,
-    players: room.players.map((player) => ({ name: player.name, memberId: player.memberId })),
-    calledNumbers: room.calledNumbers.slice(-15),
-    allCalledNumbers: room.calledNumbers,
-    drawCount: room.calledNumbers.length,
-    latestNumber: room.calledNumbers.length ? room.calledNumbers[room.calledNumbers.length - 1] : null,
-    winners: room.winners,
-    myCards: me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : []),
-    joined: queued || !!me,
-    startedAt: room.startedAt,
-    finishedAt: room.finishedAt,
-    myBingoCoins: Number(account?.bingo_coins) || 0,
-    myCoinTransactions: await coinHistory(db, userId),
+    playerCount:room.status === 'waiting' ? room.queue.length : room.players.length,
+    cardCount:room.status === 'waiting'
+      ? Object.values(room.cardCounts || {}).reduce((sum, count) => sum + Math.max(0, Number(count) || 0), 0)
+      : (Number(room.totalCards) || room.players.reduce((sum, player) => sum + (player.cards?.length || 0), 0)),
+    queueCount:room.status === 'waiting' ? room.queue.length : room.players.length,
+    players:room.status === 'waiting'
+      ? room.queue.map(id => ({name:room.queuedNames?.[String(id)] || 'بازیکن',memberId:''}))
+      : room.players.map(player => ({name:player.name,memberId:player.memberId})),
+    calledNumbers:room.calledNumbers.slice(-15), allCalledNumbers:room.calledNumbers,
+    drawCount:room.calledNumbers.length,
+    latestNumber:room.calledNumbers.length ? room.calledNumbers[room.calledNumbers.length - 1] : null,
+    winners:room.winners, myCards:me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : []),
+    joined:queued || !!me, startedAt:room.startedAt, finishedAt:room.finishedAt,
+    myBingoCoins:Number(account?.bingo_coins) || 0,
+    myCoinTransactions:await coinHistory(db, userId),
   };
 }
 
@@ -847,79 +830,82 @@ async function handleRoom(db, request, user, path) {
 
   if (request.method === 'GET' && !action) {
     let room = await loadRoom(db, roomId);
-    if (room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now()) {
+    const expired = room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now();
+    const drawDue = room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now();
+    if (expired || drawDue) {
       await withRoomLock(db, roomId, async () => {
         room = await loadRoom(db, roomId);
-        const advanced = advanceRoom(room);
-        if (advanced.changed) await saveRoom(db, room, advanced.awards);
-      }).catch((error) => { if (!(error instanceof HttpError && error.status === 409)) throw error; });
+        let started = false;
+        if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
+          started = await startRoom(db, room);
+        }
+        if (room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now()) {
+          const advanced = advanceRoom(room);
+          if (advanced.changed) await saveRoom(db, room, advanced.awards);
+          else if (started) await saveRoom(db, room);
+        } else if (started) await saveRoom(db, room);
+      }).catch(error => { if (!(error instanceof HttpError && error.status === 409)) throw error; });
       room = await loadRoom(db, roomId);
     }
-    return json({ ok: true, room: await publicRoom(db, room, userId) });
+    return json({ok:true,room:await publicRoom(db,room,userId)});
   }
 
   if (request.method === 'POST' && action === 'join') {
     validateWriteOrigin(request);
     const body = await readJson(request);
-    const requestedCardsCount = Math.max(1, Math.min(4, Math.floor(Number(body.cardsCount) || 1)));
-    const result = await withRoomLock(db, roomId, async () => {
-      let room = await loadRoom(db, roomId);
+    const requested = Math.max(1,Math.min(MAX_CARDS_PER_PLAYER,Math.floor(Number(body.cardsCount)||1)));
+    const result = await withRoomLock(db,roomId,async()=>{
+      let room = await loadRoom(db,roomId);
       const economics = ROOM_ECONOMICS[roomId];
-      if (!economics) throw new HttpError(500, 'تنظیمات مالی این اتاق پیدا نشد.');
-      const advanced = advanceRoom(room);
-      if (advanced.changed) await saveRoom(db, room, advanced.awards);
+      if (!economics) throw new HttpError(500,'تنظیمات مالی این اتاق پیدا نشد.');
+      if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
+        const started = await startRoom(db,room);
+        if (started) await saveRoom(db,room);
+      }
+      if (room.status === 'playing') return {conflict:true,room:await publicRoom(db,room,userId)};
       if (room.status === 'finished') room = newRoom(roomId);
-      if (room.status === 'playing') return { conflict: true, room: await publicRoom(db, room, userId) };
-
-      const userKey = String(userId);
-      const alreadyQueued = room.queue.some((id) => Number(id) === userId);
-      const previouslyOwned = alreadyQueued
-        ? Math.max(0, Number(room.cardCounts?.[userKey]) || room.queuedCards?.[userKey]?.length || 0)
-        : 0;
-      const soldCards = Object.values(room.cardCounts || {}).reduce((total, count) => total + Math.max(0, Number(count) || 0), 0);
-      const remainingCards = Math.max(0, CAPACITY - soldCards);
-      if (remainingCards === 0) throw new HttpError(409, 'ظرفیت ۳۰ کارت این سانس تکمیل شده است.');
-      const cardsCount = Math.min(requestedCardsCount, remainingCards);
-      if (cardsCount < 1) throw new HttpError(409, 'در این اتاق امکان خرید کارت بیشتری وجود ندارد.');
-
+      const key = String(userId);
+      const alreadyQueued = room.queue.some(id=>Number(id)===userId);
+      const owned = alreadyQueued ? Math.max(0,Number(room.cardCounts?.[key])||room.queuedCards?.[key]?.length||0) : 0;
+      const available = Math.max(0,MAX_CARDS_PER_PLAYER-owned);
+      if (!available) throw new HttpError(409,'هر حساب در هر سانس حداکثر ۵ کارت می‌تواند بخرد.');
+      const cardsCount = Math.min(requested,available);
       const totalPrice = economics.price * cardsCount;
-      const debit = await db.prepare('UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?').bind(totalPrice, userId, totalPrice).run();
-      if (!Number(debit.meta?.changes || 0)) throw new HttpError(400, 'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
-
-      const existingCards = Array.isArray(room.queuedCards?.[userKey]) ? room.queuedCards[userKey] : [];
-      room.cardCounts[userKey] = previouslyOwned + cardsCount;
-      room.queuedCards[userKey] = [
-        ...existingCards,
-        ...Array.from({ length: cardsCount }, () => makeCard()),
-      ];
-      room.entryPayments[userKey] = (Math.max(0, Number(room.entryPayments?.[userKey]) || 0)) + totalPrice;
+      const debit = await db.prepare('UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?').bind(totalPrice,userId,totalPrice).run();
+      if (!Number(debit.meta?.changes||0)) throw new HttpError(400,'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
+      const oldCards = Array.isArray(room.queuedCards?.[key]) ? room.queuedCards[key] : [];
+      room.cardCounts[key] = owned + cardsCount;
+      room.queuedCards[key] = [...oldCards,...Array.from({length:cardsCount},()=>makeCard())];
+      room.queuedNames[key] = String(user.username || 'بازیکن');
+      room.entryPayments[key] = (Math.max(0,Number(room.entryPayments?.[key])||0))+totalPrice;
       if (!alreadyQueued) room.queue.push(userId);
-      const newSoldCardCount = soldCards + cardsCount;
-      if (newSoldCardCount === CAPACITY) await startRoom(db, room);
+      if (!room.registrationDeadline) {
+        room.registrationStartedAt = Date.now();
+        room.registrationDeadline = room.registrationStartedAt + REGISTRATION_WINDOW_MS;
+      }
       room.updatedAt = Date.now();
       try {
         await db.batch([
-          db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
-            VALUES (?, 'room_entry', ?, ?, ?)`).bind(userId, -totalPrice, alreadyQueued ? `خرید ${cardsCount} کارت اضافی دبرنا` : `خرید ${cardsCount} کارت دبرنا`, new Date().toISOString()),
-          db.prepare(`INSERT INTO room_states (room_id, payload, updated_at) VALUES (?, ?, ?)
-            ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
-            .bind(room.id, JSON.stringify(room), room.updatedAt),
+          db.prepare(`INSERT INTO transactions (user_id,type,amount,description,created_at) VALUES (?, 'room_entry', ?, ?, ?)`)
+            .bind(userId,-totalPrice,alreadyQueued ? `خرید ${cardsCount} کارت اضافی دبرنا` : `خرید ${cardsCount} کارت دبرنا`,new Date().toISOString()),
+          db.prepare(`INSERT INTO room_states (room_id,payload,updated_at) VALUES (?,?,?)
+            ON CONFLICT(room_id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`)
+            .bind(room.id,JSON.stringify(room),room.updatedAt),
         ]);
-      } catch (error) {
-        await db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(totalPrice, userId).run();
+      } catch(error) {
+        await db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(totalPrice,userId).run();
         throw error;
       }
-      return { room: await publicRoom(db, room, userId) };
+      return {room:await publicRoom(db,room,userId)};
     });
-    if (result.conflict) return json({ error: 'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.', room: result.room }, 409);
-    return json({ ok: true, room: result.room });
+    if (result.conflict) return json({error:'مهلت خرید این سانس تمام شده و بازی آغاز شده است؛ بعد از پایان وارد سانس بعدی شو.',room:result.room},409);
+    return json({ok:true,room:result.room});
   }
-
   if (request.method === 'POST' && action === 'leave') {
     validateWriteOrigin(request);
-    throw new HttpError(409, 'پس از خرید کارت، امکان لغو خرید یا خروج از صف وجود ندارد.');
+    throw new HttpError(409,'پس از خرید کارت، امکان لغو خرید یا خروج از صف وجود ندارد.');
   }
-  return json({ error: 'روش درخواست برای این مسیر پشتیبانی نمی‌شود.' }, 405);
+  return json({error:'روش درخواست برای این مسیر پشتیبانی نمی‌شود.'},405);
 }
 
 async function referralSummary(db, userId) {
