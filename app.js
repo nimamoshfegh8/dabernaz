@@ -239,7 +239,7 @@ function gameCard(id, symbol, name, desc, price, coverClass = '') {
   return `<article class="game-card"><div class="game-cover ${coverClass}">${symbol}</div><h3>${name}</h3><p>${desc}</p><button class="btn btn-primary" data-game="${id}">ورود به بازی</button><div class="price">${price}</div></article>`;
 }
 function roomGameCard() {
-  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>۴ سطح قیمت · مهلت خرید ۲:۳۰ دقیقه</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
+  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>۴ سطح قیمت · حداقل ۵ شرکت‌کننده برای شروع</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
 }
 function renderGames() {
   const tiers = ['red','silver','gold','purple'];
@@ -251,18 +251,19 @@ function renderGames() {
     </header>
 
     <section class="games-lobby-hero">
-      <div class="games-lobby-callout"><small>اتاق با ظرفیت نامحدود</small><h2>شروع خودکار!</h2><p>از اولین خرید کارت، ۲ دقیقه و ۳۰ ثانیه برای خرید و ورود بازیکنان فرصت هست؛ سپس بازی خودکار آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
+      <div class="games-lobby-callout"><small>اتاق با ظرفیت نامحدود</small><h2>شروع خودکار!</h2><p>از اولین خرید کارت، ۲ دقیقه و ۳۰ ثانیه برای خرید و ورود بازیکنان فرصت هست؛ بازی پس از پایان مهلت و با حداقل ۵ شرکت‌کننده آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
       <div class="games-lobby-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
       <div class="games-lobby-features">
         <div><span>▤</span><p>ظرفیت اتاق<strong>نامحدود</strong></p></div>
         <div><span>◷</span><p>مهلت خرید<strong>۲ دقیقه و ۳۰ ثانیه</strong></p></div>
+        <div><span>♟</span><p>حداقل شروع<strong>۵ شرکت‌کننده</strong></p></div>
         <div><span>🎲</span><p>مهره‌ها<strong>شماره‌های ۱ تا ۹۰</strong></p></div>
         <div><span>♛</span><p>شرط برنده شدن<strong>یک خط و دبرنای کامل</strong></p></div>
       </div>
     </section>
 
     <section class="games-purchase-section">
-      <div class="games-section-heading"><div><span class="games-section-symbol">▧</span><h2>انتخاب اتاق</h2></div><p>اتاق را انتخاب کن؛ قیمت کارت، جایزه‌ها و کمیسیون در صفحه همان اتاق نمایش داده می‌شود.</p></div>
+      <div class="games-section-heading"><div><span class="games-section-symbol">▧</span><h2>انتخاب اتاق</h2></div><p>اتاق را انتخاب کن؛ قیمت کارت و مبلغ جایزه‌ها در صفحه همان اتاق نمایش داده می‌شود.</p></div>
       <div class="games-price-grid">${ROOM_CONFIGS.map((room, index) => `<article class="games-price-card tier-${tiers[index]}">
         <div class="games-price-card-art" aria-hidden="true"><span class="mini-bingo-card card-a">BINGO</span><span class="mini-bingo-card card-b">BINGO</span><span class="mini-bingo-card card-c">BINGO</span><span class="mini-bingo-crown">${cardIcons[index]}</span></div>
         <b class="games-price-name">اتاق سطح ${index+1}</b>
@@ -358,7 +359,7 @@ function renderRoomPurchasePage() {
   const collected = Math.max(0, Number(queue.grossRevenue) || 0);
   const lineEstimate = Math.max(0, Number(queue.estimatedPrizes?.line ?? Math.floor(collected * 0.10)) || 0);
   const fullEstimate = Math.max(0, Number(queue.estimatedPrizes?.full ?? Math.floor(collected * 0.75)) || 0);
-  const commissionEstimate = Math.max(0, Number(queue.estimatedPrizes?.commission ?? (collected - lineEstimate - fullEstimate)) || 0);
+  const minPlayersToStart = Math.max(5, Number(queue.minPlayersToStart) || 5);
   const purchaseControls = joined && waiting
     ? `<small>کارت‌های خریداری‌شده</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(ownedCardCount)} از ۵ کارت</b></div>`
     : `<small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${selectedCount <= 1 ? 'disabled' : ''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${selectedCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>+</button></div>`;
@@ -374,17 +375,17 @@ function renderRoomPurchasePage() {
         : joined && waiting
           ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER || timerExpired ? 'disabled' : ''}>${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت تکمیل شده' : timerExpired ? 'مهلت خرید پایان یافته' : 'افزودن و خرید یک کارت'}</button>`
           : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">${queue.status === 'finished' ? 'ورود به سانس بعدی' : 'خرید کارت و ورود به اتاق'}</button>`;
-  const waitingMessage = queue.status === 'playing' ? 'مهلت خرید تمام شده و قرعه‌کشی خودکار در حال اجراست.'
+  const waitingMessage = queue.status === 'playing' ? 'بازی در حال اجراست و قرعه‌کشی خودکار انجام می‌شود.'
     : queue.status === 'finished' ? 'این سانس پایان یافته است؛ برای شرکت در سانس بعدی دوباره کارت بخر.'
-    : registrationStarted ? (timerExpired ? 'مهلت خرید به پایان رسیده؛ بازی در حال شروع است.' : 'تا پایان مهلت خرید و شروع خودکار بازی:')
+    : registrationStarted && playerCount < minPlayersToStart && timerExpired ? `مهلت اولیه تمام شده؛ بازی پس از رسیدن تعداد شرکت‌کنندگان به حداقل ${faDigits(minPlayersToStart)} نفر شروع می‌شود.`
+    : registrationStarted ? (timerExpired ? 'مهلت خرید به پایان رسیده و حداقل شرکت‌کنندگان کامل شده؛ بازی در حال شروع است.' : `تا پایان مهلت خرید و شروع خودکار بازی با حداقل ${faDigits(minPlayersToStart)} شرکت‌کننده:`)
     : 'با اولین خرید کارت، زمان‌سنج ۲ دقیقه و ۳۰ ثانیه‌ای شروع می‌شود.';
-  return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x => x.id === room.id) + 1}`, 'بدون محدودیت تعداد بازیکن و کارت در کل اتاق؛ هر حساب حداکثر ۵ کارت.', 'DABERNAZ · LIVE ROOM')}
+  return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x => x.id === room.id) + 1}`, 'بدون محدودیت تعداد بازیکن و کارت در کل اتاق؛ هر حساب حداکثر ۵ کارت و شروع بازی با حداقل ۵ شرکت‌کننده.', 'DABERNAZ · LIVE ROOM')}
   <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
   <section class="room-info-strip room-prize-strip">
     <div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>قیمت هر کارت</small></div>
-    <div><b>🏅 خطی · ۱۰٪</b><small>از کل مبلغ جمع‌شده</small></div>
-    <div><b>👑 کامل · ۷۵٪</b><small>از کل مبلغ جمع‌شده</small></div>
-    <div><b>💼 کمیسیون · ۱۵٪</b><small>سهم مجموعه</small></div>
+    <div><b>🏅 ${faDigits(lineEstimate)} تومان</b><small>مبلغ جایزه یک خط</small></div>
+    <div><b>👑 ${faDigits(fullEstimate)} تومان</b><small>مبلغ جایزه دبرنای کامل</small></div>
   </section>
   <section class="purchase-wait-hero"><div class="purchase-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
     <div class="purchase-box"><div class="purchase-box-top"><span class="live-dot"></span> سالن آنلاین <b>${room.code}</b></div>
@@ -400,12 +401,11 @@ function renderRoomPurchasePage() {
     </div>
     <div class="purchase-total"><span>💰 کل مبلغ جمع‌شده</span><b id="roomGrossRevenue">${faDigits(collected)} تومان</b></div>
     <div class="wait-stats room-estimated-prizes">
-      <div><b>${faDigits(lineEstimate)} تومان</b><small>برآورد جایزه خطی · ۱۰٪</small></div>
-      <div><b>${faDigits(fullEstimate)} تومان</b><small>برآورد جایزه کامل · ۷۵٪</small></div>
-      <div><b>${faDigits(commissionEstimate)} تومان</b><small>کمیسیون · ۱۵٪</small></div>
+      <div><b>${faDigits(lineEstimate)} تومان</b><small>مبلغ جایزه یک خط</small></div>
+      <div><b>${faDigits(fullEstimate)} تومان</b><small>مبلغ جایزه دبرنای کامل</small></div>
     </div>
     <div class="queue-wait-hint">${joined ? 'کارت‌های تو ثبت شده‌اند و تا پایان مهلت خرید در صف باقی می‌مانند.' : 'با خرید اولین کارت، زمان‌سنج همه بازیکنان شروع می‌شود؛ مهلت با خریدهای بعدی تمدید نمی‌شود.'}</div>
-    <p class="muted-note room-session-note">ظرفیت کلی اتاق و تعداد بازیکنان محدود نیست. هر حساب فقط می‌تواند در هر سانس حداکثر ۵ کارت داشته باشد. اگر چند نفر در یک شماره برنده شوند، سهم همان مرحله به‌طور مساوی بین آن‌ها تقسیم می‌شود.</p>
+    <p class="muted-note room-session-note">ظرفیت کلی اتاق و تعداد بازیکنان محدود نیست. بازی پس از پایان مهلت خرید و با حداقل ۵ شرکت‌کننده شروع می‌شود. هر حساب فقط می‌تواند در هر سانس حداکثر ۵ کارت داشته باشد. اگر چند نفر در یک شماره برنده شوند، مبلغ جایزه همان مرحله به‌طور مساوی بین آن‌ها تقسیم می‌شود.</p>
   </section>
   <section class="room-info-strip"><div><b>🏅 یک خط</b><small>اولین تکمیل ردیف</small></div><div><b>👑 دبرنای کامل</b><small>تکمیل هر ۱۵ عدد کارت</small></div><div><b>🎱 ۹۰ مهره</b><small>اعلام خودکار بدون تکرار</small></div></section>
   <section class="room-panel ticket-selection"><div class="room-panel-heading"><div><span class="eyebrow">YOUR TICKETS</span><h3>کارت‌های تو</h3><p>کارت‌ها هنگام خرید روی سرور ساخته و نگهداری می‌شوند.</p></div><span class="ticket-count-badge" id="roomTicketCount">${faDigits(selectedCount)} کارت</span></div><div class="room-tickets-list" id="roomTicketsList">${joined && roomCards.length ? roomCards.map(roomCardMarkup).join('') : '<div class="empty"><span>🎟️</span>کارت نهایی پس از خرید و ثبت در صف، به‌صورت تصادفی روی سرور ساخته می‌شود.</div>'}</div></section>`;
