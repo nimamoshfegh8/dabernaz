@@ -9,10 +9,10 @@ const password = 'Dabernaz-QA-2026!';
 const accounts = [];
 const startingBalance = 5000000;
 const roomEconomics = {
-  room5000: { price: 5000, linePrize: 20000, fullPrize: 115000, commissionMode: 'revenue_minus_prizes' },
-  room10000: { price: 10000, linePrize: 40000, fullPrize: 230000, commissionMode: 'revenue_minus_prizes' },
-  room20000: { price: 20000, linePrize: 80000, fullPrize: 460000, commissionMode: 'revenue_minus_prizes' },
-  room50000: { price: 50000, linePrize: 200000, fullPrize: 1150000, commissionMode: 'revenue_minus_prizes' },
+  room5000: { price: 5000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
+  room10000: { price: 10000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
+  room20000: { price: 20000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
+  room50000: { price: 50000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
 };
 
 async function request(path, options = {}) {
@@ -113,34 +113,39 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const balancesBeforeBuy = new Map();
   for (const account of accounts) balancesBeforeBuy.set(account.memberId, Number((await accountMe(account)).balance));
 
-  // Four separate accounts first buy one card, then each purchases three additional cards.
-  await Promise.all(accounts.slice(0, 4).map(account => join(account, roomId, 1)));
-  for (let extra = 0; extra < 3; extra++) {
+  // The first successful card purchase opens a fixed 150-second registration window.
+  const firstPurchase = await join(accounts[0], roomId, 1);
+  const firstDeadline = Number(firstPurchase.registrationDeadline);
+  assert.equal(firstDeadline - Number(firstPurchase.registrationStartedAt), 150000);
+  assert.equal(firstPurchase.registrationWindowMs, 150000);
+  assert.equal(firstPurchase.maxCardsPerPlayer, 5);
+  assert.ok(firstPurchase.registrationRemainingMs > 0 && firstPurchase.registrationRemainingMs <= 150000);
+  await Promise.all(accounts.slice(1, 4).map(account => join(account, roomId, 1)));
+  for (let extra = 0; extra < 4; extra++) {
     await Promise.all(accounts.slice(0, 4).map(account => join(account, roomId, 1)));
   }
   let snapshot = await roomFor(accounts[0], roomId);
-  assert.equal(snapshot.capacity, 30);
+  assert.equal(snapshot.capacity, null);
   assert.equal(snapshot.playerCount, 4, roomId + ': four registered players');
   assert.equal(snapshot.queueCount, 4, roomId + ': queue count is players, not cards');
-  assert.equal(snapshot.cardCount, 16, roomId + ': additional card purchases must update shared count');
+  assert.equal(snapshot.cardCount, 20, roomId + ': room accepts 20 sold cards before other players join');
   assert.equal(snapshot.status, 'waiting');
   assert.deepEqual(snapshot.economics, economics);
+  assert.equal(snapshot.registrationDeadline, firstDeadline, roomId + ': subsequent purchases do not extend the timer');
   for (const account of accounts.slice(0, 4)) {
     const accountRoom = await roomFor(account, roomId);
-    assert.equal(accountRoom.myCards.length, 4, roomId + ': each of the four initial players owns four cards');
+    assert.equal(accountRoom.myCards.length, 5, roomId + ': each of the four initial players owns five cards');
   }
-  const balanceBeforeFifthCard = Number((await accountMe(accounts[0])).balance);
-  const fifthCardResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
+  const balanceBeforeSixthCard = Number((await accountMe(accounts[0])).balance);
+  const sixthCardResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
     method: 'POST',
     headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
     body: JSON.stringify({ cardsCount: 1 }),
   });
-  assert.equal(fifthCardResponse.status, 200, roomId + ': temporary per-player card cap must be removed');
-  const fifthCardData = await fifthCardResponse.json();
-  assert.equal(fifthCardData.room.cardCount, 17, roomId + ': fifth card must increment the shared room count');
-  assert.equal(fifthCardData.room.myCards.length, 5, roomId + ': same player must own five cards during the temporary test');
-  assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeFifthCard - economics.price,
-    roomId + ': fifth card must be charged exactly once');
+  assert.equal(sixthCardResponse.status, 409, roomId + ': sixth card must be rejected');
+  assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeSixthCard,
+    roomId + ': rejected sixth card must not debit the wallet');
+  assert.equal((await roomFor(accounts[0], roomId)).myCards.length, 5);
 
   // Regression: logging out after a card purchase must not remove the paid
   // entry from the shared room. A second account must see the global counts,
@@ -149,7 +154,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const afterLogoutFromOtherAccount = await roomFor(accounts[1], roomId);
   assert.equal(afterLogoutFromOtherAccount.playerCount, 4,
     roomId + ': logout must not remove a purchased player from the shared queue');
-  assert.equal(afterLogoutFromOtherAccount.cardCount, 17,
+  assert.equal(afterLogoutFromOtherAccount.cardCount, 20,
     roomId + ': logout must not remove purchased cards from the shared queue');
   const reloginResponse = await fetch(baseUrl + '/api/auth/login', {
     method: 'POST',
@@ -164,7 +169,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.equal(afterRelogin.joined, true, roomId + ': paid entry must survive logout and login');
   assert.equal(afterRelogin.myCards.length, 5, roomId + ': own cards must be restored after login');
   assert.equal(afterRelogin.playerCount, 4);
-  assert.equal(afterRelogin.cardCount, 17);
+  assert.equal(afterRelogin.cardCount, 20);
 
   // A purchased place cannot be cancelled or refunded.
   const beforeLeave = Number((await accountMe(accounts[0])).balance);
@@ -178,35 +183,58 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     roomId + ': no refund on attempted cancellation');
   snapshot = await roomFor(accounts[0], roomId);
   assert.equal(snapshot.playerCount, 4);
-  assert.equal(snapshot.cardCount, 17);
+  assert.equal(snapshot.cardCount, 20);
 
-  // Three further players buy four cards each: 29 cards in total.
-  for (const account of accounts.slice(4, 7)) await join(account, roomId, 4);
+  // Seven accounts purchase five cards each; this exceeds the old room cap.
+  for (const account of accounts.slice(4, 7)) await join(account, roomId, 5);
   snapshot = await roomFor(accounts[0], roomId);
   assert.equal(snapshot.playerCount, 7);
-  assert.equal(snapshot.cardCount, 29);
+  assert.equal(snapshot.cardCount, 35);
   assert.equal(snapshot.status, 'waiting');
+  assert.equal(snapshot.registrationDeadline, firstDeadline);
 
-  // Player eight requests four cards, but only one fits. Exactly one card and
-  // exactly one card fee are accepted; the room starts at precisely 30 cards.
-  const lastPlayerRoom = await join(accounts[7], roomId, 4);
-  assert.equal(lastPlayerRoom.status, 'playing');
-  assert.equal(lastPlayerRoom.capacity, 30);
+  // The eighth player adds five cards. The room remains open until the fixed timer expires.
+  const lastPlayerRoom = await join(accounts[7], roomId, 5);
+  assert.equal(lastPlayerRoom.status, 'waiting');
+  assert.equal(lastPlayerRoom.capacity, null);
   assert.equal(lastPlayerRoom.playerCount, 8);
   assert.equal(lastPlayerRoom.queueCount, 8);
-  assert.equal(lastPlayerRoom.cardCount, 30);
-  assert.equal(lastPlayerRoom.players.length, 8);
-  assert.equal(lastPlayerRoom.myCards.length, 1);
-  assert.equal(lastPlayerRoom.finance.totalPlayers, 8);
-  assert.equal(lastPlayerRoom.finance.totalCards, 30);
-  assert.equal(lastPlayerRoom.finance.grossRevenue, 30 * economics.price);
+  assert.equal(lastPlayerRoom.cardCount, 40);
+  assert.equal(lastPlayerRoom.myCards.length, 5);
+  assert.equal(lastPlayerRoom.registrationDeadline, firstDeadline);
+
+  const expireSql = "UPDATE room_states SET payload = json_set(payload, '$.registrationDeadline', 1) WHERE room_id = '" + roomId + "'";
+  execFileSync('wrangler', [
+    'd1', 'execute', 'dabernaz-ci', '--local',
+    '--persist-to', '.wrangler/test-state',
+    '--command', expireSql,
+  ], { stdio: 'inherit' });
+  const startedRoom = await roomFor(accounts[0], roomId);
+  assert.equal(startedRoom.status, 'playing');
+  assert.equal(startedRoom.capacity, null);
+  assert.equal(startedRoom.playerCount, 8);
+  assert.equal(startedRoom.queueCount, 8);
+  assert.equal(startedRoom.cardCount, 40);
+  assert.equal(startedRoom.players.length, 8);
+  assert.equal(startedRoom.myCards.length, 5);
+  assert.equal(startedRoom.finance.totalPlayers, 8);
+  assert.equal(startedRoom.finance.totalCards, 40);
+  assert.equal(startedRoom.finance.grossRevenue, 40 * economics.price);
+
+  const latePurchase = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
+    method: 'POST',
+    headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ cardsCount: 1 }),
+  });
+  assert.equal(latePurchase.status, 409, roomId + ': purchases after the timer must be rejected');
+
 
   for (let index = 0; index < accounts.length; index++) {
-    const expectedCards = index === 0 ? 5 : index === 7 ? 1 : 4;
+    const expectedCards = 5;
     const accountRoom = await roomFor(accounts[index], roomId);
     assert.equal(accountRoom.status, 'playing');
     assert.equal(accountRoom.playerCount, 8);
-    assert.equal(accountRoom.cardCount, 30);
+    assert.equal(accountRoom.cardCount, 40);
     assert.equal(accountRoom.joined, true);
     checkCard(accountRoom.myCards, accounts[index].email, expectedCards);
     const expectedBalance = balancesBeforeBuy.get(accounts[index].memberId) -
@@ -240,12 +268,15 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.equal(finishedRoom.status, 'finished');
   assert.equal(finishedRoom.finance.finalized, true);
   assert.equal(finishedRoom.finance.totalPlayers, 8);
-  assert.equal(finishedRoom.finance.totalCards, 30);
-  assert.equal(finishedRoom.finance.grossRevenue, 30 * economics.price);
-  assert.equal(finishedRoom.finance.linePrizePaid, economics.linePrize);
-  assert.equal(finishedRoom.finance.fullPrizePaid, economics.fullPrize);
-  const expectedCommission = 30 * economics.price - economics.linePrize - economics.fullPrize;
-  assert.ok(expectedCommission >= 0);
+  assert.equal(finishedRoom.finance.totalCards, 40);
+  const grossRevenue = 40 * economics.price;
+  const expectedLinePrize = Math.floor(grossRevenue * 0.10);
+  const expectedFullPrize = Math.floor(grossRevenue * 0.75);
+  const expectedCommission = grossRevenue - expectedLinePrize - expectedFullPrize;
+  assert.equal(finishedRoom.finance.grossRevenue, grossRevenue);
+  assert.equal(finishedRoom.finance.linePrizePaid, expectedLinePrize);
+  assert.equal(finishedRoom.finance.fullPrizePaid, expectedFullPrize);
+  assert.equal(expectedCommission, Math.floor(grossRevenue * 0.15));
   assert.equal(finishedRoom.finance.siteCommission, expectedCommission);
   assert.ok(finishedRoom.winners.line);
   assert.ok(finishedRoom.winners.full);
@@ -260,12 +291,12 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
       expectedPrizes.set(key, (expectedPrizes.get(key) || 0) + base + (index < remainder ? 1 : 0));
     });
   };
-  addSplitPrize(finishedRoom.winners.line, economics.linePrize);
-  addSplitPrize(finishedRoom.winners.full, economics.fullPrize);
+  addSplitPrize(finishedRoom.winners.line, expectedLinePrize);
+  addSplitPrize(finishedRoom.winners.full, expectedFullPrize);
 
   for (let index = 0; index < accounts.length; index++) {
     const account = accounts[index];
-    const cardCount = index === 0 ? 5 : index === 7 ? 1 : 4;
+    const cardCount = 5;
     const expectedBalance = balancesBeforeBuy.get(account.memberId) -
       economics.price * cardCount + expectedPrizes.get(String(account.id));
     assert.equal(Number((await accountMe(account)).balance), expectedBalance,
@@ -403,4 +434,4 @@ for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
 
-console.log('PASS: Daberna capacity, wallet debits, simultaneous winners, prize splits and winner history; referrals and milestone rewards; support ticket create/read; tournament queue registration and duplicate protection; server-authoritative RPS and tic-tac-toe with forged-result rejection.');
+console.log('PASS: Daberna uncapped rooms, 150-second first-purchase timer, per-account five-card limit, deadline/late-purchase enforcement, 10/75/15 percentage payouts, simultaneous winners and history; referrals; support tickets; tournaments; server-authoritative mini-games.');
