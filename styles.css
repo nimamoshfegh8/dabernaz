@@ -216,7 +216,10 @@
 .queue-test-tools .demo-chip{margin-left:auto;}
 .queue-wait-hint{text-align:center;border:1px dashed #55222d;border-radius:10px;padding:12px;font-size:9px;color:#c4aeb5;margin-top:10px;}
 .queue-disclaimer{display:block;text-align:center;color:#92848a;font-size:8px;line-height:1.9;margin-top:11px;}
-.room-info-strip{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;}
+.room-info-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:12px;}
+.room-info-strip.room-prize-strip{grid-template-columns:repeat(4,minmax(0,1fr));}
+.room-estimated-prizes{margin-top:10px;}
+@media(max-width:420px){.room-info-strip.room-prize-strip{grid-template-columns:repeat(2,minmax(0,1fr));}}
 .room-info-strip>div{padding:11px 7px;text-align:center;border:1px solid #5c202b;border-radius:12px;background:linear-gradient(145deg,#1b0e13,#0d0b10);}
 .room-info-strip b{display:block;color:#ffc94f;font-size:10px;}
 .room-info-strip small{display:block;color:#b6aab0;font-size:8px;margin-top:4px;}
