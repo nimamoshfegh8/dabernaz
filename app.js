@@ -71,28 +71,42 @@ function numberToPersianWords(number) {
 }
 
 function speakRoomNumber(number, room) {
-  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return;
+  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
   const value = Math.trunc(Number(number));
-  if (!Number.isFinite(value) || value < 1 || value > 90) return;
-  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
+  if (!Number.isFinite(value) || value < 1 || value > 90) return false;
+  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
+    showToast('اعلام صوتی در این مرورگر پشتیبانی نمی‌شود.');
+    return false;
+  }
   const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || '');
   const announcementKey = `${room?.id || activeRoomId}:${roundKey}:${value}`;
-  if (announcementKey === lastSpokenRoomAnnouncementKey) return;
+  if (announcementKey === lastSpokenRoomAnnouncementKey) return false;
   lastSpokenRoomAnnouncementKey = announcementKey;
   try {
-    window.speechSynthesis.cancel();
+    const synth = window.speechSynthesis;
     const spokenNumber = numberToPersianWords(value);
     const utterance = new SpeechSynthesisUtterance(`عدد ${spokenNumber}`);
     utterance.lang = 'fa-IR';
     utterance.rate = 0.82;
     utterance.pitch = 1;
     utterance.volume = 1;
-    const voices = window.speechSynthesis.getVoices?.() || [];
+    const voices = synth.getVoices?.() || [];
     const persianVoice = voices.find(voice => /^fa([_-]|$)/i.test(voice.lang));
     if (persianVoice) utterance.voice = persianVoice;
-    window.speechSynthesis.speak(utterance);
-  } catch (_) { /* Speech is an optional device capability. */ }
-  if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
+    utterance.onerror = () => showToast('پخش صدا توسط مرورگر انجام نشد. صدای رسانه و موتور تبدیل متن به گفتار دستگاه را بررسی کن.');
+    synth.cancel();
+    synth.resume?.();
+    synth.speak(utterance);
+    // Some Android WebViews need a short delayed retry after cancel().
+    window.setTimeout(() => {
+      if (synth.paused) synth.resume?.();
+    }, 80);
+    if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
+    return true;
+  } catch (_) {
+    showToast('پخش اعلام صوتی در این دستگاه انجام نشد.');
+    return false;
+  }
 }
 function playSettingsTone() {
   if (!settingEnabled('sounds')) return;
@@ -1236,8 +1250,8 @@ document.addEventListener('click', async event => {
   else if (action === 'test-number-voice') {
     if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) { showToast('ابتدا «صدای بازی» و «اعلام صوتی شماره‌ها» را فعال کن.'); return; }
     lastSpokenRoomAnnouncementKey = '';
-    speakRoomNumber(42, {id:'settings-test',roundId:Date.now()});
-    showToast('نمونه اعلام شماره پخش شد.');
+    const played = speakRoomNumber(42, {id:'settings-test',roundId:Date.now()});
+    if (played) showToast('در حال پخش: عدد چهل و دو');
   }
   else if (action === 'test-notification') {
     if (!settingEnabled('notifications')) { showToast('ابتدا اعلان‌های دستگاه را فعال کن.'); return; }
