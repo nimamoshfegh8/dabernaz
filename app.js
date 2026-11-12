@@ -51,18 +51,38 @@ let settingsAudioContext = null;
 
 function settingEnabled(key) { return !!state?.settings?.[key]; }
 
+function numberToPersianWords(number) {
+  const value = Math.trunc(Number(number));
+  if (!Number.isFinite(value) || value < 0 || value > 999) return '';
+  const units = ['صفر','یک','دو','سه','چهار','پنج','شش','هفت','هشت','نه'];
+  const teens = ['ده','یازده','دوازده','سیزده','چهارده','پانزده','شانزده','هفده','هجده','نوزده'];
+  const tens = ['','','بیست','سی','چهل','پنجاه','شصت','هفتاد','هشتاد','نود'];
+  const hundreds = ['','صد','دویست','سیصد','چهارصد','پانصد','ششصد','هفتصد','هشتصد','نهصد'];
+  if (value < 10) return units[value];
+  if (value < 20) return teens[value - 10];
+  if (value < 100) {
+    const ten = Math.floor(value / 10);
+    const one = value % 10;
+    return one ? `${tens[ten]} و ${units[one]}` : tens[ten];
+  }
+  const hundred = Math.floor(value / 100);
+  const rest = value % 100;
+  return rest ? `${hundreds[hundred]} و ${numberToPersianWords(rest)}` : hundreds[hundred];
+}
+
 function speakRoomNumber(number, room) {
   if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return;
-  if (!Number.isFinite(Number(number))) return;
+  const value = Math.trunc(Number(number));
+  if (!Number.isFinite(value) || value < 1 || value > 90) return;
   if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
-  const value = Number(number);
   const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || '');
   const announcementKey = `${room?.id || activeRoomId}:${roundKey}:${value}`;
   if (announcementKey === lastSpokenRoomAnnouncementKey) return;
   lastSpokenRoomAnnouncementKey = announcementKey;
   try {
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(`عدد ${value}`);
+    const spokenNumber = numberToPersianWords(value);
+    const utterance = new SpeechSynthesisUtterance(`عدد ${spokenNumber}`);
     utterance.lang = 'fa-IR';
     utterance.rate = 0.82;
     utterance.pitch = 1;
@@ -74,7 +94,6 @@ function speakRoomNumber(number, room) {
   } catch (_) { /* Speech is an optional device capability. */ }
   if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
 }
-
 function playSettingsTone() {
   if (!settingEnabled('sounds')) return;
   try {
