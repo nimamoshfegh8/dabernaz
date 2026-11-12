@@ -234,6 +234,11 @@ async function loadAuthenticatedUser() {
     state.roomHistory = Array.isArray(history.rounds) ? history.rounds.slice(0,12) : [];
   } catch (_) { /* Keep the last successfully loaded history for a temporary outage. */ }
 
+  try {
+    const publicTournaments = await apiRequest('/api/tournaments', { method:'GET', headers:{} });
+    state.tournamentRooms = Array.isArray(publicTournaments.rooms) ? publicTournaments.rooms : [];
+  } catch (_) { /* Aggregate tournament counts are optional during an API outage. */ }
+
   if (currentUser) {
     const [referralResult, tournamentResult, ticketResult] = await Promise.allSettled([
       apiRequest('/api/referrals', { method:'GET', headers:{} }),
