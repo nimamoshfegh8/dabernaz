@@ -2,7 +2,7 @@
   "name": "dabernaz-game-club",
   "version": "4.0.0",
   "private": true,
-  "description": "Dabernaz Cloudflare Pages Functions + D1 backend with 30-card Daberna rooms, secure game sessions, referrals, support tickets and tournament registration queues",
+  "description": "Dabernaz Cloudflare Pages Functions + D1 backend with uncapped timed Daberna rooms, five-card per-account limit and 10/75/15 revenue sharing",
   "scripts": {
     "start": "node server.js",
     "build:pages": "node build-pages.mjs",

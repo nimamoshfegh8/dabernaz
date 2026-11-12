@@ -1,11 +1,18 @@
-Dabernaz Cloudflare Backend – Static validation report
+گزارش تست یکپارچه دابرناز — Cloudflare Pages + D1 محلی
 
-- Pages Function JavaScript syntax: passed with Node.js --check.
-- Pages asset build script syntax: passed with Node.js --check.
-- Pages asset build: passed; dist contains only frontend assets and _routes.json.
-- Route map: includes /api/* only.
-- D1 bootstrap: schema tables and missing user columns are created automatically on first API request; no manual SQL paste required.
-- Required manual Cloudflare step: bind the D1 database to the Pages project using variable name DB, then redeploy.
-- Not claimed as live-tested: Cloudflare production deployment, D1 binding, public registration/login, and concurrent 20-player room behavior. Those require the user's Cloudflare environment after the files are pushed and the DB binding is enabled.
+تست‌ها روی D1 محلی و ایزوله اجرا می‌شوند و موجودی یا حساب‌های Production را تغییر نمی‌دهند.
 
-This report distinguishes local/static validation from production verification.
+موارد تحت آزمون:
+- حذف ظرفیت کلی و پذیرش ۴۰ کارت از ۸ حساب در سناریوی آزمایش.
+- آغاز مهلت دقیق ۱۵۰ ثانیه‌ای با اولین خرید و ثابت ماندن مهلت بعد از خریدهای بعدی.
+- سقف ۵ کارت برای هر حساب و رد خرید کارت ششم بدون کسر وجه.
+- شروع خودکار پس از پایان مهلت و رد خرید دیرهنگام.
+- محاسبه ۱۰٪ جایزه خطی، ۷۵٪ جایزه کامل و ۱۵٪ کمیسیون از کل پول جمع‌شده.
+- تقسیم مساوی جایزه بین برندگان هم‌زمان و تطبیق موجودی با دفتر تراکنش‌ها.
+- حفظ کارت‌های خریداری‌شده پس از خروج/ورود مجدد و رد لغو/بازپرداخت.
+- ذخیره تاریخچه برندگان و امور مالی سانس.
+- تست‌های رگرسیون دعوت، پشتیبانی، تورنمنت، سنگ‌کاغذ‌قیچی و دوز.
+
+محدودیت:
+- اجرای تایمر/قرعه‌کشی با درخواست‌های دوره‌ای API جلو می‌رود؛ Cron مستقل برای زمان بسته بودن تمام مرورگرها در این تغییر افزوده نشده است.
+- درگاه پرداخت و برداشت واقعی متصل نیستند.
