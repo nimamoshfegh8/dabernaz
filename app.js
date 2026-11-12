@@ -4,7 +4,7 @@ const STORAGE_KEY = 'dabernaz_state_v1';
 const cloneData = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const defaultState = {
   username: '', memberId: '', balance: 0, joined: [], transactions: [],
-  settings: { sounds: true, notifications: true, privacy: true, vibration: false },
+  settings: { sounds: true, voiceNumbers: true, notifications: false, privacy: true, vibration: false },
   referralCode: '', gamesPlayed: 0, wins: 0, points: 0,
   bingoCoins: 0, coinTransactions: [], inviteCount: 0, inviteRewardMilestones: [],
   roomHistory: [], supportTickets: [], tournamentRooms: []
@@ -45,6 +45,77 @@ let roomPollBusy = false;
 let currentPage = 'home';
 let toastTimer = null;
 let bingoGame = null;
+let lastSpokenRoomAnnouncementKey = '';
+let settingsAudioContext = null;
+
+function settingEnabled(key) { return !!state?.settings?.[key]; }
+
+function speakRoomNumber(number, room) {
+  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return;
+  if (!Number.isFinite(Number(number))) return;
+  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) return;
+  const value = Number(number);
+  const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || '');
+  const announcementKey = `${room?.id || activeRoomId}:${roundKey}:${value}`;
+  if (announcementKey === lastSpokenRoomAnnouncementKey) return;
+  lastSpokenRoomAnnouncementKey = announcementKey;
+  try {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(`عدد ${value}`);
+    utterance.lang = 'fa-IR';
+    utterance.rate = 0.82;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    const voices = window.speechSynthesis.getVoices?.() || [];
+    const persianVoice = voices.find(voice => /^fa([_-]|$)/i.test(voice.lang));
+    if (persianVoice) utterance.voice = persianVoice;
+    window.speechSynthesis.speak(utterance);
+  } catch (_) { /* Speech is an optional device capability. */ }
+  if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
+}
+
+function playSettingsTone() {
+  if (!settingEnabled('sounds')) return;
+  try {
+    settingsAudioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    const oscillator = settingsAudioContext.createOscillator();
+    const gain = settingsAudioContext.createGain();
+    oscillator.frequency.value = 740;
+    gain.gain.setValueAtTime(0.05, settingsAudioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, settingsAudioContext.currentTime + 0.12);
+    oscillator.connect(gain); gain.connect(settingsAudioContext.destination);
+    oscillator.start(); oscillator.stop(settingsAudioContext.currentTime + 0.12);
+  } catch (_) {}
+}
+
+async function toggleSetting(key) {
+  const next = !settingEnabled(key);
+  if (key === 'notifications' && next) {
+    if (!('Notification' in window)) {
+      showToast('اعلان‌های سیستمی در این مرورگر پشتیبانی نمی‌شود.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      state.settings.notifications = false;
+      saveState(); renderSettingsIntoView();
+      showToast('اجازه ارسال اعلان داده نشد.');
+      return;
+    }
+  }
+  state.settings[key] = next;
+  if (key === 'sounds' && !next && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+  saveState();
+  if (key === 'sounds' && next) playSettingsTone();
+  if (key === 'vibration' && next && navigator.vibrate) navigator.vibrate(25);
+  renderSettingsIntoView();
+  const labels = {
+    sounds:'صدای بازی', voiceNumbers:'اعلام صوتی شماره‌ها', notifications:'اعلان‌ها',
+    vibration:'لرزش', privacy:'نمایش وضعیت آنلاین'
+  };
+  showToast(`${labels[key] || 'تنظیم'} ${next ? 'فعال' : 'غیرفعال'} شد`);
+}
+
 const ROOM_CONFIGS = [
   { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
   { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
@@ -440,6 +511,7 @@ async function pollCurrentRoom() {
     roomCalledNumbers=Array.isArray(result.room.allCalledNumbers)?result.room.allCalledNumbers:(result.room.calledNumbers||[]);
     roomStages={one:roomHasWinner(result.room.winners?.line),full:roomHasWinner(result.room.winners?.full)};
     if (Number.isFinite(Number(result.room.myBingoCoins))) { state.bingoCoins=Math.max(0,Number(result.room.myBingoCoins)); state.coinTransactions=Array.isArray(result.room.myCoinTransactions)?result.room.myCoinTransactions.slice(0,50):state.coinTransactions; saveState(); updateHeader(); }
+    if (result.room.status==='playing' && currentPage==='roomGame') speakRoomNumber(result.room.latestNumber, result.room);
     if (result.room.status==='finished' && currentUser) {
       try {
         const me=await apiRequest('/api/auth/me',{method:'GET',headers:{}});
@@ -564,12 +636,21 @@ function renderAuthPage() {
 }
 function accountRow(icon, title, desc, action) { return `<button class="list-row" data-action="${action}"><span class="row-icon">${icon}</span><span class="row-copy"><b>${title}</b><small>${desc}</small></span><span class="chevron">‹</span></button>`; }
 function renderSettings() {
-  const sw = (key, title, desc) => `<div class="setting-row"><div class="setting-copy"><b>${title}</b><small>${desc}</small></div><button class="switch ${state.settings[key] ? 'on' : ''}" role="switch" aria-checked="${!!state.settings[key]}" aria-label="${title}" data-setting="${key}"></button></div>`;
-  return `${heading('تنظیمات', 'دابرناز رو مطابق سلیقه خودت تنظیم کن.', 'PREFERENCES')}
-  <section class="setting-group"><h3 class="settings-title">تنظیمات عمومی</h3>${sw('sounds','صدای بازی','فعال یا غیرفعال کردن صداها')}${sw('notifications','اعلان‌ها','دریافت اعلان‌های داخل سایت')}${sw('vibration','لرزش','بازخورد لرزشی در دستگاه‌های پشتیبانی‌شده')}</section>
-  <section class="setting-group"><h3 class="settings-title">حریم خصوصی</h3>${sw('privacy','نمایش وضعیت آنلاین','تنظیم نمایش وضعیت حضور در بخش‌های بازی')}</section>
-  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3><div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div><div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های خودکار</small></div><span class="muted-note">4.0.0</span></div></section>
-  <button class="btn btn-outline btn-block" data-action="reset-settings">بازنشانی تنظیمات</button>`;
+  const sw = (key, title, desc) => `<div class="setting-row"><div class="setting-copy"><b>${title}</b><small>${desc}</small></div><button class="switch ${state.settings[key] ? 'on' : ''}" type="button" role="switch" aria-checked="${!!state.settings[key]}" aria-label="${title}" data-setting="${key}"></button></div>`;
+  return `${heading('تنظیمات', 'صدا، اعلام شماره‌ها و امکانات دستگاه را مطابق سلیقه خودت تنظیم کن.', 'PREFERENCES')}
+  <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
+    ${sw('sounds','صدای بازی','روشن یا خاموش کردن صداهای بازی')}
+    ${sw('voiceNumbers','اعلام صوتی شماره‌ها','خواندن خودکار هر شماره جدید در بازی دبرنا')}
+    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدا</b><small>نمونه اعلام صوتی شماره دبرنا</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
+    ${sw('vibration','لرزش','بازخورد لرزشی هنگام رویدادهای بازی در دستگاه‌های پشتیبانی‌شده')}
+  </section>
+  <section class="setting-group"><h3 class="settings-title">اعلان‌ها</h3>
+    ${sw('notifications','اعلان‌های دستگاه','با فعال‌سازی، اجازه اعلان از مرورگر گرفته می‌شود')}
+    <div class="setting-row"><div class="setting-copy"><b>آزمایش اعلان</b><small>نمایش یک اعلان آزمایشی در همین دستگاه</small></div><button class="btn btn-outline" type="button" data-action="test-notification">تست</button></div>
+  </section>
+  <section class="setting-group"><h3 class="settings-title">حریم خصوصی</h3>${sw('privacy','نمایش وضعیت آنلاین','کنترل نمایش برچسب حضور در رابط این دستگاه')}</section>
+  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3><div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div><div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>تنظیمات فعال، حساب سروری و اتاق‌های خودکار</small></div><span class="muted-note">4.1.0</span></div></section>
+  <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
 const faqs = [
   ['چطور وارد اتاق بازی بشم؟','از صفحه خانه روی «اتاق بازی» بزن یا از کارت بازی مورد علاقه‌ات وارد شو.'],
@@ -918,7 +999,7 @@ document.addEventListener('click', async event => {
     return;
   }
   const setting = event.target.closest('[data-setting]');
-  if (setting) { const key = setting.dataset.setting; state.settings[key] = !state.settings[key]; saveState(); renderSettingsIntoView(); return; }
+  if (setting) { event.preventDefault(); await toggleSetting(setting.dataset.setting); return; }
   const actionEl = event.target.closest('[data-action]');
   if (!actionEl) return;
   const action = actionEl.dataset.action;
@@ -1035,7 +1116,19 @@ document.addEventListener('click', async event => {
   else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه فعلی Cloudflare رمز عبور با PBKDF2-SHA256 و salt اختصاصی هش می‌شود. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
-  else if (action === 'reset-settings') { state.settings = { ...defaultState.settings }; saveState(); render(); showToast('تنظیمات بازنشانی شد'); }
+  else if (action === 'test-number-voice') {
+    if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) { showToast('ابتدا «صدای بازی» و «اعلام صوتی شماره‌ها» را فعال کن.'); return; }
+    lastSpokenRoomAnnouncementKey = '';
+    speakRoomNumber(42, {id:'settings-test',roundId:Date.now()});
+    showToast('نمونه اعلام شماره پخش شد.');
+  }
+  else if (action === 'test-notification') {
+    if (!settingEnabled('notifications')) { showToast('ابتدا اعلان‌های دستگاه را فعال کن.'); return; }
+    if (!('Notification' in window) || Notification.permission !== 'granted') { showToast('اجازه اعلان در دسترس نیست.'); return; }
+    try { new Notification('دابرناز', { body:'اعلان آزمایشی با موفقیت فعال است.' }); showToast('اعلان آزمایشی ارسال شد.'); }
+    catch (_) { showToast('نمایش اعلان در این مرورگر ممکن نشد.'); }
+  }
+  else if (action === 'reset-settings') { state.settings = { ...defaultState.settings }; saveState(); if ('speechSynthesis' in window) window.speechSynthesis.cancel(); render(); showToast('تنظیمات بازنشانی شد'); }
 });
 function renderSettingsIntoView() { const y = window.scrollY; render(); window.scrollTo(0,y); }
 function callBingo() {
