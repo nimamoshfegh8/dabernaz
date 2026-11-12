@@ -485,3 +485,114 @@
 .room-winner-line b{color:#eac36e;white-space:nowrap}
 .room-winner-line span{color:#fff;text-align:left}
 @media(max-width:420px){.room-winner-line{align-items:flex-start;flex-direction:column;gap:4px}}
+
+
+/* Professional 90-ball tournament lobby */
+.tour-hero{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(250px,.8fr);gap:22px;align-items:end;margin:16px 0 24px;padding:27px;border:1px solid rgba(235,184,90,.24);border-radius:24px;background:linear-gradient(125deg,#351018 0%,#1c1219 48%,#12151d 100%);box-shadow:0 18px 45px rgba(0,0,0,.24)}
+.tour-hero-backdrop{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden;opacity:.18}
+.tour-hero-backdrop span{position:absolute;left:5%;top:-54px;font-size:260px;color:#f4c66c;transform:rotate(-14deg)}
+.tour-hero-backdrop i,.tour-hero-backdrop b{position:absolute;border:1px solid rgba(255,220,154,.38);border-radius:50%;width:270px;height:270px;right:10%;top:-130px}
+.tour-hero-backdrop b{width:390px;height:390px;right:4%;top:-190px}
+.tour-hero-copy{max-width:670px}
+.tour-kicker,.tour-eyebrow{display:inline-block;color:#e7bd70;font-size:10px;font-weight:900;letter-spacing:1.5px}
+.tour-hero-copy h2{margin:8px 0 9px;font-size:clamp(24px,4vw,38px);font-weight:1000;color:#fff}
+.tour-hero-copy h2 em{font-style:normal;color:#f4c66c}
+.tour-hero-copy p{max-width:550px;margin:0;color:#cbbec0;line-height:2;font-size:12px}
+.tour-hero-actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:19px}
+.tour-hero-link{border:0;background:transparent;color:#f5dca9;font:inherit;font-size:11px;font-weight:800;cursor:pointer}
+.tour-hero-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:13px;border-radius:17px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09)}
+.tour-hero-stats div{text-align:center;border-left:1px solid rgba(255,255,255,.1)}
+.tour-hero-stats div:last-child{border:0}
+.tour-hero-stats b{display:block;font-size:25px;color:#f4d18e}
+.tour-hero-stats small{display:block;margin-top:4px;color:#c2b8bc;font-size:9px}
+.tour-section,.tour-how-section{margin:22px 0}
+.tour-section-heading{display:flex;align-items:end;justify-content:space-between;gap:14px;margin-bottom:14px}
+.tour-section-heading h2{margin:4px 0;font-size:20px;color:#fff}
+.tour-section-heading p{margin:0;color:var(--muted);font-size:10px}
+.tour-tabs{display:flex;gap:5px;padding:4px;border:1px solid var(--border);border-radius:13px;background:#141217}
+.tour-tabs button{border:0;padding:8px 12px;border-radius:9px;background:transparent;color:var(--muted);font:inherit;font-size:10px;font-weight:800;cursor:pointer}
+.tour-tabs button.active{background:linear-gradient(135deg,#a82a3a,#6d1c2d);color:#fff;box-shadow:0 4px 14px rgba(160,38,57,.2)}
+.tour-tabs button b{margin-right:4px;color:#f6d78f}
+.tour-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.tour-card{position:relative;overflow:hidden;padding:18px;border:1px solid var(--border);border-radius:20px;background:linear-gradient(155deg,#211920,#15151b 65%);box-shadow:0 12px 30px rgba(0,0,0,.15)}
+.tour-card:before{content:"";position:absolute;top:-100px;left:-80px;width:210px;height:210px;border-radius:50%;background:rgba(191,48,67,.11);filter:blur(5px);pointer-events:none}
+.tour-card-gold{background:linear-gradient(155deg,#292218,#17151a 65%)}
+.tour-card-gold:before{background:rgba(209,159,64,.13)}
+.tour-card-top{position:relative;display:flex;align-items:center;gap:8px}
+.tour-card-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:rgba(202,54,73,.16);font-size:21px}
+.tour-card-gold .tour-card-icon{background:rgba(218,173,84,.15)}
+.tour-card-type{font-size:9px;font-weight:900;letter-spacing:1px;color:#e7b3b9}
+.tour-card-gold .tour-card-type{color:#e7c985}
+.tour-card-state{margin-right:auto;padding:5px 9px;border-radius:20px;background:rgba(58,190,125,.12);color:#7ed8a8;font-size:9px;font-weight:800}
+.tour-card-state.is-full{background:rgba(224,90,90,.12);color:#ef9292}
+.tour-card-state.is-entered{background:rgba(216,172,82,.13);color:#e9ca81}
+.tour-card-title{position:relative;margin:14px 0}
+.tour-card-title h3{margin:0 0 5px;font-size:18px;color:#fff}
+.tour-card-title p{margin:0;color:var(--muted);font-size:10px}
+.tour-card-entry{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:12px 0;border-top:1px solid rgba(255,255,255,.07);border-bottom:1px solid rgba(255,255,255,.07)}
+.tour-card-entry small,.tour-entry-price small{display:block;color:var(--muted);font-size:9px}
+.tour-card-entry b{display:block;margin-top:4px;color:#fff;font-size:19px}
+.tour-card-entry em{font-style:normal;color:#d9b86e;font-size:10px}
+.tour-progress{height:6px;margin:13px 0 8px;overflow:hidden;border-radius:10px;background:#343038}
+.tour-progress span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#a62b40,#edbb72);transition:width .25s}
+.tour-card-gold .tour-progress span{background:linear-gradient(90deg,#97702b,#f2d18b)}
+.tour-card-meta{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:9px}
+.tour-card-button{margin-top:15px;width:100%;display:flex;justify-content:center;align-items:center;gap:9px}
+.tour-empty{grid-column:1/-1;display:grid;justify-items:center;gap:8px;padding:28px 15px;border:1px dashed var(--border);border-radius:18px;text-align:center;color:#fff}
+.tour-empty>span{font-size:28px}.tour-empty small{color:var(--muted);font-size:10px}
+.tour-format-panel{padding:19px;border:1px solid rgba(205,160,78,.2);border-radius:20px;background:linear-gradient(110deg,rgba(153,111,38,.1),rgba(255,255,255,.02))}
+.tour-format-heading,.tour-panel-heading{display:flex;align-items:center;gap:11px}
+.tour-format-heading>span,.tour-panel-heading>span{display:grid;place-items:center;width:40px;height:40px;border-radius:12px;background:rgba(218,177,91,.13);font-size:20px}
+.tour-format-heading small,.tour-panel-heading small{color:#d5b36d;font-size:9px;font-weight:900;letter-spacing:1px}
+.tour-format-heading h2,.tour-panel-heading h3{margin:3px 0 0;color:#fff;font-size:16px}
+.tour-format-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:16px 0}
+.tour-format-grid div{padding:12px;border-radius:12px;background:rgba(255,255,255,.045);text-align:center}
+.tour-format-grid b{display:block;color:#f3d28f;font-size:21px}
+.tour-format-grid small{display:block;margin-top:4px;color:var(--muted);font-size:9px}
+.tour-format-panel>p{margin:0;color:#bdb5ba;font-size:10px;line-height:2}
+.tour-step-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.tour-step-grid>div{display:grid;gap:6px;padding:15px;border:1px solid var(--border);border-radius:15px;background:rgba(255,255,255,.025)}
+.tour-step-grid>div>span{display:grid;place-items:center;width:29px;height:29px;border-radius:9px;background:rgba(195,53,73,.16);color:#f0b9c0;font-weight:900}
+.tour-step-grid b{font-size:12px;color:#fff}.tour-step-grid small{font-size:9px;color:var(--muted);line-height:1.8}
+.tour-honesty-note{margin:12px 0 0;padding:11px 13px;border-right:3px solid #b78943;border-radius:9px;background:rgba(185,137,67,.07);color:#c9bba6;font-size:9px;line-height:1.9}
+.tour-detail-hero{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:17px;margin:14px 0;padding:22px;border:1px solid rgba(214,145,91,.22);border-radius:22px;background:linear-gradient(120deg,#39141f,#1d171e 70%)}
+.tour-detail-gold{background:linear-gradient(120deg,#3a2d17,#1d1918 70%);border-color:rgba(226,187,103,.25)}
+.tour-detail-symbol{display:grid;place-items:center;width:66px;height:66px;border-radius:19px;background:rgba(255,255,255,.07);font-size:34px}
+.tour-detail-info h2{margin:6px 0;color:#fff;font-size:22px}.tour-detail-info p{margin:0 0 9px;color:#c7b9bd;font-size:10px;line-height:1.9}
+.tour-status-pill{display:inline-block;padding:5px 10px;border-radius:18px;background:rgba(70,190,127,.13);color:#8be0af;font-size:9px}
+.tour-status-pill.entered{background:rgba(219,174,83,.14);color:#f0d18d}.tour-status-pill.full{background:rgba(221,80,80,.13);color:#f39b9b}
+.tour-entry-price{min-width:110px;padding:12px;border-radius:14px;background:rgba(255,255,255,.055);text-align:center}
+.tour-entry-price b{display:block;margin:5px 0;color:#f6d38e;font-size:28px}.tour-entry-price span{font-size:10px;color:#c6b8a3}
+.tour-registration-panel,.tour-rules-card,.tour-prize-card{padding:18px;border:1px solid var(--border);border-radius:18px;background:#19171d}
+.tour-registration-heading{display:flex;justify-content:space-between;align-items:center}
+.tour-registration-heading small{color:#d2ac67;font-size:9px;font-weight:900;letter-spacing:1px}
+.tour-registration-heading h2{margin:4px 0;color:#fff;font-size:17px}
+.tour-registration-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:rgba(220,179,96,.13);color:#f0cf88;font-size:20px}
+.tour-registration-numbers{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:15px 0 5px}
+.tour-registration-numbers div{text-align:center;padding:10px;border-radius:12px;background:rgba(255,255,255,.035)}
+.tour-registration-numbers b{display:block;color:#fff;font-size:21px}.tour-registration-numbers small{display:block;margin-top:3px;color:var(--muted);font-size:9px}
+.tour-progress-large{height:9px;margin:14px 0 7px}
+.tour-registration-foot{display:flex;justify-content:space-between;color:var(--muted);font-size:9px}
+.tour-register-button{margin-top:14px;min-height:46px}
+.tour-balance-note{margin:9px 0 0;color:var(--muted);font-size:9px;text-align:center}.tour-balance-note b{color:#f0d18d}
+.tour-detail-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:13px;margin:14px 0}
+.tour-rules-card ul{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:10px}
+.tour-rules-card li{position:relative;padding-right:17px;color:#c7c0c4;font-size:10px;line-height:1.8}
+.tour-rules-card li:before{content:"✓";position:absolute;right:0;color:#e1bd73;font-weight:900}
+.tour-winning-stage{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px;border-radius:12px;background:rgba(255,255,255,.035)}
+.tour-winning-stage>b{display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:rgba(219,176,91,.13);color:#efd18e}
+.tour-winning-stage strong,.tour-winning-stage small{display:block}.tour-winning-stage strong{color:#fff;font-size:10px}.tour-winning-stage small{margin-top:3px;color:var(--muted);font-size:9px}
+.tour-prize-disclaimer{margin:12px 0 0;color:#bdb4b8;font-size:9px;line-height:1.9}
+.tour-next-cup{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0;padding:14px 16px;border:1px solid var(--border);border-radius:15px;background:rgba(255,255,255,.025)}
+.tour-next-cup small,.tour-next-cup b,.tour-next-cup span{display:block}.tour-next-cup small{color:#d2b06e;font-size:9px}.tour-next-cup b{margin:3px 0;color:#fff;font-size:12px}.tour-next-cup span{color:var(--muted);font-size:9px}
+.tour-back-button{margin-bottom:18px}
+@media(max-width:700px){
+ .tour-hero{grid-template-columns:1fr;padding:20px;gap:15px}.tour-hero-stats{max-width:none}
+ .tour-card-grid{grid-template-columns:1fr}.tour-card{padding:16px}
+ .tour-section-heading{align-items:flex-start;flex-direction:column}
+ .tour-detail-hero{grid-template-columns:auto 1fr;padding:17px;gap:12px}.tour-entry-price{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:9px;min-width:0;padding:8px}.tour-entry-price b{margin:0;font-size:20px}.tour-entry-price small,.tour-entry-price span{display:inline}
+ .tour-detail-info h2{font-size:18px}.tour-detail-symbol{width:52px;height:52px;font-size:27px}
+ .tour-detail-grid{grid-template-columns:1fr}.tour-format-grid{grid-template-columns:repeat(2,1fr)}
+ .tour-step-grid{grid-template-columns:1fr}.tour-next-cup{align-items:flex-start;flex-direction:column}
+ .tour-tabs{width:100%}.tour-tabs button{flex:1}
+}
