@@ -741,7 +741,7 @@ function renderSettings() {
     <div class="setting-row"><div class="setting-copy"><b>آزمایش اعلان</b><small>نمایش یک اعلان آزمایشی در همین دستگاه</small></div><button class="btn btn-outline" type="button" data-action="test-notification">تست</button></div>
   </section>
   <section class="setting-group"><h3 class="settings-title">حریم خصوصی</h3>${sw('privacy','نمایش وضعیت آنلاین','کنترل نمایش برچسب حضور در رابط این دستگاه')}</section>
-  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3><div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div><div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>تنظیمات فعال، حساب سروری و اتاق‌های خودکار</small></div><span class="muted-note">4.1.0</span></div></section>
+  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3><div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div><div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>تنظیمات فعال، حساب سروری و اتاق‌های خودکار</small></div><span class="muted-note">4.8.0</span></div></section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
 const faqs = [
