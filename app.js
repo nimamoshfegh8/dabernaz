@@ -45,6 +45,7 @@ let roomPollBusy = false;
 let currentPage = 'home';
 let toastTimer = null;
 let bingoGame = null;
+let tournamentLobbyTab = 'all';
 let lastSpokenRoomAnnouncementKey = '';
 let settingsAudioContext = null;
 
@@ -558,36 +559,122 @@ const tournaments = [
   { id:'t2', name:'جام طلایی VIP', kind:'ویژه', prize:'۱۲,۰۰۰', players:'۶۴', time:'فردا · ۱۹:۰۰', icon:'👑' },
   { id:'t3', name:'چالش قهرمانان', kind:'مهارتی', prize:'۲,۵۰۰', players:'۳۲', time:'شنبه · ۱۸:۰۰', icon:'🥇' }
 ];
+function getTournamentRoom(type) {
+  return (state.tournamentRooms || []).find(item => item.tournament_type === type) || {};
+}
+function hasTournamentEntry(type) {
+  return (state.joined || []).includes(type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
+}
+function tournamentStatus(room) {
+  const capacity = Math.max(1, Number(room.capacity) || 30);
+  const registered = Math.max(0, Number(room.registered_count) || 0);
+  if (room.status === 'full' || registered >= capacity) return 'ظرفیت تکمیل';
+  return 'ثبت‌نام باز است';
+}
+function tournamentCard(type, index) {
+  const bingo = type === 'bingo';
+  const room = getTournamentRoom(type);
+  const cost = bingo ? 100 : 20;
+  const capacity = Math.max(1, Number(room.capacity) || 30);
+  const registered = Math.min(capacity, Math.max(0, Number(room.registered_count) || 0));
+  const entered = hasTournamentEntry(type);
+  const full = tournamentStatus(room) === 'ظرفیت تکمیل';
+  const progress = Math.min(100, Math.round(registered / capacity * 100));
+  const title = bingo ? 'جام ویژه بینگو' : 'جام کلاسیک دبرنا';
+  const subtitle = bingo ? 'مسابقه ویژه با ورودی بینگوکوین' : 'رقابت استاندارد دبرنای ۹۰ توپی';
+  const typeLabel = bingo ? 'BINGO CUP' : 'CLASSIC CUP';
+  return `<article class="tour-card ${bingo ? 'tour-card-gold' : 'tour-card-red'}">
+    <div class="tour-card-top"><span class="tour-card-icon">${bingo ? '🎱' : '🏆'}</span><span class="tour-card-type">${typeLabel}</span><span class="tour-card-state ${full ? 'is-full' : entered ? 'is-entered' : 'is-open'}">${entered ? 'ثبت‌نام تو' : full ? 'تکمیل' : 'آزاد'}</span></div>
+    <div class="tour-card-title"><h3>${title}</h3><p>${subtitle}</p></div>
+    <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>ثبت‌نام فعلی</small><b>${faDigits(registered)} <em>از ${faDigits(capacity)}</em></b></div></div>
+    <div class="tour-progress"><span style="width:${progress}%"></span></div>
+    <div class="tour-card-meta"><span>۹۰ توپ · کارت ۱۵ عددی</span><span>${tournamentStatus(room)}</span></div>
+    <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} tour-card-button" data-page="${bingo ? 'bingoTournament' : 'tournamentRoom'}">${entered ? 'مشاهده ثبت‌نام' : 'مشاهده و ثبت‌نام'} <span>←</span></button>
+  </article>`;
+}
 function renderTournaments() {
-  const queueCount = type => Number((state.tournamentRooms||[]).find(item=>item.tournament_type===type)?.registered_count)||0;
-  const simpleCount=queueCount('simple'), bingoCount=queueCount('bingo');
-  return `${heading('تورنومنت', 'صف ثبت‌نام رقابت‌ها را مشاهده و به‌صورت سروری ثبت‌نام کن.', 'TOURNAMENTS')}
-  <div class="tournament-subpage-grid">
-    <button class="tournament-subpage-card" data-page="tournamentRoom"><span>🏆</span><b>اتاق تورنومنت</b><small>${faDigits(simpleCount)} / ۳۰ ثبت‌نام · ورود ۲۰ BGC</small><em>مشاهده اتاق ←</em></button>
-    <button class="tournament-subpage-card" data-page="bingoTournament"><span>🎱</span><b>اتاق بینگو تورنومنت</b><small>${faDigits(bingoCount)} / ۳۰ ثبت‌نام · ورود ۱۰۰ BGC</small><em>مشاهده اتاق ←</em></button>
-  </div>
-  <p class="muted-note">ثبت‌نام، شمارش ظرفیت و کسر بینگوکوین روی سرور انجام می‌شود. رسیدن به ظرفیت، صف را می‌بندد؛ اجرای خود مسابقه و تعیین جایزه به قوانین نهایی تورنمنت نیاز دارد.</p>`;
+  const simpleRoom = getTournamentRoom('simple');
+  const bingoRoom = getTournamentRoom('bingo');
+  const simpleCount = Math.max(0, Number(simpleRoom.registered_count) || 0);
+  const bingoCount = Math.max(0, Number(bingoRoom.registered_count) || 0);
+  const enteredCount = Number(hasTournamentEntry('simple')) + Number(hasTournamentEntry('bingo'));
+  const allTypes = ['simple','bingo'];
+  const visibleTypes = tournamentLobbyTab === 'mine' ? allTypes.filter(hasTournamentEntry) : allTypes;
+  const cards = visibleTypes.map(tournamentCard).join('');
+  return `${heading('جام‌ها و تورنومنت‌ها', 'وارد رقابت‌های دبرنا شو؛ کارت‌ها و قرعه‌کشی بر پایه دبرنای استاندارد ۹۰ توپی هستند.', 'DABERNAZ CHAMPIONSHIP')}
+  <section class="tour-hero">
+    <div class="tour-hero-backdrop" aria-hidden="true"><span>♛</span><i></i><b></b></div>
+    <div class="tour-hero-copy"><span class="tour-kicker">فصل رقابت‌های دابرناز</span><h2>قهرمانی از <em>اینجا</em> شروع می‌شه</h2><p>جام خودت را انتخاب کن، قوانین را ببین و با بازیکنان دیگر برای ثبت بهترین نتیجه رقابت کن.</p>
+      <div class="tour-hero-actions"><button class="btn btn-gold" data-page="tournamentRoom">جام کلاسیک</button><button class="tour-hero-link" data-page="bingoTournament">جام ویژه بینگو <span>←</span></button></div>
+    </div>
+    <div class="tour-hero-stats">
+      <div><b>۲</b><small>مسیر رقابت</small></div><div><b>${faDigits(simpleCount + bingoCount)}</b><small>ثبت‌نام فعلی</small></div><div><b>۹۰</b><small>گوی در هر مسابقه</small></div>
+    </div>
+  </section>
+  <section class="tour-section">
+    <div class="tour-section-heading"><div><span class="tour-eyebrow">CHOOSE YOUR CUP</span><h2>مسابقات فعال</h2><p>جزئیات، شرایط ورود و وضعیت ثبت‌نام هر جام را بررسی کن.</p></div>
+      <div class="tour-tabs" role="group" aria-label="فیلتر مسابقات">
+        <button type="button" data-tournament-tab="all" class="${tournamentLobbyTab === 'all' ? 'active' : ''}" aria-pressed="${tournamentLobbyTab === 'all'}">همه جام‌ها</button>
+        <button type="button" data-tournament-tab="mine" class="${tournamentLobbyTab === 'mine' ? 'active' : ''}" aria-pressed="${tournamentLobbyTab === 'mine'}">ثبت‌نام‌های من ${enteredCount ? `<b>${faDigits(enteredCount)}</b>` : ''}</button>
+      </div>
+    </div>
+    <div class="tour-card-grid">${cards || '<div class="tour-empty"><span>🏆</span><b>هنوز در جامی ثبت‌نام نکرده‌ای</b><small>از بخش «همه جام‌ها» یکی از مسابقات را انتخاب کن.</small><button class="btn btn-outline" type="button" data-tournament-tab="all">نمایش همه جام‌ها</button></div>'}</div>
+  </section>
+  <section class="tour-format-panel">
+    <div class="tour-format-heading"><span>🎱</span><div><small>قالب مشترک مسابقات</small><h2>دبرنای استاندارد ۹۰ توپی</h2></div></div>
+    <div class="tour-format-grid">
+      <div><b>۹۰</b><small>گوی شماره‌دار</small></div><div><b>۳ × ۹</b><small>ساختار هر کارت</small></div><div><b>۱۵</b><small>عدد در هر کارت</small></div><div><b>۲</b><small>مرحله برد: خط و کامل</small></div>
+    </div>
+    <p>شماره‌ها به‌صورت تصادفی و بدون تکرار اعلام می‌شوند. اگر چند نفر در یک شماره برنده شوند، نتیجه هم‌زمان ثبت و جایزه طبق قوانین همان مسابقه تقسیم خواهد شد.</p>
+  </section>
+  <section class="tour-how-section">
+    <div class="tour-section-heading"><div><span class="tour-eyebrow">HOW IT WORKS</span><h2>مسیر ورود به رقابت</h2></div></div>
+    <div class="tour-step-grid"><div><span>۱</span><b>انتخاب جام</b><small>نوع مسابقه و هزینه ورود را بررسی کن.</small></div><div><span>۲</span><b>ثبت‌نام سروری</b><small>ورود با بینگوکوین از موجودی حساب کسر می‌شود.</small></div><div><span>۳</span><b>اعلام برنامه مسابقه</b><small>جزئیات زمان‌بندی و اجرای مراحل از همین بخش اطلاع‌رسانی می‌شود.</small></div></div>
+    <p class="tour-honesty-note">وضعیت ثبت‌نام و کسر بینگوکوین در حال حاضر به‌صورت سروری فعال است. اجرای خودکار مراحل حذفی، جدول امتیاز زنده و پرداخت جوایز مستقل تورنومنت هنوز در موتور مسابقات پیاده‌سازی نشده‌اند و تا تکمیل آن‌ها به‌عنوان قابلیت فعال نمایش داده نمی‌شوند.</p>
+  </section>`;
 }
 function renderTournamentDetail(bingo=false) {
-  const title = bingo ? 'اتاق بینگو تورنومنت' : 'اتاق تورنومنت';
-  const id = bingo ? 'bingoTournamentEntry' : 'simpleTournamentEntry';
+  const title = bingo ? 'جام ویژه بینگو' : 'جام کلاسیک دبرنا';
   const type = bingo ? 'bingo' : 'simple';
   const cost = bingo ? 100 : 20;
-  const room = (state.tournamentRooms || []).find(item => item.tournament_type === type) || {};
-  const capacity = Number(room.capacity) || 30;
-  const registered = Math.min(capacity, Number(room.registered_count) || 0);
-  const full = room.status === 'full' || registered >= capacity;
-  const entered = state.joined.includes(id);
-  const statusText = entered ? 'ثبت‌نام شد' : full ? 'ظرفیت تکمیل' : 'در صف ثبت‌نام';
-  return `${heading(title, 'ثبت‌نام با بینگوکوین در صف سروری انجام می‌شود.', 'TOURNAMENT ROOM')}
-  <section class="room-panel tournament-room-detail"><div class="tournament-emblem">${bingo ? '🎱' : '🏆'}</div><h2>${title}</h2>
-    <p>ظرفیت صف ${faDigits(capacity)} نفر است. با تکمیل ظرفیت، ثبت‌نام بسته می‌شود.</p>
-    <div class="coin-entry-cost"><img class="bingocoin-icon-img" src="./assets/bingocoin.svg" alt="سکه بینگوکوین"><b>${cost.toLocaleString('fa-IR')} بینگوکوین</b><small>هزینه ورود</small></div>
-    <div class="wait-stats"><div><b>${faDigits(registered)} / ${faDigits(capacity)}</b><small>ثبت‌نام‌شده</small></div><div><b>${state.bingoCoins.toLocaleString('fa-IR')}</b><small>موجودی بینگوکوین تو</small></div><div><b>${statusText}</b><small>وضعیت</small></div></div>
-    <button class="btn btn-primary btn-block" data-action="join-tournament" data-tournament="${type}" ${entered||full?'disabled':''}>${entered?'ثبت‌نام شد':full?'ظرفیت تکمیل شده':'ثبت‌نام با بینگوکوین'}</button>
-    <small class="room-safe-caption">هزینه ورود فقط یک بار کسر می‌شود. پس از پر شدن صف، ثبت‌نام جدید پذیرفته نمی‌شود.</small>
-    ${full?'<p class="muted-note">ظرفیت تکمیل شده است؛ وضعیت بعدی مسابقه پس از تعیین برنامه اجرای تورنمنت اعلام می‌شود.</p>':''}
-  </section>`;
+  const room = getTournamentRoom(type);
+  const capacity = Math.max(1, Number(room.capacity) || 30);
+  const registered = Math.min(capacity, Math.max(0, Number(room.registered_count) || 0));
+  const full = tournamentStatus(room) === 'ظرفیت تکمیل';
+  const entered = hasTournamentEntry(type);
+  const left = Math.max(0, capacity - registered);
+  const progress = Math.min(100, Math.round(registered / capacity * 100));
+  const statusText = entered ? 'ثبت‌نام تو تکمیل شده' : full ? 'ظرفیت این دوره تکمیل شده' : 'ثبت‌نام باز است';
+  const entryId = bingo ? 'bingoTournamentEntry' : 'simpleTournamentEntry';
+  const otherPage = bingo ? 'tournamentRoom' : 'bingoTournament';
+  const otherTitle = bingo ? 'مشاهده جام کلاسیک دبرنا' : 'مشاهده جام ویژه بینگو';
+  const otherCost = bingo ? '۲۰ BGC' : '۱۰۰ BGC';
+  return `${heading(title, bingo ? 'رقابت ویژه دبرنا با ورودی بینگوکوین و قوانین یکسان ۹۰ توپی.' : 'مسابقه کلاسیک دبرنای ۹۰ توپی با ثبت‌نام سروری و کارت‌های اختصاصی.', 'CHAMPIONSHIP DETAILS')}
+  <section class="tour-detail-hero ${bingo ? 'tour-detail-gold' : 'tour-detail-red'}">
+    <div class="tour-detail-symbol">${bingo ? '🎱' : '🏆'}</div>
+    <div class="tour-detail-info"><span class="tour-kicker">${bingo ? 'BINGO CHAMPIONSHIP' : 'CLASSIC DABERNA CUP'}</span><h2>${title}</h2><p>${bingo ? 'یک رقابت اختصاصی برای علاقه‌مندان بینگو؛ همان هیجان ۹۰ گوی، در جامی جداگانه.' : 'قالب آشنای دبرنا با کارت ۱۵ عددی، قرعه‌کشی خودکار و رقابت بین شرکت‌کنندگان.'}</p><span class="tour-status-pill ${entered ? 'entered' : full ? 'full' : ''}">${statusText}</span></div>
+    <div class="tour-entry-price"><small>هزینه ورود</small><b>${faDigits(cost)}</b><span>بینگوکوین</span></div>
+  </section>
+  <section class="tour-registration-panel">
+    <div class="tour-registration-heading"><div><small>REGISTRATION STATUS</small><h2>وضعیت ثبت‌نام</h2></div><span class="tour-registration-icon">${entered ? '✓' : full ? '!' : '♟'}</span></div>
+    <div class="tour-registration-numbers"><div><b>${faDigits(registered)}</b><small>ثبت‌نام‌شده</small></div><div><b>${faDigits(left)}</b><small>ظرفیت باقی‌مانده</small></div><div><b>${faDigits(capacity)}</b><small>ظرفیت این صف</small></div></div>
+    <div class="tour-progress tour-progress-large"><span style="width:${progress}%"></span></div>
+    <div class="tour-registration-foot"><span>${progress.toLocaleString('fa-IR')}٪ تکمیل ظرفیت</span><span>${full ? 'ثبت‌نام بسته' : 'ثبت‌نام فعال'}</span></div>
+    <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full ? 'disabled' : ''}>${entered ? '✓ ثبت‌نام تو قبلاً انجام شده' : full ? 'ظرفیت تکمیل شده' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
+    <p class="tour-balance-note">موجودی فعلی تو: <b>${state.bingoCoins.toLocaleString('fa-IR')} BGC</b> · هزینه فقط یک‌بار و پس از تأیید سرور کسر می‌شود.</p>
+  </section>
+  <section class="tour-detail-grid">
+    <div class="tour-rules-card"><div class="tour-panel-heading"><span>📜</span><div><small>GAME RULES</small><h3>قوانین مسابقه</h3></div></div>
+      <ul><li>هر کارت شامل ۳ ردیف و ۹ ستون و مجموعاً ۱۵ عدد است.</li><li>گوی‌ها از ۱ تا ۹۰ و به‌شکل تصادفی، بدون تکرار اعلام می‌شوند.</li><li>برد اول با تکمیل یک ردیف پنج‌عددی ثبت می‌شود.</li><li>برد کامل با اعلام تمام ۱۵ عدد یک کارت ثبت می‌شود.</li><li>در برد هم‌زمان، همه برندگان همان مرحله ثبت می‌شوند.</li></ul>
+    </div>
+    <div class="tour-prize-card"><div class="tour-panel-heading"><span>👑</span><div><small>WINNING FORMAT</small><h3>مراحل برد</h3></div></div>
+      <div class="tour-winning-stage"><b>Ⅰ</b><div><strong>برنده یک خط</strong><small>تکمیل یک ردیف افقی</small></div></div>
+      <div class="tour-winning-stage"><b>♛</b><div><strong>برنده دبرنای کامل</strong><small>تکمیل تمام خانه‌های کارت</small></div></div>
+      <p class="tour-prize-disclaimer">جزئیات زمان مسابقه و مبالغ جایزه مستقل این جام، تا زمان فعال‌شدن برنامه برگزاری و تسویه تورنومنت اعلام نمی‌شود.</p>
+    </div>
+  </section>
+  <section class="tour-next-cup"><div><small>مسیر جایگزین</small><b>${otherTitle}</b><span>هزینه ورود: ${otherCost}</span></div><button class="btn btn-outline" data-page="${otherPage}">مشاهده جام دیگر ←</button></section>
+  <button class="btn btn-muted btn-block tour-back-button" data-page="tournaments">بازگشت به فهرست جام‌ها</button>`;
 }
 function renderInvite() {
   const nextMilestone = (Math.floor(state.inviteCount / 5) + 1) * 5;
@@ -990,6 +1077,12 @@ document.addEventListener('click', async event => {
   if (pageButton) { event.preventDefault(); setPage(pageButton.dataset.page); return; }
   const authTab=event.target.closest('[data-auth-mode]');
   if(authTab){authMode=authTab.dataset.authMode;render();return;}
+  const tournamentTab = event.target.closest('[data-tournament-tab]');
+  if (tournamentTab) {
+    tournamentLobbyTab = tournamentTab.dataset.tournamentTab === 'mine' ? 'mine' : 'all';
+    render();
+    return;
+  }
   const gameButton = event.target.closest('[data-game]');
   if (gameButton) { launchGame(gameButton.dataset.game); return; }
   const filter = event.target.closest('[data-game-filter]');
