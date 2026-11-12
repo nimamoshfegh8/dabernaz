@@ -126,11 +126,12 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   }
   let snapshot = await roomFor(accounts[0], roomId);
   assert.equal(snapshot.capacity, null);
+  assert.equal(snapshot.minPlayersToStart, 5);
   assert.equal(snapshot.playerCount, 4, roomId + ': four registered players');
   assert.equal(snapshot.queueCount, 4, roomId + ': queue count is players, not cards');
   assert.equal(snapshot.cardCount, 20, roomId + ': room accepts 20 sold cards before other players join');
   assert.equal(snapshot.status, 'waiting');
-  assert.deepEqual(snapshot.economics, economics);
+  assert.deepEqual(snapshot.economics, { price: economics.price });
   assert.equal(snapshot.registrationDeadline, firstDeadline, roomId + ': subsequent purchases do not extend the timer');
   for (const account of accounts.slice(0, 4)) {
     const accountRoom = await roomFor(account, roomId);
@@ -212,6 +213,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const startedRoom = await roomFor(accounts[0], roomId);
   assert.equal(startedRoom.status, 'playing');
   assert.equal(startedRoom.capacity, null);
+  assert.equal(startedRoom.minPlayersToStart, 5);
   assert.equal(startedRoom.playerCount, 8);
   assert.equal(startedRoom.queueCount, 8);
   assert.equal(startedRoom.cardCount, 40);
@@ -434,4 +436,4 @@ for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
 
-console.log('PASS: Daberna uncapped rooms, 150-second first-purchase timer, per-account five-card limit, deadline/late-purchase enforcement, 10/75/15 percentage payouts, simultaneous winners and history; referrals; support tickets; tournaments; server-authoritative mini-games.');
+console.log('PASS: Daberna uncapped rooms, minimum-five-player policy, 150-second first-purchase timer, per-account five-card limit, deadline/late-purchase enforcement, prize calculations, simultaneous winners and history; referrals; support tickets; tournaments; server-authoritative mini-games.');
