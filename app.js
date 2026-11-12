@@ -228,7 +228,7 @@ function renderHome() {
     <button class="shortcut" data-page="wallet"><span class="symbol">👛</span><b>کیف پول</b><small>موجودی سکه</small></button>
   </div>
   <div class="promo"><div class="promo-art">🎯</div><div class="promo-copy"><b>بازی‌های دابرناز</b><p>بازی مورد علاقه‌ات را انتخاب کن و مهارتت را محک بزن.</p></div><button class="btn btn-outline" data-page="games">مشاهده</button></div>
-  <section class="room-teaser"><div class="room-teaser-art">🎱</div><div class="room-teaser-copy"><span>اتاق‌های آنلاین دبرنا</span><b>۴ سطح اتاق</b><small>ظرفیت ۳۰ کارت · شروع و قرعه‌کشی خودکار</small></div><button class="btn btn-gold" data-page="games">انتخاب اتاق <span>←</span></button></section>
+  
   ${section('بازی‌های محبوب', 'همه بازی‌ها', 'games')}
   <div class="game-grid">${roomGameCard()}${gameCard('rps','✊✋✌️','سنگ، کاغذ، قیچی','مسابقه خودکار تا رسیدن یکی از طرفین به ۳ برد','بازی مهارتی · بدون شرط‌بندی','game-cover-rps')}${gameCard('tic','⭕❌','دوز حرفه‌ای','صفحه ۳×۳ با حریف هوشمند و تصمیم‌های تاکتیکی','بازی مهارتی · بدون شرط‌بندی','game-cover-tic')}</div>
   ${section('وضعیت حساب', 'حساب کاربری', 'account')}
