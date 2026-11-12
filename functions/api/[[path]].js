@@ -1,6 +1,7 @@
 /* Dabernaz Cloudflare Pages Function: authentication, D1 accounts and live Daberna rooms. */
 const REGISTRATION_WINDOW_MS = 150000;
 const MAX_CARDS_PER_PLAYER = 5;
+const MIN_PLAYERS_TO_START = 5;
 const ROOM_ECONOMICS = Object.freeze({
   room5000: { price: 5000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
   room10000: { price: 10000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
@@ -634,7 +635,7 @@ function fullComplete(card, called) {
 
 async function startRoom(db, room) {
   const ids = [...new Set((room.queue || []).map(Number).filter(Number.isInteger))];
-  if (!ids.length) return false;
+  if (ids.length < MIN_PLAYERS_TO_START) return false;
   const byId = new Map();
   // Chunk lookups so a room has no hidden bind-parameter capacity.
   for (let offset = 0; offset < ids.length; offset += 80) {
@@ -650,7 +651,7 @@ async function startRoom(db, room) {
     if (row && cards.length) players.push({ userId:id, name:row.username, memberId:String(row.member_id || ''), cards });
   }
   const totalCards = players.reduce((sum, player) => sum + player.cards.length, 0);
-  if (!players.length || totalCards < 1) return false;
+  if (players.length < MIN_PLAYERS_TO_START || totalCards < MIN_PLAYERS_TO_START) return false;
   room.players = players;
   room.totalPlayers = players.length;
   room.totalCards = totalCards;
@@ -790,13 +791,14 @@ async function publicRoom(db, room, userId) {
   const fullPrize = economics ? Math.floor(grossRevenue * economics.fullPrizePercent / 100) : 0;
   const commission = grossRevenue - linePrize - fullPrize;
   return {
-    id:room.id, status:room.status, capacity:null, maxCardsPerPlayer:MAX_CARDS_PER_PLAYER,
-    registrationWindowMs:REGISTRATION_WINDOW_MS,
+    id:room.id, status:room.status, capacity:null, minPlayersToStart:MIN_PLAYERS_TO_START,
+    maxCardsPerPlayer:MAX_CARDS_PER_PLAYER, registrationWindowMs:REGISTRATION_WINDOW_MS,
     registrationStartedAt:room.registrationStartedAt || null,
     registrationDeadline:room.registrationDeadline || null,
     registrationRemainingMs:room.status === 'waiting' && room.registrationDeadline
       ? Math.max(0, Number(room.registrationDeadline) - Date.now()) : null,
-    economics, grossRevenue, estimatedPrizes:{line:linePrize,full:fullPrize,commission},
+    economics:{price:Number(economics?.price) || 0}, grossRevenue,
+    estimatedPrizes:{line:linePrize,full:fullPrize},
     finance:room.roundId ? {
       totalPlayers:Number(room.totalPlayers) || room.players.length,
       totalCards:Number(room.totalCards) || room.players.reduce((sum, player) => sum + (player.cards?.length || 0), 0),
@@ -898,7 +900,7 @@ async function handleRoom(db, request, user, path) {
       }
       return {room:await publicRoom(db,room,userId)};
     });
-    if (result.conflict) return json({error:'مهلت خرید این سانس تمام شده و بازی آغاز شده است؛ بعد از پایان وارد سانس بعدی شو.',room:result.room},409);
+    if (result.conflict) return json({error:'این سانس در حال اجراست؛ بعد از پایان وارد سانس بعدی شو.',room:result.room},409);
     return json({ok:true,room:result.room});
   }
   if (request.method === 'POST' && action === 'leave') {
