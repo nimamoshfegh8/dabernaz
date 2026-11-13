@@ -1048,12 +1048,6 @@ function persianNumberWords(number) {
 
 async function getPersianNumberAudio(number, requestUrl) {
   const spokenText = `عدد ${persianNumberWords(number)}`;
-  const upstreamUrl = new URL('https://translate.google.com/translate_tts');
-  upstreamUrl.searchParams.set('ie', 'UTF-8');
-  upstreamUrl.searchParams.set('client', 'tw-ob');
-  upstreamUrl.searchParams.set('tl', 'fa');
-  upstreamUrl.searchParams.set('q', spokenText);
-
   const cacheKey = new Request(new URL(`/api/voice/${number}`, requestUrl).toString(), { method: 'GET' });
   const edgeCache = globalThis.caches?.default;
   if (edgeCache) {
@@ -1063,21 +1057,50 @@ async function getPersianNumberAudio(number, requestUrl) {
     } catch (_) { /* Continue to origin when cache is unavailable. */ }
   }
 
-  const upstream = await fetch(upstreamUrl.toString(), {
-    method: 'GET',
-    headers: {
-      'accept': 'audio/mpeg,audio/*;q=0.9,*/*;q=0.1',
-      'user-agent': 'Mozilla/5.0 (compatible; DabernazVoice/1.0)',
-      'referer': 'https://translate.google.com/',
-    },
-    cf: { cacheTtl: 86400, cacheEverything: true },
-  });
-  const contentType = upstream.headers.get('content-type') || '';
-  if (!upstream.ok || !contentType.toLowerCase().includes('audio')) {
-    throw new Error(`Persian voice provider returned HTTP ${upstream.status} (${contentType || 'unknown content type'})`);
+  // Google changed its unofficial Translate TTS route in 2026. Try the current
+  // translate.googleapis.com endpoint first, then the legacy hosts as fallback.
+  const providers = [
+    { host: 'https://translate.googleapis.com/translate_tts', client: 'gtx', referer: 'https://translate.google.com/' },
+    { host: 'https://translate.google.com/translate_tts', client: 'gtx', referer: 'https://translate.google.com/' },
+    { host: 'https://translate.google.com/translate_tts', client: 'tw-ob', referer: 'https://translate.google.com/' },
+  ];
+  const failures = [];
+  let audio = null;
+  for (const provider of providers) {
+    const upstreamUrl = new URL(provider.host);
+    upstreamUrl.searchParams.set('ie', 'UTF-8');
+    upstreamUrl.searchParams.set('client', provider.client);
+    upstreamUrl.searchParams.set('tl', 'fa');
+    upstreamUrl.searchParams.set('q', spokenText);
+    try {
+      const upstream = await fetch(upstreamUrl.toString(), {
+        method: 'GET',
+        headers: {
+          'accept': 'audio/mpeg,audio/*;q=0.9,*/*;q=0.1',
+          'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36',
+          'referer': provider.referer,
+        },
+        cf: { cacheTtl: 86400, cacheEverything: true },
+      });
+      const contentType = upstream.headers.get('content-type') || '';
+      if (!upstream.ok || !contentType.toLowerCase().includes('audio')) {
+        failures.push(`${provider.host} (${upstream.status}, ${contentType || 'unknown type'})`);
+        continue;
+      }
+      const bytes = await upstream.arrayBuffer();
+      if (bytes.byteLength < 512) {
+        failures.push(`${provider.host} (empty audio: ${bytes.byteLength} bytes)`);
+        continue;
+      }
+      audio = bytes;
+      break;
+    } catch (error) {
+      failures.push(`${provider.host} (${String(error?.message || error)})`);
+    }
   }
-  const audio = await upstream.arrayBuffer();
-  if (audio.byteLength < 512) throw new Error('Persian voice provider returned an empty audio clip.');
+  if (!audio) {
+    throw new Error(`No Persian audio endpoint returned MP3. ${failures.join('; ')}`);
+  }
 
   const response = new Response(audio, {
     status: 200,
