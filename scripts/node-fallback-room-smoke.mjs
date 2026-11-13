@@ -25,6 +25,7 @@ const child = spawn(process.execPath, ['server.js'], {
     NODE_ENV: 'test',
     DABERNAZ_DATA_DIR: dataDir,
     DABERNAZ_DRAW_INTERVAL_MS: '60000',
+    DABERNAZ_TEST_REGISTRATION_WINDOW_MS: '500',
     COOKIE_SECURE: 'false'
   },
   stdio: ['ignore', 'ignore', 'pipe']
@@ -81,13 +82,13 @@ try {
   assert.equal(first.response.status, 200, first.data.error || '');
   const firstRoom = first.data.room;
   assert.equal(firstRoom.capacity, null);
-  assert.equal(firstRoom.registrationWindowMs, 150000);
+  assert.equal(firstRoom.registrationWindowMs, 500);
   assert.equal(firstRoom.minPlayersToStart, 5);
   assert.equal(firstRoom.maxCardsPerPlayer, 5);
   assert.equal(firstRoom.playerCount, 1);
   assert.equal(firstRoom.cardCount, 3);
   const fixedDeadline = firstRoom.registrationDeadline;
-  assert.equal(fixedDeadline - firstRoom.registrationStartedAt, 150000);
+  assert.equal(fixedDeadline - firstRoom.registrationStartedAt, 500);
 
   const addTwo = await request('/api/rooms/room5000/join', {
     method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 2 }
@@ -128,10 +129,7 @@ try {
 
   // Expire the first round's fixed timer in isolated test storage. The server
   // starts it only after the deadline and only when at least five people joined.
-  const storePath = path.join(dataDir, 'store.json');
-  const store = JSON.parse(await readFile(storePath, 'utf8'));
-  store.rooms.room5000.registrationDeadline = 1;
-  await writeFile(storePath, JSON.stringify(store), 'utf8');
+  await delay(600);
   const started = await request('/api/rooms/room5000', { cookie: accounts[1].cookie });
   assert.equal(started.data.room.status, 'playing');
   assert.equal(started.data.room.capacity, null);
@@ -147,9 +145,7 @@ try {
     });
     assert.equal(joined.response.status, 200);
   }
-  const secondStore = JSON.parse(await readFile(storePath, 'utf8'));
-  secondStore.rooms.room10000.registrationDeadline = 1;
-  await writeFile(storePath, JSON.stringify(secondStore), 'utf8');
+  await delay(600);
   const underMinimum = await request('/api/rooms/room10000', { cookie: accounts[0].cookie });
   assert.equal(underMinimum.data.room.status, 'waiting');
   assert.equal(underMinimum.data.room.playerCount, 4);
