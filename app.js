@@ -478,16 +478,35 @@ function updateHeader() {
   $('#headerBalance').textContent = money(state.balance);
   if ($('#headerBingoCoins')) $('#headerBingoCoins').textContent = `${state.bingoCoins.toLocaleString('fa-IR')} BGC`;
 }
-function setPage(page) {
-  const allowed = ['home','games','room5000','room10000','room20000','room50000','roomGame','tournaments','tournamentRoom','bingoTournament','invite','wallet','account','settings','support'];
-  if (!allowed.includes(page)) page = 'home';
+const APP_PAGES = ['home','games','room5000','room10000','room20000','room50000','roomGame','tournaments','tournamentRoom','bingoTournament','invite','wallet','account','settings','support'];
+function pageFromLocation() {
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const page = hash.get('page');
+  const room = hash.get('room');
+  if (page === 'roomGame' && ROOM_CONFIGS.some(item => item.id === room)) activeRoomId = room;
+  return APP_PAGES.includes(page) ? page : 'home';
+}
+function syncPageLocation(page, replace = false) {
+  const hash = new URLSearchParams();
+  hash.set('page', page);
+  if (page === 'roomGame') hash.set('room', activeRoomId);
+  const next = '#' + hash.toString();
+  if (location.hash !== next) {
+    if (replace) history.replaceState(null, '', next);
+    else history.pushState(null, '', next);
+  }
+}
+function setPage(page, options = {}) {
+  const { sync = true, scroll = true } = options;
+  if (!APP_PAGES.includes(page)) page = 'home';
   if (ROOM_CONFIGS.some(room => room.id === page)) {
     if(roomServerSnapshot && roomServerSnapshot.id!==page){roomServerSnapshot=null;roomCards=[];roomCardCount=1;roomCalledNumbers=[];roomStages={one:false,full:false};}
-    activeRoomId = page; 
+    activeRoomId = page;
   }
   currentPage = page;
+  if (sync) syncPageLocation(page);
   render();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
   if (ROOM_CONFIGS.some(room => room.id === page) || page === 'roomGame') pollCurrentRoom();
 }
 function heading(title, subtitle, label = '') {
@@ -720,11 +739,15 @@ async function pollCurrentRoom() {
     roomStages={one:roomHasWinner(result.room.winners?.line),full:roomHasWinner(result.room.winners?.full)};
     if (Number.isFinite(Number(result.room.myBingoCoins))) { state.bingoCoins=Math.max(0,Number(result.room.myBingoCoins)); state.coinTransactions=Array.isArray(result.room.myCoinTransactions)?result.room.myCoinTransactions.slice(0,50):state.coinTransactions; saveState(); updateHeader(); }
     if (result.room.status==='playing' && currentPage==='roomGame') speakRoomNumber(result.room.latestNumber, result.room);
-    if (result.room.status==='finished' && currentUser) {
+    if (result.room.status==='finished') {
+      roomCards=[];
+      roomCardCount=1;
+      if (currentUser) {
       try {
         const me=await apiRequest('/api/auth/me',{method:'GET',headers:{}});
         if(me.user) applyAuthenticatedUser(me.user);
       } catch (_) {}
+      }
     }
     if (result.room.status==='playing' && result.room.joined && currentPage===roomId) { activeRoomId=roomId; currentPage='roomGame'; render(); }
     else if (currentPage==='roomGame' && result.room.status==='finished') render();
@@ -1391,7 +1414,7 @@ document.addEventListener('click', async event => {
     return;
   }
   if (action === 'room-open-game') { unlockPersianAudio(); if(roomServerSnapshot?.status==='playing'){setPage('roomGame');} else showToast('این سانس هنوز شروع نشده است.'); return; }
-  if (action === 'room-back-lobby') { setPage(activeRoomId); return; }
+  if (action === 'room-back-lobby') { roomCards=[]; roomCardCount=1; roomServerSnapshot=null; setPage(activeRoomId); return; }
   if (action === 'copy-ref') {
     try { await navigator.clipboard.writeText(state.referralCode); showToast('کد دعوت کپی شد'); }
     catch (_) { const input = $('#refCode'); input?.select(); showToast('کد دعوت را به‌صورت دستی کپی کن'); }
@@ -1521,6 +1544,7 @@ document.addEventListener('submit', async event => {
   }
 });
 
+currentPage = pageFromLocation();
 render();
 loadAuthenticatedUser();
 checkPersianVoicePack();
@@ -1542,3 +1566,8 @@ window.addEventListener('online', () => {
   });
 });
 setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom(); }, 2200);
+
+window.addEventListener('hashchange', () => {
+  const page = pageFromLocation();
+  if (page !== currentPage || (page === 'roomGame' && currentPage === 'roomGame')) setPage(page, { sync:false, scroll:false });
+});
