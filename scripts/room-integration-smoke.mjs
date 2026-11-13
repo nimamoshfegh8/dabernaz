@@ -80,7 +80,7 @@ assert.equal(health.database, 'D1');
 // Verify the Persian voice provider, server-side MP3 proxy, and the full 1..90 range.
 const voiceHealthResponse = await fetch(baseUrl + '/api/voice/health');
 const voiceHealth = await voiceHealthResponse.json().catch(() => ({}));
-assert.equal(voiceHealthResponse.status, 200, 'Persian voice provider health endpoint must return HTTP 200');
+assert.equal(voiceHealthResponse.status, 200, 'Persian voice provider health endpoint failed: ' + String(voiceHealth.error || 'no details'));
 assert.equal(voiceHealth.ok, true, 'Persian voice provider must return a playable MP3');
 assert.equal(voiceHealth.contentType, 'audio/mpeg', 'voice health must report MPEG audio');
 assert.ok(Number(voiceHealth.bytes) > 512, 'Persian voice MP3 must contain audio data');
