@@ -1083,7 +1083,7 @@ function renderSettings() {
   </section>
   <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
     <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
-    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.18.0</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.19.0</span></div>
   </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
@@ -1565,7 +1565,7 @@ document.addEventListener('click', async event => {
   else if (action === 'test-number-voice') {
     voicePlaybackErrorShown = false;
     const ok = await PersianAudioManager.previewSample({ fromGesture: true });
-    if (ok) showToast(voicePackReady ? 'نمونهٔ Sage Woman پخش شد؛ بستهٔ ۹۰ شماره آماده است.' : 'نمونهٔ اصلی شمارهٔ ۴۲ پخش شد؛ برای فعال‌سازی اتاق‌ها هنوز ۸۹ فایل دیگر لازم است.');
+    if (ok) showToast(voicePackReady ? 'نمونهٔ Sage Woman پخش شد؛ بستهٔ ۹۰ شماره آماده است.' : 'نمونهٔ اصلی شمارهٔ ۴۲ پخش شد؛ هنوز ' + Math.max(0, 90 - availableSageWomanNumbers.size) + ' فایل دیگر برای فعال‌سازی اتاق‌ها لازم است.');
     renderSettingsIntoView();
   }
   else if (action === 'enable-room-audio') {
