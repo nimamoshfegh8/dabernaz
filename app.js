@@ -1167,7 +1167,7 @@ function renderSettings() {
     voicePackReady ? 'صدای زنانه Sage Woman برای اعلام شماره‌های ۱ تا ۹۰' : 'بستهٔ Sage Woman هنوز نصب نشده؛ در APK از موتور بومی فارسی Android و در وب از موتور گفتار مرورگر استفاده می‌شود.');
   return `${heading('تنظیمات', 'صدای بازی، اعلام شماره‌ها و اعلان‌های دستگاه را مدیریت کن.', 'PREFERENCES')}
   <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
-    ${sw('sounds','صدای بازی','روشن یا خاموش کردن بازخوردهای صوتی بازی')}
+    ${sw('sounds','صداهای محیط بازی','افکت‌ها و صداهای محیطی بازی؛ مستقل از اعلام شماره‌ها')}
     ${voiceControl}
     <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${voicePackReady ? 'پخش نمونهٔ «چهل دو» با صدای Sage Woman' : 'پخش نمونه از موتور گفتار دستگاه؛ صدای Sage Woman پس از نصب بسته فعال می‌شود'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
     ${sw('vibration','لرزش','بازخورد لرزشی در دستگاه‌های پشتیبانی‌شده')}
@@ -1178,7 +1178,7 @@ function renderSettings() {
   </section>
   <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
     <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
-    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.15.0</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.18.0</span></div>
   </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
@@ -1680,26 +1680,7 @@ document.addEventListener('click', async event => {
         : 'صدای فارسی فعال شد؛ نمونه پخش شد و شماره‌های بعدی اعلام می‌شوند.');
     }
   }
-  else if (action === 'enable-room-audio') {
-    unlockPersianAudio();
-    refreshPersianBrowserVoices();
-    state.settings.sounds = true;
-    state.settings.voiceNumbers = true;
-    saveState();
-    const latest = Number(roomServerSnapshot?.latestNumber);
-    if (latest >= 1 && latest <= 90) {
-      showToast('صدای فارسی فعال شد؛ شماره فعلی پخش می‌شود.');
-      // Same direct gesture path as the test button, to unlock Android TTS.
-      speakPersianNumberFallback(latest).catch(error => showToast(error.message));
-    } else {
-      // Prime speech output from the user's tap; subsequent numbers use the same engine.
-      const prime = new window.SpeechSynthesisUtterance(' ');
-      prime.lang = browserSpeechVoice?.lang || 'fa-IR';
-      prime.volume = 0;
-      try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(prime); } catch (_) {}
-      showToast('صدای فارسی فعال شد؛ شماره بعدی به‌صورت صوتی اعلام می‌شود.');
-    }
-  }
+
   else if (action === 'test-notification') {
     if (!settingEnabled('notifications')) { showToast('ابتدا اعلان‌های دستگاه را فعال کن.'); return; }
     if (!('Notification' in window) || Notification.permission !== 'granted') { showToast('اجازه اعلان در دسترس نیست.'); return; }
