@@ -1,9 +1,14 @@
 {
-  "version": 2,
+  "version": 3,
   "provider": "kenerate-sage-woman",
   "voice": "Sage Woman",
   "language": "fa-IR",
   "configured": false,
   "requiredNumbers": 90,
-  "numbers": {}
+  "numbers": {
+    "42": {
+      "file": "042.mp3",
+      "text": "چهل و دو"
+    }
+  }
 }
