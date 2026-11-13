@@ -5,6 +5,13 @@ import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.media.AudioAttributes;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Bundle;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import android.speech.tts.Voice;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -13,6 +20,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.SafeBrowsingResponse;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
@@ -25,6 +33,10 @@ import android.net.http.SslError;
 import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 
+import org.json.JSONObject;
+import java.util.Locale;
+import java.util.Set;
+
 import androidx.core.view.WindowCompat;
 
 public class MainActivity extends Activity {
@@ -36,6 +48,9 @@ public class MainActivity extends Activity {
     private ProgressBar progressBar;
     private WebChromeClient.FileChooserParams pendingChooser;
     private android.webkit.ValueCallback<Uri[]> fileCallback;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private TextToSpeech textToSpeech;
+    private volatile boolean nativeTtsReady = false;
 
     private static final String OFFLINE_HTML =
         "<!doctype html><html lang='fa' dir='rtl'><meta charset='utf-8'>" +
@@ -109,6 +124,8 @@ public class MainActivity extends Activity {
             ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP);
         root.addView(progressBar, progressParams);
         setContentView(root);
+        webView.addJavascriptInterface(new NativeTtsBridge(), "DabernazNativeTTS");
+        initializeNativeTts();
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
@@ -183,6 +200,136 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void initializeNativeTts() {
+        textToSpeech = new TextToSpeech(getApplicationContext(), status -> {
+            TextToSpeech engine = textToSpeech;
+            if (engine == null || status != TextToSpeech.SUCCESS) {
+                nativeTtsReady = false;
+                return;
+            }
+
+            int languageStatus = engine.setLanguage(new Locale("fa", "IR"));
+            if (languageStatus < TextToSpeech.LANG_AVAILABLE) {
+                nativeTtsReady = false;
+                return;
+            }
+
+            // Prefer a Persian female voice when the installed Android engine exposes one.
+            // The licensed Sage Woman MP3 pack remains the website's primary voice.
+            try {
+                Set<Voice> voices = engine.getVoices();
+                if (voices != null) {
+                    for (Voice voice : voices) {
+                        Locale locale = voice.getLocale();
+                        String voiceName = voice.getName() == null ? "" : voice.getName().toLowerCase(Locale.ROOT);
+                        if (locale != null && "fa".equalsIgnoreCase(locale.getLanguage()) &&
+                            (voiceName.contains("female") || voiceName.contains("woman") || voiceName.contains("زن"))) {
+                            engine.setVoice(voice);
+                            break;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // Some vendor TTS engines do not expose a complete voice catalogue.
+            }
+
+            engine.setSpeechRate(0.84f);
+            engine.setPitch(1.0f);
+            engine.setAudioAttributes(new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build());
+
+            engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override
+                public void onStart(String utteranceId) {
+                }
+
+                @Override
+                public void onDone(String utteranceId) {
+                    notifyNativeTtsResult(utteranceId, true, "");
+                }
+
+                @Override
+                public void onError(String utteranceId) {
+                    notifyNativeTtsResult(utteranceId, false, "Android TextToSpeech playback failed.");
+                }
+
+                @Override
+                public void onError(String utteranceId, int errorCode) {
+                    notifyNativeTtsResult(utteranceId, false, "Android TextToSpeech error " + errorCode + ".");
+                }
+
+                @Override
+                public void onStop(String utteranceId, boolean interrupted) {
+                    notifyNativeTtsResult(utteranceId, false, interrupted
+                        ? "Android speech was interrupted."
+                        : "Android speech stopped.");
+                }
+            });
+            nativeTtsReady = true;
+            if (webView != null) {
+                webView.post(() -> webView.evaluateJavascript(
+                    "window.dispatchEvent(new Event('dabernaz-native-tts-ready'));", null));
+            }
+        });
+    }
+
+    private void notifyNativeTtsResult(String requestId, boolean ok, String error) {
+        if (webView == null || requestId == null ||
+            !requestId.matches("[A-Za-z0-9_-]{1,80}")) return;
+        String script = "window.dispatchEvent(new CustomEvent('dabernaz-native-tts-result',{detail:{requestId:" +
+            JSONObject.quote(requestId) + ",ok:" + ok + ",error:" + JSONObject.quote(error == null ? "" : error) + "}}));";
+        webView.post(() -> {
+            if (webView != null) webView.evaluateJavascript(script, null);
+        });
+    }
+
+    private final class NativeTtsBridge {
+        @JavascriptInterface
+        public boolean isAvailable() {
+            return nativeTtsReady && textToSpeech != null;
+        }
+
+        @JavascriptInterface
+        public void speak(String text, String language, String requestId) {
+            final String safeText = text == null ? "" : text.trim();
+            final String safeId = requestId == null ? "" : requestId;
+            if (!safeId.matches("[A-Za-z0-9_-]{1,80}")) return;
+            if (!"fa-IR".equalsIgnoreCase(language) ||
+                safeText.isEmpty() || safeText.length() > 80 ||
+                !safeText.matches("[\\p{L}\\s]+")) {
+                notifyNativeTtsResult(safeId, false, "Invalid Persian speech request.");
+                return;
+            }
+
+            mainHandler.post(() -> {
+                TextToSpeech engine = textToSpeech;
+                if (!nativeTtsReady || engine == null) {
+                    notifyNativeTtsResult(safeId, false, "Persian Android voice is not installed or ready.");
+                    return;
+                }
+                int languageStatus = engine.setLanguage(new Locale("fa", "IR"));
+                if (languageStatus < TextToSpeech.LANG_AVAILABLE) {
+                    nativeTtsReady = false;
+                    notifyNativeTtsResult(safeId, false, "Persian Android voice data is unavailable.");
+                    return;
+                }
+                int result = engine.speak(safeText, TextToSpeech.QUEUE_ADD, new Bundle(), safeId);
+                if (result == TextToSpeech.ERROR) {
+                    notifyNativeTtsResult(safeId, false, "Android TextToSpeech rejected the request.");
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void stop() {
+            mainHandler.post(() -> {
+                if (textToSpeech != null) textToSpeech.stop();
+            });
+        }
+    }
+
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
@@ -237,6 +384,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (fileCallback != null) fileCallback.onReceiveValue(null);
+        nativeTtsReady = false;
+        if (textToSpeech != null) {
+            textToSpeech.stop();
+            textToSpeech.shutdown();
+            textToSpeech = null;
+        }
         if (webView != null) {
             webView.stopLoading();
             webView.setWebChromeClient(null);
