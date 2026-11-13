@@ -4,7 +4,7 @@ const STORAGE_KEY = 'dabernaz_state_v1';
 const cloneData = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const defaultState = {
   username: '', memberId: '', balance: 0, joined: [], transactions: [],
-  settings: { sounds: true, voiceNumbers: true, notifications: false, privacy: true, vibration: false },
+  settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 2, notifications: false, vibration: false },
   referralCode: '', gamesPlayed: 0, wins: 0, points: 0,
   bingoCoins: 0, coinTransactions: [], inviteCount: 0, inviteRewardMilestones: [],
   roomHistory: [], supportTickets: [], tournamentRooms: []
@@ -26,7 +26,13 @@ function loadState() {
       roomHistory: Array.isArray(saved.roomHistory) ? saved.roomHistory.slice(0,12) : [],
       supportTickets: Array.isArray(saved.supportTickets) ? saved.supportTickets.slice(0,20) : [],
       tournamentRooms: Array.isArray(saved.tournamentRooms) ? saved.tournamentRooms.slice(0,2) : [],
-      settings: { ...defaultState.settings, ...(saved.settings || {}) }
+      settings: (() => {
+        const previous = saved.settings && typeof saved.settings === 'object' ? saved.settings : {};
+        const merged = { ...defaultState.settings, ...previous };
+        if (Number(previous.voiceAudioVersion) !== 2) merged.voiceNumbers = false;
+        merged.voiceAudioVersion = 2;
+        return merged;
+      })()
     };
   } catch (_) { return cloneData(defaultState); }
 }
@@ -48,6 +54,10 @@ let bingoGame = null;
 let tournamentLobbyTab = 'all';
 let lastSpokenRoomAnnouncementKey = '';
 let settingsAudioContext = null;
+let voicePackReady = false;
+let voicePackCheckPromise = null;
+let voicePlaybackErrorShown = false;
+let roomJoinBusy = false;
 
 function settingEnabled(key) { return !!state?.settings?.[key]; }
 
@@ -109,31 +119,51 @@ async function loadPersianNumberAudio(number) {
   if (!persianAudioContext) throw new Error('ابتدا روی دکمه فعال‌سازی صدای فارسی بزن.');
   if (persianAudioAsset) {
     const clip = persianAudioAsset.manifest.numbers[String(value)];
-    if (!clip) throw new Error('فایل صوتی این شماره پیدا نشد.');
+    if (!clip) throw new Error('فایل صوتی این شماره در بسته Sage Woman پیدا نشد.');
     return { buffer: persianAudioAsset.buffer, clip };
   }
 
   if (!persianAudioAssetPromise) {
     const loading = (async () => {
       const base = new URL('./assets/voice/', document.baseURI);
-      const [manifestResponse, audioResponse] = await Promise.all([
-        fetch(new URL('fa-numbers.json?v=1', base), { method:'GET', cache:'force-cache', credentials:'same-origin' }),
-        fetch(new URL('fa-numbers.mp3?v=1', base), { method:'GET', cache:'force-cache', credentials:'same-origin' })
-      ]);
-      if (!manifestResponse.ok) throw new Error('دریافت فهرست صدای فارسی ناموفق بود (HTTP ' + manifestResponse.status + ').');
-      if (!audioResponse.ok) throw new Error('دریافت فایل صدای فارسی ناموفق بود (HTTP ' + audioResponse.status + ').');
+      const manifestResponse = await fetch(new URL('sage-woman.json?v=2', base), {
+        method:'GET', cache:'no-store', credentials:'same-origin'
+      });
+      if (!manifestResponse.ok) throw new Error('بسته صدای طبیعی Sage Woman هنوز در سایت قرار نگرفته است.');
       const manifest = await manifestResponse.json();
-      if (!manifest || manifest.provider !== 'bundled-persian-audio' || !manifest.numbers ||
-          Object.keys(manifest.numbers).length !== 90) {
-        throw new Error('فهرست فایل‌های صدای فارسی کامل یا معتبر نیست.');
+      if (!manifest || manifest.provider !== 'kenerate-sage-woman' ||
+          manifest.voice !== 'Sage Woman' || manifest.configured !== true ||
+          !manifest.numbers || Object.keys(manifest.numbers).length !== 90) {
+        throw new Error('بسته کامل ۹۰ شماره با صدای Sage Woman هنوز آماده نیست.');
+      }
+
+      const audioResponse = await fetch(new URL('sage-woman.mp3?v=2', base), {
+        method:'GET', cache:'no-store', credentials:'same-origin'
+      });
+      if (!audioResponse.ok) throw new Error('فایل صوتی Sage Woman دریافت نشد.');
+      if (!(audioResponse.headers.get('content-type') || '').toLowerCase().includes('audio')) {
+        throw new Error('نوع فایل صدای Sage Woman معتبر نیست.');
       }
       const audioData = await audioResponse.arrayBuffer();
-      if (audioData.byteLength < 200000 || !(audioResponse.headers.get('content-type') || '').toLowerCase().includes('audio')) {
-        throw new Error('فایل صوتی فارسی معتبر یا کامل نیست.');
-      }
+      if (audioData.byteLength < 15000) throw new Error('فایل صوتی Sage Woman ناقص است.');
       const buffer = await persianAudioContext.decodeAudioData(audioData.slice(0));
-      if (buffer.duration < 150) throw new Error('فایل صوتی فارسی ناقص دریافت شده است.');
+      if (!Number.isFinite(buffer.duration) || buffer.duration < 20) {
+        throw new Error('فایل صوتی باید شامل تمام ۹۰ شماره باشد.');
+      }
+      for (let n = 1; n <= 90; n++) {
+        const clip = manifest.numbers[String(n)];
+        if (!clip || !Number.isFinite(Number(clip.start)) || !Number.isFinite(Number(clip.duration)) ||
+            Number(clip.start) < 0 || Number(clip.duration) <= 0 ||
+            Number(clip.start) + Number(clip.duration) > buffer.duration + 0.2) {
+          throw new Error('زمان‌بندی صدای شماره ' + n + ' معتبر نیست.');
+        }
+        const expectedText = numberToPersianWords(n);
+        if (String(clip.text || '').trim() !== expectedText) {
+          throw new Error('متن شماره ' + n + ' با تلفظ مورد انتظار هماهنگ نیست.');
+        }
+      }
       persianAudioAsset = { manifest, buffer };
+      voicePackReady = true;
       return persianAudioAsset;
     })();
     persianAudioAssetPromise = loading.catch(error => {
@@ -144,18 +174,30 @@ async function loadPersianNumberAudio(number) {
 
   await persianAudioAssetPromise;
   const clip = persianAudioAsset.manifest.numbers[String(value)];
-  if (!clip || !Number.isFinite(Number(clip.start)) || !Number.isFinite(Number(clip.duration)) ||
-      Number(clip.start) < 0 || Number(clip.duration) <= 0 ||
-      Number(clip.start) + Number(clip.duration) > persianAudioAsset.buffer.duration + 0.2) {
-    throw new Error('محدوده صوتی شماره موردنظر معتبر نیست.');
-  }
   return { buffer: persianAudioAsset.buffer, clip };
+}
+
+async function checkPersianVoicePack() {
+  if (voicePackCheckPromise) return voicePackCheckPromise;
+  voicePackCheckPromise = (async () => {
+    try {
+      const response = await fetch('/api/voice/health', { cache:'no-store', credentials:'same-origin' });
+      const result = await response.json();
+      voicePackReady = response.ok && result.ok === true && result.configured === true &&
+        result.provider === 'kenerate-sage-woman' && Number(result.numbers) === 90;
+    } catch (_) {
+      voicePackReady = false;
+    }
+    if (currentPage === 'settings') renderSettingsIntoView();
+    return voicePackReady;
+  })().finally(() => { voicePackCheckPromise = null; });
+  return voicePackCheckPromise;
 }
 
 function playPersianNumberAudio(number) {
   const value = Math.trunc(Number(number));
   if (!Number.isInteger(value) || value < 1 || value > 90) return Promise.resolve(false);
-  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return Promise.resolve(false);
+  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers') || !voicePackReady) return Promise.resolve(false);
   if ((!persianAudioContext || persianAudioContext.state === 'closed') && !unlockPersianAudio()) return Promise.resolve(false);
 
   const play = async () => {
@@ -185,7 +227,7 @@ function playPersianNumberAudio(number) {
     .then(play)
     .catch(error => {
       console.error('[Dabernaz Persian audio]', error);
-      showToast(error.message || 'پخش صدای فارسی انجام نشد.');
+      if (!voicePlaybackErrorShown) { voicePlaybackErrorShown = true; showToast(error.message || 'پخش صدای فارسی انجام نشد.'); }
       return false;
     });
   return persianAudioQueue;
@@ -219,6 +261,10 @@ function playSettingsTone() {
 
 async function toggleSetting(key) {
   const next = !settingEnabled(key);
+  if (key === 'voiceNumbers' && next && !voicePackReady) {
+    showToast('ابتدا باید فایل کامل ۹۰ شماره با صدای Sage Woman در سایت قرار بگیرد.');
+    return;
+  }
   if (key === 'notifications' && next) {
     if (!('Notification' in window)) {
       showToast('اعلان‌های سیستمی در این مرورگر پشتیبانی نمی‌شود.');
@@ -857,19 +903,24 @@ function renderAuthPage() {
 function accountRow(icon, title, desc, action) { return `<button class="list-row" data-action="${action}"><span class="row-icon">${icon}</span><span class="row-copy"><b>${title}</b><small>${desc}</small></span><span class="chevron">‹</span></button>`; }
 function renderSettings() {
   const sw = (key, title, desc) => `<div class="setting-row"><div class="setting-copy"><b>${title}</b><small>${desc}</small></div><button class="switch ${state.settings[key] ? 'on' : ''}" type="button" role="switch" aria-checked="${!!state.settings[key]}" aria-label="${title}" data-setting="${key}"></button></div>`;
-  return `${heading('تنظیمات', 'صدا، اعلام شماره‌ها و امکانات دستگاه را مطابق سلیقه خودت تنظیم کن.', 'PREFERENCES')}
+  const voiceControl = voicePackReady
+    ? sw('voiceNumbers','اعلام صوتی شماره‌ها با Sage Woman','صدای زنانه انتخاب‌شده برای اعلام شماره‌های ۱ تا ۹۰')
+    : `<div class="setting-row"><div class="setting-copy"><b>صدای زنانه Sage Woman</b><small>این صدا انتخاب شده است؛ بسته کامل ۹۰ شماره هنوز آماده بارگذاری است.</small></div><span class="tag">در انتظار فایل</span></div>`;
+  return `${heading('تنظیمات', 'صدای بازی، اعلام شماره‌ها و اعلان‌های دستگاه را مدیریت کن.', 'PREFERENCES')}
   <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
-    ${sw('sounds','صدای بازی','روشن یا خاموش کردن صداهای بازی')}
-    ${sw('voiceNumbers','اعلام صوتی شماره‌ها','پخش فایل‌های آماده فارسی؛ بدون نیاز به صدای نصب‌شده یا سرویس آنلاین')}
-    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدا</b><small>نمونه اعلام صوتی شماره دبرنا</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
-    ${sw('vibration','لرزش','بازخورد لرزشی هنگام رویدادهای بازی در دستگاه‌های پشتیبانی‌شده')}
+    ${sw('sounds','صدای بازی','روشن یا خاموش کردن بازخوردهای صوتی بازی')}
+    ${voiceControl}
+    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${voicePackReady ? 'پخش عبارت «چهل و دو» با صدای Sage Woman' : 'پس از بارگذاری بسته کامل صدای Sage Woman فعال می‌شود'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice" ${voicePackReady ? '' : 'disabled'}>تست</button></div>
+    ${sw('vibration','لرزش','بازخورد لرزشی در دستگاه‌های پشتیبانی‌شده')}
   </section>
-  <section class="setting-group"><h3 class="settings-title">اعلان‌ها</h3>
-    ${sw('notifications','اعلان‌های دستگاه','با فعال‌سازی، اجازه اعلان از مرورگر گرفته می‌شود')}
+  <section class="setting-group"><h3 class="settings-title">اعلان‌های دستگاه</h3>
+    ${sw('notifications','اجازه اعلان مرورگر','فقط مجوز اعلان این دستگاه را فعال می‌کند؛ اعلان خودکار سرور هنوز راه‌اندازی نشده است')}
     <div class="setting-row"><div class="setting-copy"><b>آزمایش اعلان</b><small>نمایش یک اعلان آزمایشی در همین دستگاه</small></div><button class="btn btn-outline" type="button" data-action="test-notification">تست</button></div>
   </section>
-  <section class="setting-group"><h3 class="settings-title">حریم خصوصی</h3>${sw('privacy','نمایش وضعیت آنلاین','کنترل نمایش برچسب حضور در رابط این دستگاه')}</section>
-  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3><div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div><div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>تنظیمات فعال، حساب سروری و اتاق‌های خودکار</small></div><span class="muted-note">4.8.0</span></div></section>
+  <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
+    <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.14.0</span></div>
+  </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
 const faqs = [
@@ -1231,7 +1282,9 @@ document.addEventListener('click', async event => {
   const action = actionEl.dataset.action;
   if (action === 'close-modal' || (action === 'backdrop-close' && event.target === actionEl)) { closeModal(); return; }
   if (action === 'room-join-auto') {
-    if(!requireLogin()) return;
+    if(!requireLogin() || roomJoinBusy || actionEl.disabled) return;
+    roomJoinBusy = true;
+    actionEl.disabled = true;
     unlockPersianAudio();
     try {
       let result;
@@ -1267,6 +1320,7 @@ document.addEventListener('click', async event => {
       }
       render();
     } catch(error) { showToast(error.message); }
+    finally { roomJoinBusy = false; if (actionEl.isConnected) actionEl.disabled = false; }
     return;
   }
   if (action === 'room-add-card') {
@@ -1348,10 +1402,12 @@ document.addEventListener('click', async event => {
     if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) { showToast('ابتدا «صدای بازی» و «اعلام صوتی شماره‌ها» را فعال کن.'); return; }
     lastSpokenRoomAnnouncementKey = '';
     if (!unlockPersianAudio()) return;
-    showToast('در حال بارگذاری و پخش نمونه صدای فارسی: عدد چهل و دو');
+    if (!voicePackReady) { showToast('صدای Sage Woman انتخاب شده، اما بسته کامل ۹۰ شماره هنوز در سایت قرار نگرفته است.'); return; }
+    showToast('در حال پخش نمونه: چهل و دو');
     playPersianNumberAudio(42);
   }
   else if (action === 'enable-room-audio') {
+    if (!voicePackReady) { showToast('بسته کامل صدای Sage Woman هنوز آماده نشده است.'); return; }
     if (!unlockPersianAudio()) return;
     const latest = Number(roomServerSnapshot?.latestNumber);
     if (latest >= 1 && latest <= 90) {
@@ -1362,8 +1418,13 @@ document.addEventListener('click', async event => {
   else if (action === 'test-notification') {
     if (!settingEnabled('notifications')) { showToast('ابتدا اعلان‌های دستگاه را فعال کن.'); return; }
     if (!('Notification' in window) || Notification.permission !== 'granted') { showToast('اجازه اعلان در دسترس نیست.'); return; }
-    try { new Notification('دابرناز', { body:'اعلان آزمایشی با موفقیت فعال است.' }); showToast('اعلان آزمایشی ارسال شد.'); }
-    catch (_) { showToast('نمایش اعلان در این مرورگر ممکن نشد.'); }
+    try {
+      const options = { body:'اعلان آزمایشی با موفقیت فعال است.', tag:'dabernaz-test-notification' };
+      const registration = 'serviceWorker' in navigator ? await navigator.serviceWorker.ready.catch(() => null) : null;
+      if (registration && typeof registration.showNotification === 'function') await registration.showNotification('دابرناز', options);
+      else new Notification('دابرناز', options);
+      showToast('اعلان آزمایشی ارسال شد.');
+    } catch (_) { showToast('نمایش اعلان در این مرورگر ممکن نشد.'); }
   }
   else if (action === 'reset-settings') { state.settings = { ...defaultState.settings }; saveState(); render(); showToast('تنظیمات بازنشانی شد'); }
 });
@@ -1434,6 +1495,7 @@ document.addEventListener('submit', async event => {
 
 render();
 loadAuthenticatedUser();
+checkPersianVoicePack();
 // Refresh the authenticated account and the active room when a mobile browser/WebView
 // returns to the foreground. Background tabs can throttle timers, so rely on an
 // immediate authoritative read when visibility or focus returns.
