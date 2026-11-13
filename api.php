@@ -16,7 +16,7 @@ session_set_cookie_params([
 session_start();
 
 const DABERNAZ_REGISTRATION_WINDOW_MS = 150000;
-const DABERNAZ_MIN_PLAYERS = 5;
+const DABERNAZ_MIN_PLAYERS = 2;
 const DABERNAZ_MAX_CARDS_PER_PLAYER = 5;
 const DABERNAZ_DRAW_INTERVAL = 3;
 $privateDir = __DIR__ . '/.private';
@@ -147,7 +147,21 @@ function start_room(array &$room, array $db): bool {
     $room['finishedAt']=null; $room['nextDrawAt']=time()+DABERNAZ_DRAW_INTERVAL; $room['updatedAt']=time();
     return true;
 }
-function advance_waiting_room(array &$room, array $db): bool {
+function refund_expired_waiting_room(array &$room, array &$db): bool {
+    $now=gmdate('c');
+    foreach (($room['queue']??[]) as $userId) {
+        $amount=max(0,(int)(($room['entryPayments'][$userId]??0)));
+        $i=get_user_index($db,$userId);
+        if ($i>=0 && $amount>0) {
+            $db['users'][$i]['balance']=max(0,(int)($db['users'][$i]['balance']??0))+$amount;
+            $db['users'][$i]['transactions']=$db['users'][$i]['transactions']??[];
+            array_unshift($db['users'][$i]['transactions'],['amount'=>$amount,'title'=>'لغو سانس به‌دلیل نرسیدن حداقل دو بازیکن؛ بازگشت وجه کارت','date'=>$now]);
+        }
+    }
+    $room=fresh_room($room['id']);
+    return true;
+}
+function advance_waiting_room(array &$room, array &$db): bool {
     if (($room['status'] ?? '') !== 'waiting') return false;
     if (!empty($room['queue']) && empty($room['registrationDeadline'])) {
         $updated=(int)($room['updatedAt'] ?? time());
@@ -156,8 +170,8 @@ function advance_waiting_room(array &$room, array $db): bool {
         $room['registrationDeadline']=$started + DABERNAZ_REGISTRATION_WINDOW_MS;
     }
     if (empty($room['registrationDeadline']) ||
-        (int)$room['registrationDeadline'] > (int)floor(microtime(true)*1000) ||
-        count($room['queue'] ?? []) < DABERNAZ_MIN_PLAYERS) return false;
+        (int)$room['registrationDeadline'] > (int)floor(microtime(true)*1000)) return false;
+    if (count($room['queue'] ?? []) < DABERNAZ_MIN_PLAYERS) return refund_expired_waiting_room($room,$db);
     return start_room($room,$db);
 }
 function award_bingo_coin(array &$db, string $userId, int $amount, string $title): void {
