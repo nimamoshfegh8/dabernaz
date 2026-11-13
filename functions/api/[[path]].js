@@ -1046,7 +1046,7 @@ function persianNumberWords(number) {
   return unit ? `${tens[ten]} و ${units[unit]}` : tens[ten];
 }
 
-async function getPersianNumberAudio(number) {
+async function getPersianNumberAudio(number, requestUrl) {
   const spokenText = `عدد ${persianNumberWords(number)}`;
   const upstreamUrl = new URL('https://translate.google.com/translate_tts');
   upstreamUrl.searchParams.set('ie', 'UTF-8');
@@ -1054,7 +1054,7 @@ async function getPersianNumberAudio(number) {
   upstreamUrl.searchParams.set('tl', 'fa');
   upstreamUrl.searchParams.set('q', spokenText);
 
-  const cacheKey = new Request(`https://dabernaz-voice-cache.invalid/fa/number/${number}`, { method: 'GET' });
+  const cacheKey = new Request(new URL(`/api/voice/${number}`, requestUrl).toString(), { method: 'GET' });
   const edgeCache = globalThis.caches?.default;
   if (edgeCache) {
     try {
@@ -1119,7 +1119,7 @@ async function routeRequest(request, env) {
     const number = Number(voiceMatch[1]);
     if (!Number.isInteger(number) || number < 1 || number > 90) throw new HttpError(400, 'شماره صوتی باید بین ۱ تا ۹۰ باشد.');
     try {
-      return await getPersianNumberAudio(number);
+      return await getPersianNumberAudio(number, request.url);
     } catch (error) {
       console.error('[dabernaz-voice-error]', String(error?.message || error));
       return json({ ok: false, error: 'سرویس ساخت صدای فارسی موقتاً در دسترس نیست.' }, 502);
@@ -1128,7 +1128,7 @@ async function routeRequest(request, env) {
 
   if (request.method === 'GET' && path === '/api/voice/health') {
     try {
-      const response = await getPersianNumberAudio(42);
+      const response = await getPersianNumberAudio(42, request.url);
       return json({
         ok: true,
         provider: 'server-side-persian-mp3',
