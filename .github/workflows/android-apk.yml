@@ -12,6 +12,15 @@ on:
       - 'styles.css'
       - 'sw.js'
       - 'sw-register.js'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'index.html'
+      - 'manifest.webmanifest'
+      - 'app.js'
+      - 'styles.css'
+      - 'sw.js'
+      - 'sw-register.js'
   workflow_dispatch:
 
 permissions:

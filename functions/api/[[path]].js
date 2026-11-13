@@ -1069,18 +1069,21 @@ async function routeRequest(request, env) {
     }
   }
 
-  // The voice files are static Pages assets. This route describes the package
-  // contract; the browser validates the actual manifest and MP3 before enabling playback.
+  // This endpoint reports the voice package contract only. It must never
+  // claim that the files are ready: the client validates and decodes all 90 clips.
   if (request.method === 'GET' && path === '/api/voice/health') {
     return json({
       ok: true,
-      status: 'client-asset-validation',
+      ready: null,
+      verifiedBy: 'client-audio-manager',
+      status: 'client-validation-required',
       provider: 'kenerate-sage-woman',
       voice: 'Sage Woman',
       language: 'fa-IR',
       requiredNumbers: 90,
       asset: '/assets/voice/sage-woman.mp3',
-      manifest: '/assets/voice/sage-woman.json'
+      manifest: '/assets/voice/sage-woman.json',
+      note: 'Endpoint availability is not audio-package readiness. The client must fetch, decode and validate the MP3 and all 90 clips.'
     });
   }
 
