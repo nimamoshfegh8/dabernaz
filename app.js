@@ -322,7 +322,11 @@ const PersianAudioManager = {
   },
   previewSample(options = {}) {
     if (options.fromGesture) unlockPersianAudio();
-    return playSageWomanNumber(42);
+    return playSageWomanNumber(42).catch(error => {
+      console.error('[Dabernaz Sage Woman sample]', error);
+      showToast(error?.message || 'فایل نمونهٔ Sage Woman پخش نشد.');
+      return false;
+    });
   },
   speak(number, options = {}) {
     const value = Math.trunc(Number(number));
@@ -396,8 +400,9 @@ async function toggleSetting(key) {
   const next = !settingEnabled(key);
   if (key === 'voiceNumbers' && next) {
     voicePlaybackErrorShown = false;
-    if (!PersianAudioManager.activateFromGesture()) {
-      showToast('هیچ موتور صوتی برای اعلام شماره در این دستگاه در دسترس نیست.');
+    unlockPersianAudio();
+    if (!(voicePackReady || await checkPersianVoicePack())) {
+      showToast('بستهٔ Sage Woman کامل نیست؛ ' + availableSageWomanNumbers.size + ' فایل از ۹۰ فایل آماده است. تا تکمیل هر ۹۰ فایل، اعلام اتاق فعال نمی‌شود.');
       return;
     }
   }
@@ -1565,6 +1570,7 @@ document.addEventListener('click', async event => {
   }
   else if (action === 'enable-room-audio') {
     voicePlaybackErrorShown = false;
+    unlockPersianAudio();
     if (!(voicePackReady || await checkPersianVoicePack())) {
       state.settings.voiceNumbers = false;
       saveState();
