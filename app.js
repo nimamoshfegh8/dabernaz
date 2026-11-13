@@ -55,7 +55,6 @@ let tournamentLobbyTab = 'all';
 const spokenRoomAnnouncementKeys = new Set();
 const roomSpeechInFlight = new Set();
 const roomSpeechRetryAt = new Map();
-let settingsAudioContext = null;
 let roomJoinBusy = false;
 
 function settingEnabled(key) { return !!state?.settings?.[key]; }
@@ -103,7 +102,7 @@ function refreshPersianBrowserVoices() {
 }
 
 if ('speechSynthesis' in window) {
-  window.speechSynthesis.addEventListener?.('voiceschanged', refreshPersianBrowserVoices);
+  window.speechSynthesis.onvoiceschanged = refreshPersianBrowserVoices;
   refreshPersianBrowserVoices();
 }
 
@@ -398,6 +397,23 @@ function playPersianNumberInternal(number) {
 }
 
 const PersianAudioManager = {
+  playEffectTone() {
+    if (!settingEnabled('sounds')) return;
+    try {
+      if (!persianAudioContext && !unlockPersianAudio()) return;
+      const context = persianAudioContext;
+      if (context.state === 'suspended') context.resume().catch(() => {});
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = 740;
+      gain.gain.setValueAtTime(0.05, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.12);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.12);
+    } catch (_) {}
+  },
   supportsPlayback() {
     return voicePackReady || nativePersianTtsAvailable() ||
       ('speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function');
@@ -485,55 +501,6 @@ function speakRoomNumber(number, room) {
   return true;
 }
 
-function playSettingsTone() {
-  if (!settingEnabled('sounds')) return;
-  try {
-    settingsAudioContext ||= new (window.AudioContext || window.webkitAudioContext)();
-    if (settingsAudioContext.state === 'suspended') settingsAudioContext.resume().catch(() => {});
-    const oscillator = settingsAudioContext.createOscillator();
-    const gain = settingsAudioContext.createGain();
-    oscillator.frequency.value = 740;
-    gain.gain.setValueAtTime(0.05, settingsAudioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, settingsAudioContext.currentTime + 0.12);
-    oscillator.connect(gain);
-    gain.connect(settingsAudioContext.destination);
-    oscillator.start();
-    oscillator.stop(settingsAudioContext.currentTime + 0.12);
-  } catch (_) {}
-}
-async function toggleSetting(key) {
-  const next = !settingEnabled(key);
-  if (key === 'voiceNumbers' && next) {
-    voicePlaybackErrorShown = false;
-    if (!PersianAudioManager.activateFromGesture()) {
-      showToast('هیچ موتور صوتی برای اعلام شماره در این دستگاه در دسترس نیست.');
-      return;
-    }
-  }
-  if (key === 'notifications' && next) {
-    if (!('Notification' in window)) {
-      showToast('اعلان‌های سیستمی در این مرورگر پشتیبانی نمی‌شود.');
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') {
-      state.settings.notifications = false;
-      saveState(); renderSettingsIntoView();
-      showToast('اجازه ارسال اعلان داده نشد.');
-      return;
-    }
-  }
-  state.settings[key] = next;
-  saveState();
-  if (key === 'sounds' && next) playSettingsTone();
-  if (key === 'vibration' && next && navigator.vibrate) navigator.vibrate(25);
-  renderSettingsIntoView();
-  const labels = {
-    sounds: 'صداهای محیط بازی', voiceNumbers: 'اعلام صوتی شماره‌ها', notifications: 'اعلان‌ها',
-    vibration: 'لرزش', privacy: 'نمایش وضعیت آنلاین'
-  };
-  showToast((labels[key] || 'تنظیم') + ' ' + (next ? 'فعال' : 'غیرفعال') + ' شد');
-}
 const ROOM_CONFIGS = [
   { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
   { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
