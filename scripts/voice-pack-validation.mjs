@@ -55,5 +55,8 @@ if (!packageReady) {
     assert.equal(String(clip.text || '').trim(), numberToSpokenPersian(number), 'wrong spoken text for number ' + number);
     previousEnd = start + duration;
   }
+  const audioDuration = Number(manifest.audioDurationSeconds);
+  assert.ok(Number.isFinite(audioDuration) && audioDuration > 0, 'manifest must declare decoded MP3 duration in seconds');
+  assert.ok(audioDuration + 0.1 >= previousEnd, 'one or more clips exceed the MP3 duration');
   console.log('Sage Woman voice package is complete: MP3 present and all 90 clips validated.');
 }
