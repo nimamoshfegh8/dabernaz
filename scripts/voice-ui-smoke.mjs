@@ -16,7 +16,7 @@ assert.match(app, /const PersianAudioManager = \{/);
 assert.match(app, /supportsPlayback\(\)/);
 assert.match(app, /speak\(number, options = \{\}\)/);
 assert.match(app, /DabernazNativeTTS/);
-assert.match(app, /speechSynthesis\.speak\(utterance\)/);
+assert.match(app, /synth\.speak\(utterance\)/);
 
 const testActionStart = app.indexOf("else if (action === 'test-number-voice')");
 const roomActionStart = app.indexOf("else if (action === 'enable-room-audio')", testActionStart);
