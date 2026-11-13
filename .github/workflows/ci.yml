@@ -33,6 +33,12 @@ jobs:
       - name: Build Cloudflare Pages assets
         run: npm run build:pages
 
+      - name: Test Node fallback room rules
+        run: node scripts/node-fallback-room-smoke.mjs
+
+      - name: Validate Sage Woman voice package
+        run: node scripts/voice-pack-validation.mjs
+
       - name: Install Wrangler for isolated D1 integration tests
         run: npm install --global wrangler@4
 

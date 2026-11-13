@@ -1055,17 +1055,15 @@ async function routeRequest(request, env) {
     }
   }
 
-  // The selected Kenerate Sage Woman voice is pending its complete 1..90 audio package.
-  // A one-line sample must never be represented as a ready production voice pack.
+  // The voice files are static Pages assets. This route describes the package
+  // contract; the browser validates the actual manifest and MP3 before enabling playback.
   if (request.method === 'GET' && path === '/api/voice/health') {
     return json({
       ok: true,
-      configured: false,
-      status: 'awaiting-audio-pack',
+      status: 'client-asset-validation',
       provider: 'kenerate-sage-woman',
       voice: 'Sage Woman',
       language: 'fa-IR',
-      numbers: 0,
       requiredNumbers: 90,
       asset: '/assets/voice/sage-woman.mp3',
       manifest: '/assets/voice/sage-woman.json'

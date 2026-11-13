@@ -4,7 +4,7 @@ const STORAGE_KEY = 'dabernaz_state_v1';
 const cloneData = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const defaultState = {
   username: '', memberId: '', balance: 0, joined: [], transactions: [],
-  settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 2, notifications: false, vibration: false },
+  settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 3, notifications: false, vibration: false },
   referralCode: '', gamesPlayed: 0, wins: 0, points: 0,
   bingoCoins: 0, coinTransactions: [], inviteCount: 0, inviteRewardMilestones: [],
   roomHistory: [], supportTickets: [], tournamentRooms: []
@@ -29,8 +29,8 @@ function loadState() {
       settings: (() => {
         const previous = saved.settings && typeof saved.settings === 'object' ? saved.settings : {};
         const merged = { ...defaultState.settings, ...previous };
-        if (Number(previous.voiceAudioVersion) !== 2) merged.voiceNumbers = false;
-        merged.voiceAudioVersion = 2;
+        if (Number(previous.voiceAudioVersion) !== 3) merged.voiceNumbers = false;
+        merged.voiceAudioVersion = 3;
         return merged;
       })()
     };
@@ -126,7 +126,7 @@ async function loadPersianNumberAudio(number) {
   if (!persianAudioAssetPromise) {
     const loading = (async () => {
       const base = new URL('./assets/voice/', document.baseURI);
-      const manifestResponse = await fetch(new URL('sage-woman.json?v=2', base), {
+      const manifestResponse = await fetch(new URL('sage-woman.json?v=3', base), {
         method:'GET', cache:'no-store', credentials:'same-origin'
       });
       if (!manifestResponse.ok) throw new Error('بسته صدای طبیعی Sage Woman هنوز در سایت قرار نگرفته است.');
@@ -137,7 +137,7 @@ async function loadPersianNumberAudio(number) {
         throw new Error('بسته کامل ۹۰ شماره با صدای Sage Woman هنوز آماده نیست.');
       }
 
-      const audioResponse = await fetch(new URL('sage-woman.mp3?v=2', base), {
+      const audioResponse = await fetch(new URL('sage-woman.mp3?v=3', base), {
         method:'GET', cache:'no-store', credentials:'same-origin'
       });
       if (!audioResponse.ok) throw new Error('فایل صوتی Sage Woman دریافت نشد.');
@@ -181,10 +181,37 @@ async function checkPersianVoicePack() {
   if (voicePackCheckPromise) return voicePackCheckPromise;
   voicePackCheckPromise = (async () => {
     try {
-      const response = await fetch('/api/voice/health', { cache:'no-store', credentials:'same-origin' });
-      const result = await response.json();
-      voicePackReady = response.ok && result.ok === true && result.configured === true &&
-        result.provider === 'kenerate-sage-woman' && Number(result.numbers) === 90;
+      const base = new URL('./assets/voice/', document.baseURI);
+      const manifestUrl = new URL('sage-woman.json?v=3', base);
+      const audioUrl = new URL('sage-woman.mp3?v=3', base);
+      const [manifestResponse, audioHead] = await Promise.all([
+        fetch(manifestUrl, { cache:'no-store', credentials:'same-origin' }),
+        fetch(audioUrl, { method:'HEAD', cache:'no-store', credentials:'same-origin' })
+      ]);
+      if (!manifestResponse.ok || !audioHead.ok) throw new Error('voice assets missing');
+      const manifest = await manifestResponse.json();
+      const contentType = String(audioHead.headers.get('content-type') || '').toLowerCase();
+      const contentLength = Number(audioHead.headers.get('content-length') || 0);
+      if (!manifest || manifest.provider !== 'kenerate-sage-woman' ||
+          manifest.voice !== 'Sage Woman' || manifest.language !== 'fa-IR' ||
+          manifest.configured !== true || !manifest.numbers ||
+          Object.keys(manifest.numbers).length !== 90 ||
+          !contentType.includes('audio') || (contentLength > 0 && contentLength < 15000)) {
+        throw new Error('voice pack metadata is incomplete');
+      }
+      let previousEnd = 0;
+      for (let n = 1; n <= 90; n++) {
+        const clip = manifest.numbers[String(n)];
+        const start = Number(clip?.start);
+        const duration = Number(clip?.duration);
+        if (!clip || !Number.isFinite(start) || !Number.isFinite(duration) ||
+            start < 0 || duration <= 0 || start < previousEnd - 0.03 ||
+            String(clip.text || '').trim() !== numberToPersianWords(n)) {
+          throw new Error('invalid Sage Woman clip ' + n);
+        }
+        previousEnd = start + duration;
+      }
+      voicePackReady = true;
     } catch (_) {
       voicePackReady = false;
     }
@@ -234,7 +261,7 @@ function playPersianNumberAudio(number) {
 }
 
 function speakRoomNumber(number, room) {
-  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
+  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers') || !voicePackReady) return false;
   const value = Math.trunc(Number(number));
   if (!Number.isInteger(value) || value < 1 || value > 90) return false;
   const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || 'current');
@@ -265,6 +292,7 @@ async function toggleSetting(key) {
     showToast('ابتدا باید فایل کامل ۹۰ شماره با صدای Sage Woman در سایت قرار بگیرد.');
     return;
   }
+  if (key === 'voiceNumbers' && next && !unlockPersianAudio()) return;
   if (key === 'notifications' && next) {
     if (!('Notification' in window)) {
       showToast('اعلان‌های سیستمی در این مرورگر پشتیبانی نمی‌شود.');
@@ -919,7 +947,7 @@ function renderSettings() {
   </section>
   <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
     <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
-    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.14.0</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.15.0</span></div>
   </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }

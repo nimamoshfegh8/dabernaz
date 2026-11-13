@@ -77,16 +77,17 @@ const health = await request('/api/health');
 assert.equal(health.ok, true);
 assert.equal(health.database, 'D1');
 
-// The production UI must not fall back to robotic eSpeak while the selected
-// Kenerate Sage Woman 1..90 package is still being prepared.
+// Voice audio is served as static Pages assets. The browser must validate
+// the real 90-number manifest and MP3 before enabling the selected voice.
 const voiceHealth = await request('/api/voice/health');
 assert.equal(voiceHealth.ok, true);
-assert.equal(voiceHealth.configured, false);
-assert.equal(voiceHealth.status, 'awaiting-audio-pack');
+assert.equal(voiceHealth.status, 'client-asset-validation');
 assert.equal(voiceHealth.provider, 'kenerate-sage-woman');
 assert.equal(voiceHealth.voice, 'Sage Woman');
-assert.equal(voiceHealth.numbers, 0);
+assert.equal(voiceHealth.language, 'fa-IR');
 assert.equal(voiceHealth.requiredNumbers, 90);
+assert.equal(voiceHealth.asset, '/assets/voice/sage-woman.mp3');
+assert.equal(voiceHealth.manifest, '/assets/voice/sage-woman.json');
 
 const publicTournamentLobby = await request('/api/tournaments');
 assert.equal(publicTournamentLobby.ok, true);

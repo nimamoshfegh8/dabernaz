@@ -13,7 +13,11 @@ const ROOT = __dirname;
 const PRIVATE_DIR = process.env.DABERNAZ_DATA_DIR || path.join(ROOT, '.private');
 const DB_FILE = path.join(PRIVATE_DIR, 'store.json');
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
-const ROOM_CAPACITY = 20;
+const testRegistrationWindow = Number(process.env.DABERNAZ_TEST_REGISTRATION_WINDOW_MS);
+const REGISTRATION_WINDOW_MS = process.env.NODE_ENV === 'test' && Number.isInteger(testRegistrationWindow) && testRegistrationWindow >= 50 && testRegistrationWindow < 150000
+  ? testRegistrationWindow : 150000;
+const MIN_PLAYERS_TO_START = 5;
+const MAX_CARDS_PER_PLAYER = 5;
 const requestedDrawInterval = Number(process.env.DABERNAZ_DRAW_INTERVAL_MS || 3000);
 const DRAW_INTERVAL_MS = Number.isFinite(requestedDrawInterval) ? Math.max(20, Math.min(requestedDrawInterval, 60000)) : 3000;
 const ROOM_CONFIG = {
@@ -97,12 +101,23 @@ async function loadDb() {
   }
   for (const user of db.users) { if (!Number.isFinite(Number(user.bingoCoins))) user.bingoCoins=0; if (!Array.isArray(user.coinTransactions)) user.coinTransactions=[]; if (!user.stats) user.stats={gamesPlayed:0,wins:0,points:0}; }
   for (const id of Object.keys(ROOM_CONFIG)) if (!db.rooms[id]) db.rooms[id] = freshRoom(id);
+  for (const room of Object.values(db.rooms)) {
+    room.queue = Array.isArray(room.queue) ? room.queue : [];
+    room.cardCounts = room.cardCounts && typeof room.cardCounts === 'object' ? room.cardCounts : {};
+    room.queuedCards = room.queuedCards && typeof room.queuedCards === 'object' ? room.queuedCards : {};
+    if (room.status === 'waiting' && room.queue.length && !room.registrationDeadline) {
+      room.registrationStartedAt = Number(room.updatedAt) || Date.now();
+      room.registrationDeadline = room.registrationStartedAt + REGISTRATION_WINDOW_MS;
+    }
+    room.registrationStartedAt ??= null;
+    room.registrationDeadline ??= null;
+  }
   db.sessions = db.sessions.filter(item => item.expiresAt > Date.now());
   await persist();
   for (const room of Object.values(db.rooms)) if (room.status === 'playing') startDrawTimer(room.id);
 }
 function freshRoom(id) {
-  return { id, status:'waiting', queue:[], cardCounts:{}, queuedCards:{}, players:[], calledNumbers:[], winners:{line:null,full:null}, startedAt:null, finishedAt:null, updatedAt:Date.now(), resultsRecorded:false };
+  return { id, status:'waiting', queue:[], cardCounts:{}, queuedCards:{}, players:[], calledNumbers:[], winners:{line:null,full:null}, registrationStartedAt:null, registrationDeadline:null, startedAt:null, finishedAt:null, updatedAt:Date.now(), resultsRecorded:false };
 }
 function secureShuffle(items) {
   for (let i = items.length - 1; i > 0; i--) {
@@ -143,9 +158,16 @@ function publicRoom(room, userId) {
   const me = room.players.find(p => p.userId === userId) || null;
   const queued = room.queue.includes(userId);
   const account = db.users.find(user=>user.id===userId);
+  const playerCount = room.status === 'waiting' ? room.queue.length : room.players.length;
+  const cardCount = room.status === 'waiting'
+    ? Object.values(room.cardCounts || {}).reduce((sum, count) => sum + Math.max(0, Number(count) || 0), 0)
+    : room.players.reduce((sum, player) => sum + (Array.isArray(player.cards) ? player.cards.length : 0), 0);
   return {
-    id:room.id, status:room.status, capacity:ROOM_CAPACITY,
-    queueCount:room.status==='waiting' ? room.queue.length : room.players.length,
+    id:room.id, status:room.status, capacity:null, minPlayersToStart:MIN_PLAYERS_TO_START,
+    maxCardsPerPlayer:MAX_CARDS_PER_PLAYER, registrationWindowMs:REGISTRATION_WINDOW_MS,
+    registrationStartedAt:room.registrationStartedAt, registrationDeadline:room.registrationDeadline,
+    registrationRemainingMs:room.registrationDeadline ? Math.max(0, room.registrationDeadline - Date.now()) : 0,
+    playerCount, cardCount, queueCount:playerCount,
     players:room.players.map(p=>({name:p.name,memberId:p.memberId})),
     calledNumbers:room.calledNumbers.slice(-15), allCalledNumbers:room.calledNumbers, drawCount:room.calledNumbers.length,
     latestNumber:room.calledNumbers.at(-1) ?? null, winners:{line:room.winners.line?{name:room.winners.line.name,memberId:room.winners.line.memberId,number:room.winners.line.number,at:room.winners.line.at}:null,full:room.winners.full?{name:room.winners.full.name,memberId:room.winners.full.memberId,number:room.winners.full.number,at:room.winners.full.at}:null},
@@ -231,14 +253,23 @@ function startDrawTimer(roomId) {
 }
 function stopDrawTimer(roomId) { const timer=drawTimers.get(roomId); if(timer)clearInterval(timer); drawTimers.delete(roomId); }
 function startRoom(room) {
-  room.players = room.queue.map(userId => {
+  if (room.status !== 'waiting' || room.queue.length < MIN_PLAYERS_TO_START) return false;
+  const players = room.queue.map(userId => {
     const user = db.users.find(u=>u.id===userId);
-    return { userId, name:user?.name || 'بازیکن', memberId:user?.memberId || '—', cards:room.queuedCards?.[userId] || [makeCard()] };
-  });
-  room.queue = []; room.queuedCards = {}; room.status = 'playing'; room.calledNumbers = [];
+    return user ? { userId, name:user.name || 'بازیکن', memberId:user.memberId || '—', cards:room.queuedCards?.[userId] || [] } : null;
+  }).filter(Boolean);
+  if (players.length < MIN_PLAYERS_TO_START) return false;
+  room.players = players;
+  room.queue = []; room.queuedCards = {}; room.cardCounts = {}; room.status = 'playing'; room.calledNumbers = [];
   room.winners = {line:null,full:null}; room.resultsRecorded=false; room.startedAt = Date.now(); room.finishedAt=null; room.updatedAt=Date.now();
   persist().catch(error=>console.error('Persist room start failed:',error.message));
   startDrawTimer(room.id);
+  return true;
+}
+function advanceWaitingRoom(room) {
+  if (room.status !== 'waiting' || !room.registrationDeadline ||
+      Date.now() < Number(room.registrationDeadline) || room.queue.length < MIN_PLAYERS_TO_START) return false;
+  return startRoom(room);
 }
 function authenticate(req) {
   const token = parseCookies(req.headers.cookie).dabernaz_session;
@@ -295,7 +326,7 @@ async function routeApi(req,res,url) {
     const token=parseCookies(req.headers.cookie).dabernaz_session;
     const activeUser=token ? authenticate(req) : null;
     if (token) db.sessions=db.sessions.filter(item=>!safeEqual(item.tokenHash,sha256(token)));
-    if(activeUser) for(const room of Object.values(db.rooms)) if(room.status==='waiting'){room.queue=room.queue.filter(id=>id!==activeUser.id);if(room.queuedCards)delete room.queuedCards[activeUser.id];if(room.cardCounts)delete room.cardCounts[activeUser.id];}
+    // Purchased waiting-room entries remain in the shared round after logout.
     await persist(); return json(res,200,{ok:true},{'Set-Cookie':cookieOptions(0)});
   }
   if (req.method==='GET' && url.pathname==='/api/auth/me') {
@@ -319,22 +350,32 @@ async function routeApi(req,res,url) {
   const roomMatch=url.pathname.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave))?$/);
   if (roomMatch) {
     const [,roomId,action]=roomMatch; const room=db.rooms[roomId];
-    if (req.method==='GET' && !action) return json(res,200,{ok:true,room:publicRoom(room,user.id)});
+    if (req.method==='GET' && !action) { const changed=advanceWaitingRoom(room); if(changed) await persist(); return json(res,200,{ok:true,room:publicRoom(room,user.id)}); }
     if (req.method==='POST' && action==='join') {
       const joinBody=await readBody(req);
-      const cardCount=Math.max(1,Math.min(4,Math.floor(Number(joinBody.cardsCount)||1)));
+      const requestedCards=Math.max(1,Math.min(MAX_CARDS_PER_PLAYER,Math.floor(Number(joinBody.cardsCount)||1)));
       if (room.status==='finished') { Object.assign(room,freshRoom(roomId)); }
       if (room.status==='playing') return json(res,409,{error:'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.',room:publicRoom(room,user.id)});
-      if (room.queue.includes(user.id)) return json(res,200,{ok:true,room:publicRoom(room,user.id)});
       room.cardCounts=room.cardCounts||{}; room.queuedCards=room.queuedCards||{};
-      room.cardCounts[user.id]=cardCount; room.queuedCards[user.id]=Array.from({length:cardCount},()=>makeCard());
-      room.queue.push(user.id); room.updatedAt=Date.now();
-      if (room.queue.length===ROOM_CAPACITY) startRoom(room); else await persist();
+      const currentCards=Math.max(0,Number(room.cardCounts[user.id])||0);
+      const addCards=Math.min(requestedCards,MAX_CARDS_PER_PLAYER-currentCards);
+      if(addCards<=0) return json(res,409,{error:'حداکثر ۵ کارت برای هر حساب در هر سانس مجاز است.',room:publicRoom(room,user.id)});
+      if(!room.queue.includes(user.id)) {
+        room.queue.push(user.id);
+        if(!room.registrationStartedAt) {
+          room.registrationStartedAt=Date.now();
+          room.registrationDeadline=room.registrationStartedAt+REGISTRATION_WINDOW_MS;
+        }
+      }
+      room.cardCounts[user.id]=currentCards+addCards;
+      room.queuedCards[user.id]=[...(room.queuedCards[user.id]||[]),...Array.from({length:addCards},()=>makeCard())];
+      room.updatedAt=Date.now();
+      if(!advanceWaitingRoom(room)) await persist();
       return json(res,200,{ok:true,room:publicRoom(room,user.id)});
     }
     if (req.method==='POST' && action==='leave') {
-      if (room.status==='waiting') { room.queue=room.queue.filter(id=>id!==user.id); if(room.cardCounts) delete room.cardCounts[user.id]; if(room.queuedCards) delete room.queuedCards[user.id]; }
-      await persist(); return json(res,200,{ok:true,room:publicRoom(room,user.id)});
+      if (room.status==='waiting' && room.queue.includes(user.id)) return json(res,409,{error:'کارت خریداری‌شده قابل لغو یا بازپرداخت نیست.',room:publicRoom(room,user.id)});
+      return json(res,200,{ok:true,room:publicRoom(room,user.id)});
     }
   }
   return json(res,404,{error:'مسیر API پیدا نشد.'});
