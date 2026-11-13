@@ -1,5 +1,8 @@
 name: Validate Dabernaz
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main]
@@ -26,6 +29,15 @@ jobs:
         run: php -l api.php
       - name: Check JavaScript syntax
         run: npm run check
+      - name: Generate bundled Persian number audio when missing
+        shell: bash
+        run: |
+          if [ ! -s assets/voice/fa-numbers.mp3 ] || [ ! -s assets/voice/fa-numbers.json ]; then
+            sudo apt-get update
+            sudo apt-get install -y espeak ffmpeg
+            python3 scripts/generate-persian-voice.py
+          fi
+
       - name: Build Cloudflare Pages assets
         run: npm run build:pages
 
@@ -80,3 +92,15 @@ jobs:
 
           cat /tmp/dabernaz-health.json
           BASE_URL=http://127.0.0.1:8788 node scripts/room-integration-smoke.mjs
+
+      - name: Commit generated Persian number audio assets
+        shell: bash
+        run: |
+          git add assets/voice/fa-numbers.mp3 assets/voice/fa-numbers.json
+          if ! git diff --cached --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Add bundled Persian number audio assets"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
