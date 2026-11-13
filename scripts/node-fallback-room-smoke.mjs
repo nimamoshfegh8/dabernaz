@@ -137,6 +137,15 @@ try {
   assert.equal(started.data.room.cardCount, 9);
   assert.equal(started.data.room.myCards.length, 1);
 
+  // Re-authenticate the account used above after verifying that logout
+  // did not remove its purchased entry from the other players' room view.
+  const relogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: { email: accounts[0].email, password: 'Dabernaz-QA-2026!' }
+  });
+  assert.equal(relogin.response.status, 200, relogin.data.error || 'relogin failed');
+  accounts[0].cookie = (relogin.response.headers.get('set-cookie') || '').split(';', 1)[0];
+
   // A round with only four players must stay waiting after the deadline; the
   // fifth participant then starts it on the next room request.
   for (const account of accounts.slice(0, 4)) {
