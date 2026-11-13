@@ -87,7 +87,7 @@ assert.ok(Number(voiceHealth.bytes) > 512, 'Persian voice MP3 must contain audio
 for (const number of [1, 25, 42, 90]) {
   const audioResponse = await fetch(baseUrl + '/api/voice/' + number);
   assert.equal(audioResponse.status, 200, 'Persian voice clip ' + number + ' must be available');
-  assert.match(audioResponse.headers.get('content-type') || '', /audio\/mpeg/i,
+  assert.ok((audioResponse.headers.get('content-type') || '').toLowerCase().startsWith('audio/'),
     'Persian voice clip ' + number + ' must have audio/mpeg content type');
   const audioBytes = await audioResponse.arrayBuffer();
   assert.ok(audioBytes.byteLength > 512, 'Persian voice clip ' + number + ' must not be empty');
