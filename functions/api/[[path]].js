@@ -1033,87 +1033,6 @@ async function advanceServerGame(db,user,request,path) {
   return null;
 }
 
-function persianNumberWords(number) {
-  const value = Math.trunc(Number(number));
-  if (!Number.isInteger(value) || value < 0 || value > 90) return '';
-  const units = ['صفر','یک','دو','سه','چهار','پنج','شش','هفت','هشت','نه'];
-  const teens = ['ده','یازده','دوازده','سیزده','چهارده','پانزده','شانزده','هفده','هجده','نوزده'];
-  const tens = ['','','بیست','سی','چهل','پنجاه','شصت','هفتاد','هشتاد','نود'];
-  if (value < 10) return units[value];
-  if (value < 20) return teens[value - 10];
-  const ten = Math.floor(value / 10);
-  const unit = value % 10;
-  return unit ? `${tens[ten]} و ${units[unit]}` : tens[ten];
-}
-
-function escapeXmlText(value) {
-  return String(value).replace(/[&<>"']/g, character => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;',
-  })[character]);
-}
-
-async function getPersianNumberAudio(number, requestUrl, env) {
-  const speechKey = String(env.AZURE_SPEECH_KEY || '').trim();
-  const speechRegion = String(env.AZURE_SPEECH_REGION || '').trim().toLowerCase();
-  if (!speechKey || !speechRegion) {
-    const error = new Error('AZURE_SPEECH_NOT_CONFIGURED');
-    error.code = 'AZURE_SPEECH_NOT_CONFIGURED';
-    throw error;
-  }
-  if (!/^[a-z0-9-]{2,40}$/.test(speechRegion)) {
-    const error = new Error('AZURE_SPEECH_REGION_INVALID');
-    error.code = 'AZURE_SPEECH_REGION_INVALID';
-    throw error;
-  }
-
-  const cacheKey = new Request(new URL(`/api/voice/${number}`, requestUrl).toString(), { method: 'GET' });
-  const edgeCache = globalThis.caches?.default;
-  if (edgeCache) {
-    try {
-      const cached = await edgeCache.match(cacheKey);
-      if (cached) return cached;
-    } catch (_) { /* Continue to synthesis when cache is unavailable. */ }
-  }
-
-  const spokenText = `عدد ${persianNumberWords(number)}`;
-  const ssml = `<speak version="1.0" xml:lang="fa-IR"><voice name="fa-IR-FaridNeural"><prosody rate="-5%">${escapeXmlText(spokenText)}</prosody></voice></speak>`;
-  const endpoint = `https://${speechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
-  const upstream = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Ocp-Apim-Subscription-Key': speechKey,
-      'Content-Type': 'application/ssml+xml',
-      'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
-      'User-Agent': 'DabernazClub/1.0',
-      'Accept': 'audio/mpeg,audio/*;q=0.9',
-    },
-    body: ssml,
-  });
-  const contentType = upstream.headers.get('content-type') || '';
-  if (!upstream.ok || !contentType.toLowerCase().includes('audio')) {
-    const detail = (await upstream.text().catch(() => '')).slice(0, 500);
-    throw new Error(`Azure Speech returned HTTP ${upstream.status} (${contentType || 'unknown content type'}) ${detail}`);
-  }
-  const audio = await upstream.arrayBuffer();
-  if (audio.byteLength < 512) throw new Error('Azure Speech returned an empty Persian audio clip.');
-
-  const response = new Response(audio, {
-    status: 200,
-    headers: {
-      'content-type': 'audio/mpeg',
-      'content-length': String(audio.byteLength),
-      'cache-control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
-      'content-disposition': `inline; filename="dabernaz-fa-${number}.mp3"`,
-      'x-content-type-options': 'nosniff',
-      'access-control-allow-origin': '*',
-    },
-  });
-  if (edgeCache) {
-    try { await edgeCache.put(cacheKey, response.clone()); } catch (_) {}
-  }
-  return response;
-}
-
 async function routeRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -1130,43 +1049,17 @@ async function routeRequest(request, env) {
     return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', binding: 'bound', mode: 'ready' });
   }
 
-  // Audio is generated server-side, so mobile browsers do not need a Persian
-  // system voice, and the client only fetches same-origin MP3 data.
-  const voiceMatch = path.match(/^\/api\/voice\/(\d{1,2})$/);
-  if (request.method === 'GET' && voiceMatch) {
-    const number = Number(voiceMatch[1]);
-    if (!Number.isInteger(number) || number < 1 || number > 90) throw new HttpError(400, 'شماره صوتی باید بین ۱ تا ۹۰ باشد.');
-    try {
-      return await getPersianNumberAudio(number, request.url, env);
-    } catch (error) {
-      if (error?.code === 'AZURE_SPEECH_NOT_CONFIGURED') {
-        return json({ ok: false, configured: false, provider: 'azure-speech', error: 'برای فعال‌شدن صدای فارسی، AZURE_SPEECH_KEY و AZURE_SPEECH_REGION را در Secrets کلودفلر تنظیم کن.' }, 503);
-      }
-      if (error?.code === 'AZURE_SPEECH_REGION_INVALID') {
-        return json({ ok: false, configured: true, provider: 'azure-speech', error: 'مقدار منطقه Azure Speech معتبر نیست.' }, 503);
-      }
-      console.error('[dabernaz-voice-error]', String(error?.message || error));
-      return json({ ok: false, configured: true, provider: 'azure-speech', error: 'ساخت صدای فارسی از Azure Speech ناموفق بود.', detail: String(error?.message || error).slice(0, 600) }, 502);
-    }
-  }
-
+  // Persian numbers are bundled as same-origin static audio; no speech API credentials are needed.
   if (request.method === 'GET' && path === '/api/voice/health') {
-    try {
-      const response = await getPersianNumberAudio(42, request.url, env);
-      return json({
-        ok: true,
-        configured: true,
-        provider: 'azure-speech',
-        voice: 'fa-IR-FaridNeural',
-        contentType: response.headers.get('content-type'),
-        bytes: Number(response.headers.get('content-length')) || null,
-      });
-    } catch (error) {
-      if (error?.code === 'AZURE_SPEECH_NOT_CONFIGURED') {
-        return json({ ok: false, configured: false, provider: 'azure-speech', error: 'AZURE_SPEECH_KEY و AZURE_SPEECH_REGION هنوز در Cloudflare Pages تنظیم نشده‌اند.' }, 503);
-      }
-      return json({ ok: false, configured: true, provider: 'azure-speech', error: String(error?.message || error).slice(0, 600) }, 502);
-    }
+    return json({
+      ok: true,
+      configured: true,
+      provider: 'bundled-persian-audio',
+      language: 'fa-IR',
+      numbers: 90,
+      asset: '/assets/voice/fa-numbers.mp3',
+      manifest: '/assets/voice/fa-numbers.json'
+    });
   }
 
   if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
