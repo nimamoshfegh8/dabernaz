@@ -74,37 +74,72 @@ function speakRoomNumber(number, room) {
   if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
   const value = Math.trunc(Number(number));
   if (!Number.isFinite(value) || value < 1 || value > 90) return false;
-  if (!('speechSynthesis' in window) || !('SpeechSynthesisUtterance' in window)) {
-    showToast('اعلام صوتی در این مرورگر پشتیبانی نمی‌شود.');
-    return false;
-  }
-  const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || '');
+
+  const spokenNumber = numberToPersianWords(value);
+  const text = `عدد ${spokenNumber}`;
+  const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || Date.now());
   const announcementKey = `${room?.id || activeRoomId}:${roundKey}:${value}`;
   if (announcementKey === lastSpokenRoomAnnouncementKey) return false;
   lastSpokenRoomAnnouncementKey = announcementKey;
+
+  // First choice: the device speech engine. Do not require a pre-installed Persian
+  // voice; browsers can choose their own best matching voice when voice is omitted.
+  if ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
+    try {
+      const synth = window.speechSynthesis;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'fa-IR';
+      utterance.rate = 0.82;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      const voices = synth.getVoices?.() || [];
+      const persianVoice = voices.find(voice => /^fa(?:[-_]|$)/i.test(voice.lang));
+      if (persianVoice) utterance.voice = persianVoice;
+
+      utterance.onstart = () => {
+        window.clearTimeout(voiceFallbackTimer);
+        voiceFallbackTimer = null;
+      };
+      utterance.onerror = () => playPersianVoiceFallback(text);
+      window.clearTimeout(voiceFallbackTimer);
+      voiceFallbackTimer = window.setTimeout(() => playPersianVoiceFallback(text), 900);
+
+      // A user click starts the test, while real game announcements can arrive later.
+      // resume() handles Android engines that remain paused after a previous utterance.
+      synth.cancel();
+      synth.resume?.();
+      synth.speak(utterance);
+      window.setTimeout(() => { if (synth.paused) synth.resume?.(); }, 120);
+
+      if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
+      return true;
+    } catch (_) {
+      // Continue to the network audio fallback below.
+    }
+  }
+
+  return playPersianVoiceFallback(text);
+}
+
+let voiceFallbackTimer = null;
+let voiceFallbackAudio = null;
+
+function playPersianVoiceFallback(text) {
+  // Audio fallback for browsers/WebViews whose installed speech engine cannot
+  // pronounce Persian. This is only used after native speech fails to start.
   try {
-    const synth = window.speechSynthesis;
-    const spokenNumber = numberToPersianWords(value);
-    const utterance = new SpeechSynthesisUtterance(`عدد ${spokenNumber}`);
-    utterance.lang = 'fa-IR';
-    utterance.rate = 0.82;
-    utterance.pitch = 1;
-    utterance.volume = 1;
-    const voices = synth.getVoices?.() || [];
-    const persianVoice = voices.find(voice => /^fa([_-]|$)/i.test(voice.lang));
-    if (persianVoice) utterance.voice = persianVoice;
-    utterance.onerror = () => showToast('پخش صدا توسط مرورگر انجام نشد. صدای رسانه و موتور تبدیل متن به گفتار دستگاه را بررسی کن.');
-    synth.cancel();
-    synth.resume?.();
-    synth.speak(utterance);
-    // Some Android WebViews need a short delayed retry after cancel().
-    window.setTimeout(() => {
-      if (synth.paused) synth.resume?.();
-    }, 80);
-    if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
+    window.clearTimeout(voiceFallbackTimer);
+    const encoded = encodeURIComponent(text);
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=fa&q=${encoded}`;
+    voiceFallbackAudio?.pause?.();
+    const audio = new Audio(url);
+    audio.preload = 'auto';
+    audio.volume = 1;
+    voiceFallbackAudio = audio;
+    audio.play().catch(() => showToast('صدای فارسی در این مرورگر مسدود شده است. اجازه پخش صدا را برای سایت فعال کن.'));
     return true;
   } catch (_) {
-    showToast('پخش اعلام صوتی در این دستگاه انجام نشد.');
+    showToast('امکان پخش اعلام صوتی فارسی در این دستگاه فراهم نشد.');
     return false;
   }
 }
@@ -1251,7 +1286,7 @@ document.addEventListener('click', async event => {
     if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) { showToast('ابتدا «صدای بازی» و «اعلام صوتی شماره‌ها» را فعال کن.'); return; }
     lastSpokenRoomAnnouncementKey = '';
     const played = speakRoomNumber(42, {id:'settings-test',roundId:Date.now()});
-    if (played) showToast('در حال پخش: عدد چهل و دو');
+    if (played) showToast('در حال پخش: عدد چهل و دو — ابتدا موتور صدای دستگاه و در صورت نیاز صدای جایگزین فعال می‌شود.');
   }
   else if (action === 'test-notification') {
     if (!settingEnabled('notifications')) { showToast('ابتدا اعلان‌های دستگاه را فعال کن.'); return; }
