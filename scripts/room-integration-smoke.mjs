@@ -77,36 +77,14 @@ const health = await request('/api/health');
 assert.equal(health.ok, true);
 assert.equal(health.database, 'D1');
 
-// Diagnostic only: list Persian voices and their commercial-use flags before selecting a provider.
-try {
-  const voiceListResponse = await fetch('https://api.tts.ai/v1/voices/?language=fa');
-  const voiceListBody = await voiceListResponse.json().catch(() => ({}));
-  console.log('TTS.ai Persian voice list:', JSON.stringify({
-    status: voiceListResponse.status,
-    voices: (voiceListBody.voices || []).map(voice => ({
-      id: voice.id, name: voice.name, model: voice.model,
-      commercial_use: voice.commercial_use, license: voice.license
-    }))
-  }));
-} catch (error) {
-  console.log('TTS.ai Persian voice list error:', String(error?.message || error));
-}
-
-// Verify the Persian voice provider, server-side MP3 proxy, and the full 1..90 range.
+// In isolated CI there are deliberately no cloud speech credentials.
+// The API must report this requirement clearly instead of silently returning fake/empty audio.
 const voiceHealthResponse = await fetch(baseUrl + '/api/voice/health');
 const voiceHealth = await voiceHealthResponse.json().catch(() => ({}));
-assert.equal(voiceHealthResponse.status, 200, 'Persian voice provider health endpoint failed: ' + String(voiceHealth.error || 'no details'));
-assert.equal(voiceHealth.ok, true, 'Persian voice provider must return a playable MP3');
-assert.equal(voiceHealth.contentType, 'audio/mpeg', 'voice health must report MPEG audio');
-assert.ok(Number(voiceHealth.bytes) > 512, 'Persian voice MP3 must contain audio data');
-for (const number of [1, 25, 42, 90]) {
-  const audioResponse = await fetch(baseUrl + '/api/voice/' + number);
-  assert.equal(audioResponse.status, 200, 'Persian voice clip ' + number + ' must be available');
-  assert.ok((audioResponse.headers.get('content-type') || '').toLowerCase().startsWith('audio/'),
-    'Persian voice clip ' + number + ' must have audio/mpeg content type');
-  const audioBytes = await audioResponse.arrayBuffer();
-  assert.ok(audioBytes.byteLength > 512, 'Persian voice clip ' + number + ' must not be empty');
-}
+assert.equal(voiceHealthResponse.status, 503, 'Azure Speech must report missing Cloudflare secrets in isolated CI');
+assert.equal(voiceHealth.ok, false, 'voice health must not claim success before Azure is configured');
+assert.equal(voiceHealth.configured, false, 'voice API must identify missing Azure Speech configuration');
+assert.equal(voiceHealth.provider, 'azure-speech', 'Persian TTS must use the official Azure Speech provider');
 
 const publicTournamentLobby = await request('/api/tournaments');
 assert.equal(publicTournamentLobby.ok, true);
