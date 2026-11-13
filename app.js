@@ -79,141 +79,19 @@ function numberToPersianWords(number) {
 }
 
 function numberToPersianSpeechText(number) {
-  return numberToPersianWords(number).replace(/\s+و\s+/g, ' ').replace(/\s+/g, ' ').trim();
+  return numberToPersianWords(number).replace(/\s+/g, ' ').trim();
 }
 
 let persianAudioContext = null;
-let persianAudioAssetPromise = null;
-let persianAudioAsset = null;
 let persianAudioQueue = Promise.resolve();
-let browserSpeechVoice = null;
 let voicePackReady = false;
 let voicePackCheckPromise = null;
 let voicePlaybackErrorShown = false;
-const nativeSpeechPending = new Map();
-let nativeSpeechSequence = 0;
-
-function refreshPersianBrowserVoices() {
-  if (!('speechSynthesis' in window) || typeof window.speechSynthesis.getVoices !== 'function') return null;
-  const voices = window.speechSynthesis.getVoices();
-  const persianVoices = voices.filter(voice => /^fa(?:-|_)/i.test(voice.lang) || /persian|farsi|فارسی/i.test(voice.name));
-  browserSpeechVoice = persianVoices.find(voice => /female|woman|زن/i.test(voice.name)) || persianVoices[0] || null;
-  return browserSpeechVoice;
-}
-
-if ('speechSynthesis' in window) {
-  window.speechSynthesis.onvoiceschanged = refreshPersianBrowserVoices;
-  refreshPersianBrowserVoices();
-}
-
-function nativePersianTtsAvailable() {
-  try {
-    return !!(window.DabernazNativeTTS &&
-      typeof window.DabernazNativeTTS.isAvailable === 'function' &&
-      window.DabernazNativeTTS.isAvailable());
-  } catch (_) {
-    return false;
-  }
-}
-
-window.addEventListener('dabernaz-native-tts-result', event => {
-  const detail = event?.detail || {};
-  const pending = nativeSpeechPending.get(String(detail.requestId || ''));
-  if (!pending) return;
-  nativeSpeechPending.delete(String(detail.requestId));
-  clearTimeout(pending.timer);
-  if (detail.ok) pending.resolve(true);
-  else pending.reject(new Error(detail.error || 'موتور گفتار فارسی اندروید نتوانست شماره را پخش کند.'));
-});
-
-function speakPersianNumberNative(number) {
-  const value = Math.trunc(Number(number));
-  const bridge = window.DabernazNativeTTS;
-  if (!Number.isInteger(value) || value < 1 || value > 90 ||
-      !nativePersianTtsAvailable() || typeof bridge.speak !== 'function') {
-    return Promise.reject(new Error('موتور گفتار بومی فارسی اندروید در دسترس نیست.'));
-  }
-  const requestId = 'dabernaz-voice-' + (++nativeSpeechSequence);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      nativeSpeechPending.delete(requestId);
-      reject(new Error('موتور گفتار اندروید در زمان مقرر پاسخ نداد.'));
-    }, 18000);
-    nativeSpeechPending.set(requestId, { resolve, reject, timer });
-    try {
-      bridge.speak(numberToPersianSpeechText(value), 'fa-IR', requestId);
-    } catch (error) {
-      clearTimeout(timer);
-      nativeSpeechPending.delete(requestId);
-      reject(error);
-    }
-  });
-}
-
-function speakPersianNumberFallback(number) {
-  const value = Math.trunc(Number(number));
-  if (!Number.isInteger(value) || value < 1 || value > 90) {
-    return Promise.reject(new Error('شمارهٔ صوتی معتبر نیست.'));
-  }
-
-  // Prefer Android's native TTS bridge in the installed APK. Browser speech is
-  // retained only for the normal website/PWA where the native bridge is absent.
-  if (nativePersianTtsAvailable()) return speakPersianNumberNative(value);
-
-  if (!('speechSynthesis' in window) ||
-      typeof window.SpeechSynthesisUtterance !== 'function') {
-    return Promise.reject(new Error('موتور گفتار در این مرورگر موجود نیست. برای صدای Sage Woman باید بستهٔ کامل صوتی نصب شود.'));
-  }
-
-  refreshPersianBrowserVoices();
-  const text = numberToPersianSpeechText(value);
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let started = false;
-    let keepAlive = null;
-    let startTimeout = null;
-    let endTimeout = null;
-    const cleanup = () => {
-      if (keepAlive) clearInterval(keepAlive);
-      if (startTimeout) clearTimeout(startTimeout);
-      if (endTimeout) clearTimeout(endTimeout);
-    };
-    const finish = (ok, error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      if (ok) resolve(true);
-      else reject(error || new Error('پخش صدای فارسی توسط مرورگر متوقف شد.'));
-    };
-    try {
-      const synth = window.speechSynthesis;
-      const utterance = new window.SpeechSynthesisUtterance(text);
-      utterance.lang = browserSpeechVoice?.lang || 'fa-IR';
-      if (browserSpeechVoice) utterance.voice = browserSpeechVoice;
-      utterance.rate = 0.84;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-      utterance.onstart = () => {
-        started = true;
-        if (startTimeout) clearTimeout(startTimeout);
-        endTimeout = setTimeout(() => finish(false, new Error('گفتار فارسی مرورگر شروع شد اما کامل نشد.')), 14000);
-      };
-      utterance.onend = () => finish(true);
-      utterance.onerror = event => finish(false, new Error(event?.error || 'مرورگر صدای فارسی را پخش نکرد.'));
-      synth.resume();
-      synth.speak(utterance);
-      startTimeout = setTimeout(() => {
-        if (!started) finish(false, new Error('مرورگر نتوانست موتور گفتار فارسی را فعال کند؛ صدای فارسی دستگاه را بررسی کن.'));
-      }, 4000);
-      keepAlive = setInterval(() => {
-        if (settled) return cleanup();
-        if (synth.paused) synth.resume();
-      }, 250);
-    } catch (error) {
-      finish(false, error);
-    }
-  });
-}
+let sageWomanManifest = null;
+let sageWomanManifestPromise = null;
+const availableSageWomanNumbers = new Set();
+const sageWomanAudioBuffers = new Map();
+const sageWomanAudioLoads = new Map();
 
 function unlockPersianAudio() {
   try {
@@ -239,112 +117,135 @@ function unlockPersianAudio() {
   }
 }
 
+function sageWomanAssetBase() {
+  return new URL('./assets/voice/', document.baseURI);
+}
+
+function sageWomanClipFilename(number) {
+  return String(Math.trunc(Number(number))).padStart(3, '0') + '.mp3';
+}
+
+async function loadSageWomanManifest() {
+  if (sageWomanManifest) return sageWomanManifest;
+  if (!sageWomanManifestPromise) {
+    sageWomanManifestPromise = (async () => {
+      const response = await fetch(new URL('sage-woman.json?v=5', sageWomanAssetBase()), {
+        method: 'GET', cache: 'no-store', credentials: 'same-origin'
+      });
+      if (!response.ok) throw new Error('مانیفست صدای Sage Woman دریافت نشد.');
+      const manifest = await response.json();
+      if (!manifest || Number(manifest.version) !== 3 ||
+          manifest.provider !== 'kenerate-sage-woman' ||
+          manifest.voice !== 'Sage Woman' || manifest.language !== 'fa-IR' ||
+          Number(manifest.requiredNumbers) !== 90 ||
+          !manifest.numbers || typeof manifest.numbers !== 'object' || Array.isArray(manifest.numbers)) {
+        throw new Error('ساختار مانیفست Sage Woman معتبر نیست.');
+      }
+      for (const [key, clip] of Object.entries(manifest.numbers)) {
+        const n = Number(key);
+        if (!Number.isInteger(n) || n < 1 || n > 90 ||
+            clip?.file !== sageWomanClipFilename(n) ||
+            String(clip?.text || '').trim() !== numberToPersianSpeechText(n)) {
+          throw new Error('اطلاعات شمارهٔ ' + key + ' در مانیفست Sage Woman معتبر نیست.');
+        }
+      }
+      sageWomanManifest = manifest;
+      return manifest;
+    })().catch(error => {
+      sageWomanManifestPromise = null;
+      throw error;
+    });
+  }
+  return sageWomanManifestPromise;
+}
+
+async function verifySageWomanClipOnServer(number, clip) {
+  const n = Math.trunc(Number(number));
+  if (!Number.isInteger(n) || n < 1 || n > 90 || !clip) return false;
+  if (availableSageWomanNumbers.has(n)) return true;
+  const url = new URL('sage-woman/' + clip.file + '?v=5', sageWomanAssetBase());
+  try {
+    const response = await fetch(url, {
+      method: 'HEAD', cache: 'no-store', credentials: 'same-origin'
+    });
+    const type = String(response.headers.get('content-type') || '').toLowerCase();
+    const size = Number(response.headers.get('content-length') || 0);
+    if (!response.ok || !type.includes('audio') || (size > 0 && size < 500)) return false;
+    availableSageWomanNumbers.add(n);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function loadPersianNumberAudio(number) {
   const value = Math.trunc(Number(number));
   if (!Number.isInteger(value) || value < 1 || value > 90) throw new Error('شمارهٔ صوتی معتبر نیست.');
   if (!persianAudioContext) throw new Error('خروجی صوتی مرورگر فعال نشده است.');
-  if (persianAudioAsset) {
-    const clip = persianAudioAsset.manifest.numbers[String(value)];
-    if (!clip) throw new Error('فایل صوتی این شماره در بسته Sage Woman پیدا نشد.');
-    return { buffer: persianAudioAsset.buffer, clip };
-  }
 
-  if (!persianAudioAssetPromise) {
-    const loading = (async () => {
-      const base = new URL('./assets/voice/', document.baseURI);
-      const manifestResponse = await fetch(new URL('sage-woman.json?v=4', base), {
-        method: 'GET', cache: 'no-store', credentials: 'same-origin'
-      });
-      if (!manifestResponse.ok) throw new Error('مانیفست صدای Sage Woman دریافت نشد.');
-      const manifest = await manifestResponse.json();
-      if (!manifest || manifest.provider !== 'kenerate-sage-woman' ||
-          manifest.voice !== 'Sage Woman' || manifest.language !== 'fa-IR' ||
-          manifest.configured !== true || !manifest.numbers ||
-          Object.keys(manifest.numbers).length !== 90) {
-        throw new Error('بستهٔ کامل ۹۰ شماره با صدای Sage Woman نصب نشده است.');
-      }
+  if (sageWomanAudioBuffers.has(value)) return sageWomanAudioBuffers.get(value);
+  if (sageWomanAudioLoads.has(value)) return sageWomanAudioLoads.get(value);
 
-      const audioResponse = await fetch(new URL('sage-woman.mp3?v=4', base), {
-        method: 'GET', cache: 'no-store', credentials: 'same-origin'
-      });
-      if (!audioResponse.ok) throw new Error('فایل MP3 صدای Sage Woman دریافت نشد.');
-      if (!(audioResponse.headers.get('content-type') || '').toLowerCase().includes('audio')) {
-        throw new Error('نوع فایل صدای Sage Woman معتبر نیست.');
-      }
-      const audioData = await audioResponse.arrayBuffer();
-      if (audioData.byteLength < 15000) throw new Error('فایل صوتی Sage Woman ناقص است.');
-      const buffer = await persianAudioContext.decodeAudioData(audioData.slice(0));
-      if (!Number.isFinite(buffer.duration) || buffer.duration < 20) {
-        throw new Error('فایل صوتی باید شامل تمام ۹۰ شماره باشد.');
-      }
+  const loading = (async () => {
+    const manifest = await loadSageWomanManifest();
+    const clip = manifest.numbers[String(value)];
+    if (!clip) throw new Error('فایل صوتی شمارهٔ ' + value + ' هنوز در بستهٔ Sage Woman قرار نگرفته است.');
+    if (!(await verifySageWomanClipOnServer(value, clip))) {
+      throw new Error('فایل MP3 شمارهٔ ' + value + ' در سرور پیدا نشد یا معتبر نیست.');
+    }
 
-      let previousEnd = 0;
-      for (let n = 1; n <= 90; n++) {
-        const clip = manifest.numbers[String(n)];
-        const start = Number(clip?.start);
-        const duration = Number(clip?.duration);
-        if (!clip || !Number.isFinite(start) || !Number.isFinite(duration) ||
-            start < 0 || duration <= 0 || start < previousEnd - 0.03 ||
-            start + duration > buffer.duration + 0.1 ||
-            String(clip.text || '').trim() !== numberToPersianSpeechText(n)) {
-          throw new Error('اطلاعات صوتی شمارهٔ ' + n + ' معتبر نیست.');
-        }
-        previousEnd = start + duration;
-      }
-      persianAudioAsset = { manifest, buffer };
-      voicePackReady = true;
-      return persianAudioAsset;
-    })();
-    persianAudioAssetPromise = loading.catch(error => {
-      persianAudioAssetPromise = null;
-      throw error;
+    const response = await fetch(new URL('sage-woman/' + clip.file + '?v=5', sageWomanAssetBase()), {
+      method: 'GET', cache: 'default', credentials: 'same-origin'
     });
-  }
+    if (!response.ok) throw new Error('دریافت فایل MP3 شمارهٔ ' + value + ' ناموفق بود.');
+    if (!String(response.headers.get('content-type') || '').toLowerCase().includes('audio')) {
+      throw new Error('نوع فایل صوتی شمارهٔ ' + value + ' معتبر نیست.');
+    }
+    const data = await response.arrayBuffer();
+    if (data.byteLength < 500) throw new Error('فایل صوتی شمارهٔ ' + value + ' ناقص است.');
+    const buffer = await persianAudioContext.decodeAudioData(data.slice(0));
+    if (!Number.isFinite(buffer.duration) || buffer.duration < 0.2 || buffer.duration > 12) {
+      throw new Error('مدت فایل صوتی شمارهٔ ' + value + ' خارج از محدودهٔ معتبر است.');
+    }
+    const loaded = { buffer, clip };
+    sageWomanAudioBuffers.set(value, loaded);
+    return loaded;
+  })().finally(() => sageWomanAudioLoads.delete(value));
 
-  await persianAudioAssetPromise;
-  const clip = persianAudioAsset.manifest.numbers[String(value)];
-  return { buffer: persianAudioAsset.buffer, clip };
+  sageWomanAudioLoads.set(value, loading);
+  return loading;
 }
 
 async function checkPersianVoicePack() {
   if (voicePackCheckPromise) return voicePackCheckPromise;
   voicePackCheckPromise = (async () => {
+    voicePackReady = false;
+    availableSageWomanNumbers.clear();
     try {
-      const base = new URL('./assets/voice/', document.baseURI);
-      const [manifestResponse, audioHead] = await Promise.all([
-        fetch(new URL('sage-woman.json?v=4', base), { cache: 'no-store', credentials: 'same-origin' }),
-        fetch(new URL('sage-woman.mp3?v=4', base), { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' })
-      ]);
-      if (!manifestResponse.ok || !audioHead.ok) throw new Error('Sage Woman audio files are missing');
-      const manifest = await manifestResponse.json();
-      const contentType = String(audioHead.headers.get('content-type') || '').toLowerCase();
-      const contentLength = Number(audioHead.headers.get('content-length') || 0);
-      if (!manifest || manifest.provider !== 'kenerate-sage-woman' ||
-          manifest.voice !== 'Sage Woman' || manifest.language !== 'fa-IR' ||
-          manifest.configured !== true || !manifest.numbers ||
-          Object.keys(manifest.numbers).length !== 90 ||
-          !contentType.includes('audio') || (contentLength > 0 && contentLength < 15000)) {
-        throw new Error('Sage Woman metadata is incomplete');
-      }
-      let previousEnd = 0;
+      const manifest = await loadSageWomanManifest();
+      const entries = [];
       for (let n = 1; n <= 90; n++) {
         const clip = manifest.numbers[String(n)];
-        const start = Number(clip?.start);
-        const duration = Number(clip?.duration);
-        if (!clip || String(clip.text || '').trim() !== numberToPersianSpeechText(n) ||
-            !Number.isFinite(start) || !Number.isFinite(duration) ||
-            start < 0 || duration <= 0 || start < previousEnd - 0.03) {
-          throw new Error('Sage Woman clip ' + n + ' is invalid');
-        }
-        previousEnd = start + duration;
+        if (clip) entries.push({ number: n, clip });
       }
-      if (!Number.isFinite(Number(manifest.audioDurationSeconds)) ||
-          Number(manifest.audioDurationSeconds) + 0.1 < previousEnd) {
-        throw new Error('Sage Woman manifest duration does not cover all 90 clips');
+
+      // Check only the files declared in the manifest, in small batches.
+      for (let i = 0; i < entries.length; i += 8) {
+        await Promise.all(entries.slice(i, i + 8).map(({ number, clip }) =>
+          verifySageWomanClipOnServer(number, clip)));
       }
-      voicePackReady = true;
-    } catch (_) {
+
+      voicePackReady = manifest.configured === true &&
+        Object.keys(manifest.numbers).length === 90 &&
+        availableSageWomanNumbers.size === 90;
+    } catch (error) {
+      console.warn('[Dabernaz Sage Woman package check]', error);
       voicePackReady = false;
+    }
+
+    if (!voicePackReady && settingEnabled('voiceNumbers')) {
+      state.settings.voiceNumbers = false;
+      saveState();
     }
     if (currentPage === 'settings') renderSettingsIntoView();
     return voicePackReady;
@@ -353,10 +254,13 @@ async function checkPersianVoicePack() {
 }
 
 async function playSageWomanNumber(number) {
-  if (!persianAudioContext && !unlockPersianAudio()) throw new Error('خروجی صوتی برای پخش Sage Woman در دسترس نیست.');
+  if (!persianAudioContext && !unlockPersianAudio()) {
+    throw new Error('خروجی صوتی برای پخش Sage Woman در دسترس نیست.');
+  }
   const context = persianAudioContext;
   if (context.state === 'suspended') await context.resume();
   const loaded = await loadPersianNumberAudio(number);
+
   return new Promise((resolve, reject) => {
     const source = context.createBufferSource();
     const gain = context.createGain();
@@ -370,7 +274,7 @@ async function playSageWomanNumber(number) {
       settled = true;
       try { source.stop(); } catch (_) {}
       reject(new Error('پخش فایل صوتی Sage Woman کامل نشد.'));
-    }, Math.max(2500, Number(loaded.clip.duration) * 1000 + 2500));
+    }, Math.max(2500, loaded.buffer.duration * 1000 + 2500));
     source.onended = () => {
       if (settled) return;
       settled = true;
@@ -378,7 +282,7 @@ async function playSageWomanNumber(number) {
       resolve(true);
     };
     try {
-      source.start(0, Number(loaded.clip.start), Number(loaded.clip.duration));
+      source.start(0);
     } catch (error) {
       clearTimeout(timer);
       reject(error);
@@ -387,13 +291,10 @@ async function playSageWomanNumber(number) {
 }
 
 function playPersianNumberInternal(number) {
-  if (voicePackReady) {
-    return playSageWomanNumber(number).catch(error => {
-      console.warn('[Dabernaz Sage Woman playback failed; using device voice]', error);
-      return speakPersianNumberFallback(number);
-    });
+  if (!voicePackReady) {
+    throw new Error('بستهٔ کامل صدای Sage Woman آماده نیست؛ اعلام شماره در اتاق تا نصب هر ۹۰ فایل فعال نمی‌شود.');
   }
-  return speakPersianNumberFallback(number);
+  return playSageWomanNumber(number);
 }
 
 const PersianAudioManager = {
@@ -414,41 +315,31 @@ const PersianAudioManager = {
       oscillator.stop(context.currentTime + 0.12);
     } catch (_) {}
   },
-  supportsPlayback() {
-    return voicePackReady || nativePersianTtsAvailable() ||
-      ('speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function');
-  },
+  supportsPlayback() { return voicePackReady; },
   activateFromGesture() {
     unlockPersianAudio();
-    if ('speechSynthesis' in window) {
-      try {
-        const synth = window.speechSynthesis;
-        synth.resume();
-        refreshPersianBrowserVoices();
-        if (!nativePersianTtsAvailable() && !voicePackReady &&
-            typeof window.SpeechSynthesisUtterance === 'function') {
-          const prime = new window.SpeechSynthesisUtterance(' ');
-          prime.lang = browserSpeechVoice?.lang || 'fa-IR';
-          prime.volume = 0;
-          synth.cancel();
-          synth.speak(prime);
-        }
-      } catch (error) {
-        console.warn('[Dabernaz browser speech activation]', error);
-      }
-    }
     return this.supportsPlayback();
+  },
+  previewSample(options = {}) {
+    if (options.fromGesture) unlockPersianAudio();
+    return playSageWomanNumber(42);
   },
   speak(number, options = {}) {
     const value = Math.trunc(Number(number));
     if (!Number.isInteger(value) || value < 1 || value > 90) return Promise.resolve(false);
+    if (!voicePackReady) {
+      const error = new Error('بستهٔ کامل صدای Sage Woman آماده نیست؛ فعلاً ' +
+        availableSageWomanNumbers.size + ' فایل از ۹۰ فایل در پروژه موجود است.');
+      if (!voicePlaybackErrorShown) {
+        voicePlaybackErrorShown = true;
+        showToast(error.message);
+      }
+      return Promise.resolve(false);
+    }
 
-    if (options.fromGesture) this.activateFromGesture();
-
+    if (options.fromGesture) unlockPersianAudio();
     let task;
     if (options.fromGesture) {
-      // Do not defer the first fallback call: Android/browser speech engines
-      // must be invoked synchronously inside the trusted tap event.
       try { task = playPersianNumberInternal(value); }
       catch (error) { task = Promise.reject(error); }
     } else {
@@ -456,7 +347,7 @@ const PersianAudioManager = {
     }
 
     const result = Promise.resolve(task).then(ok => {
-      if (!ok) throw new Error('موتور صوتی شماره را پخش نکرد؛ امکان تلاش دوباره وجود دارد.');
+      if (!ok) throw new Error('فایل صوتی شماره پخش نشد؛ امکان تلاش دوباره وجود دارد.');
       voicePlaybackErrorShown = false;
       return true;
     }).catch(error => {
@@ -471,7 +362,6 @@ const PersianAudioManager = {
     return result;
   }
 };
-
 function speakRoomNumber(number, room) {
   if (!settingEnabled('voiceNumbers')) return false;
   const value = Math.trunc(Number(number));
@@ -1174,12 +1064,12 @@ function renderSettings() {
   const sw = (key, title, desc) => `<div class="setting-row"><div class="setting-copy"><b>${title}</b><small>${desc}</small></div><button class="switch ${state.settings[key] ? 'on' : ''}" type="button" role="switch" aria-checked="${!!state.settings[key]}" aria-label="${title}" data-setting="${key}"></button></div>`;
   const voiceControl = sw('voiceNumbers',
     voicePackReady ? 'اعلام صوتی شماره‌ها با Sage Woman' : 'اعلام صوتی شماره‌ها',
-    voicePackReady ? 'صدای زنانه Sage Woman برای اعلام شماره‌های ۱ تا ۹۰' : 'بستهٔ Sage Woman هنوز نصب نشده؛ در APK از موتور بومی فارسی Android و در وب از موتور گفتار مرورگر استفاده می‌شود.');
+    voicePackReady ? 'صدای ضبط‌شدهٔ Sage Woman برای هر ۹۰ شماره آماده است' : 'بستهٔ Sage Woman کامل نیست (' + availableSageWomanNumbers.size + ' از ۹۰ فایل). اعلام داخل اتاق تا تکمیل بسته غیرفعال است.');
   return `${heading('تنظیمات', 'صدای بازی، اعلام شماره‌ها و اعلان‌های دستگاه را مدیریت کن.', 'PREFERENCES')}
   <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
     ${sw('sounds','صداهای محیط بازی','افکت‌ها و صداهای محیطی بازی؛ مستقل از اعلام شماره‌ها')}
     ${voiceControl}
-    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${voicePackReady ? 'پخش نمونهٔ «چهل دو» با صدای Sage Woman' : 'پخش نمونه از موتور گفتار دستگاه؛ صدای Sage Woman پس از نصب بسته فعال می‌شود'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
+    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${availableSageWomanNumbers.has(42) ? 'پخش فایل مرجع اصلی «چهل و دو» با صدای Sage Woman' : 'فایل مرجع شمارهٔ ۴۲ هنوز در پروژه نیست'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
     ${sw('vibration','لرزش','بازخورد لرزشی در دستگاه‌های پشتیبانی‌شده')}
   </section>
   <section class="setting-group"><h3 class="settings-title">اعلان‌های دستگاه</h3>
@@ -1669,16 +1559,18 @@ document.addEventListener('click', async event => {
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
   else if (action === 'test-number-voice') {
     voicePlaybackErrorShown = false;
-    const ok = await PersianAudioManager.speak(42, { fromGesture: true });
-    if (ok) {
-      state.settings.voiceNumbers = true;
-      saveState();
-      showToast(voicePackReady ? 'نمونه با صدای Sage Woman پخش شد.' : 'تست صدای فارسی با موفقیت پخش شد.');
-    }
+    const ok = await PersianAudioManager.previewSample({ fromGesture: true });
+    if (ok) showToast(voicePackReady ? 'نمونهٔ Sage Woman پخش شد؛ بستهٔ ۹۰ شماره آماده است.' : 'نمونهٔ اصلی شمارهٔ ۴۲ پخش شد؛ برای فعال‌سازی اتاق‌ها هنوز ۸۹ فایل دیگر لازم است.');
     renderSettingsIntoView();
   }
   else if (action === 'enable-room-audio') {
     voicePlaybackErrorShown = false;
+    if (!(voicePackReady || await checkPersianVoicePack())) {
+      state.settings.voiceNumbers = false;
+      saveState();
+      showToast('بستهٔ کامل Sage Woman موجود نیست؛ ' + availableSageWomanNumbers.size + ' فایل از ۹۰ فایل آماده است.');
+      return;
+    }
     state.settings.voiceNumbers = true;
     saveState();
     const latest = Number(roomServerSnapshot?.latestNumber);
