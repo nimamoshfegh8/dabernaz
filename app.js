@@ -501,6 +501,41 @@ function speakRoomNumber(number, room) {
   return true;
 }
 
+
+async function toggleSetting(key) {
+  const next = !settingEnabled(key);
+  if (key === 'voiceNumbers' && next) {
+    voicePlaybackErrorShown = false;
+    if (!PersianAudioManager.activateFromGesture()) {
+      showToast('هیچ موتور صوتی برای اعلام شماره در این دستگاه در دسترس نیست.');
+      return;
+    }
+  }
+  if (key === 'notifications' && next) {
+    if (!('Notification' in window)) {
+      showToast('اعلان‌های سیستمی در این مرورگر پشتیبانی نمی‌شود.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      state.settings.notifications = false;
+      saveState(); renderSettingsIntoView();
+      showToast('اجازه ارسال اعلان داده نشد.');
+      return;
+    }
+  }
+  state.settings[key] = next;
+  saveState();
+  if (key === 'sounds' && next) PersianAudioManager.playEffectTone();
+  if (key === 'vibration' && next && navigator.vibrate) navigator.vibrate(25);
+  renderSettingsIntoView();
+  const labels = {
+    sounds: 'صداهای محیط بازی', voiceNumbers: 'اعلام صوتی شماره‌ها', notifications: 'اعلان‌ها',
+    vibration: 'لرزش', privacy: 'نمایش وضعیت آنلاین'
+  };
+  showToast((labels[key] || 'تنظیم') + ' ' + (next ? 'فعال' : 'غیرفعال') + ' شد');
+}
+
 const ROOM_CONFIGS = [
   { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
   { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
