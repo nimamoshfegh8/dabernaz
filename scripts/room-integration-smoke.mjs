@@ -77,28 +77,16 @@ const health = await request('/api/health');
 assert.equal(health.ok, true);
 assert.equal(health.database, 'D1');
 
-// Persian number announcements are served from bundled, same-origin static assets.
-// No Azure credentials or external TTS provider are required.
+// The production UI must not fall back to robotic eSpeak while the selected
+// Kenerate Sage Woman 1..90 package is still being prepared.
 const voiceHealth = await request('/api/voice/health');
 assert.equal(voiceHealth.ok, true);
-assert.equal(voiceHealth.configured, true);
-assert.equal(voiceHealth.provider, 'bundled-persian-audio');
-assert.equal(voiceHealth.numbers, 90);
-const voiceManifestResponse = await fetch(baseUrl + '/assets/voice/fa-numbers.json');
-assert.equal(voiceManifestResponse.status, 200, 'bundled Persian voice manifest must be published');
-const voiceManifest = await voiceManifestResponse.json();
-assert.equal(voiceManifest.provider, 'bundled-persian-audio');
-assert.equal(Object.keys(voiceManifest.numbers || {}).length, 90, 'voice manifest must contain all numbers 1..90');
-for (let number = 1; number <= 90; number++) {
-  const clip = voiceManifest.numbers[String(number)];
-  assert.ok(clip && Number(clip.start) >= 0 && Number(clip.duration) > 0,
-    'missing or invalid audio timing for number ' + number);
-}
-const voiceAudioResponse = await fetch(baseUrl + '/assets/voice/fa-numbers.mp3');
-assert.equal(voiceAudioResponse.status, 200, 'bundled Persian MP3 must be published');
-assert.match(voiceAudioResponse.headers.get('content-type') || '', /audio\/mpeg/i);
-const voiceAudioBytes = await voiceAudioResponse.arrayBuffer();
-assert.ok(voiceAudioBytes.byteLength > 200000, 'bundled Persian MP3 must not be empty');
+assert.equal(voiceHealth.configured, false);
+assert.equal(voiceHealth.status, 'awaiting-audio-pack');
+assert.equal(voiceHealth.provider, 'kenerate-sage-woman');
+assert.equal(voiceHealth.voice, 'Sage Woman');
+assert.equal(voiceHealth.numbers, 0);
+assert.equal(voiceHealth.requiredNumbers, 90);
 
 const publicTournamentLobby = await request('/api/tournaments');
 assert.equal(publicTournamentLobby.ok, true);
