@@ -61,6 +61,33 @@ git push
 
 ذخیره کن و یک بار **Redeploy** بزن تا Binding وارد اجرای Function شود.
 
+## فعال‌سازی صدای فارسی شماره‌های دبرنا
+
+اعلام شماره‌ها با Azure Speech و صدای فارسی ایران (Farid) انجام می‌شود. کلید سرویس فقط باید به‌صورت Secret در Cloudflare ذخیره شود؛ آن را در GitHub، فایل JavaScript یا چت قرار نده.
+
+۱. در Azure یک منبع Speech بساز و پلن رایگان Free F0 را انتخاب کن. سهمیهٔ رایگان صدای Neural تا ۵۰۰٬۰۰۰ نویسه در ماه است و برای این بازی کافی است.
+
+۲. از بخش Keys and Endpoint، کلید سرویس و Region منبع را بردار. صدای انتخاب‌شده fa-IR-FaridNeural است.
+
+۳. در Cloudflare برو به:
+
+Workers & Pages → dabernaz → Settings → Variables and Secrets → Production
+
+این دو مقدار را اضافه کن:
+
+- AZURE_SPEECH_KEY — نوع Secret؛ کلید Speech.
+- AZURE_SPEECH_REGION — متن ساده؛ نام Region منبع، مانند eastus یا westeurope.
+
+۴. ذخیره کن و یک بار Redeploy بزن تا Secrets به Pages Functions برسند.
+
+۵. این نشانی را باز کن:
+
+https://dabernaz.pages.dev/api/voice/health
+
+پاسخ موفق باید ok=true، provider=azure-speech، voice=fa-IR-FaridNeural و contentType=audio/mpeg نشان دهد. سپس در سایت از تنظیمات → تست اعلام صوتی شماره‌ها و داخل بازی از دکمه فعال‌سازی صدای فارسی شماره‌ها استفاده کن.
+
+اگر کلید یا Region تنظیم نشده باشد، API پاسخ 503 و پیام پیکربندی می‌دهد و صدای خالی یا ساختگی پخش نمی‌کند.
+
 ## آزمایش نهایی
 
 این نشانی را باز کن:
