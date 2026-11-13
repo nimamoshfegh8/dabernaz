@@ -72,7 +72,6 @@ function numberToPersianWords(number) {
 
 let persianAudioContext = null;
 const persianAudioBuffers = new Map();
-let roomVoiceUnlockReady = false;
 
 function unlockPersianAudio() {
   try {
@@ -95,7 +94,6 @@ function unlockPersianAudio() {
     gain.connect(context.destination);
     silent.start();
     silent.stop(context.currentTime + 0.025);
-    roomVoiceUnlockReady = true;
     return true;
   } catch (error) {
     console.warn('[Dabernaz voice unlock]', error);
@@ -198,7 +196,6 @@ async function toggleSetting(key) {
     }
   }
   state.settings[key] = next;
-  if (key === 'sounds' && !next && 'speechSynthesis' in window) window.speechSynthesis.cancel();
   saveState();
   if (key === 'sounds' && next) playSettingsTone();
   if (key === 'vibration' && next && navigator.vibrate) navigator.vibrate(25);
@@ -1329,7 +1326,7 @@ document.addEventListener('click', async event => {
     try { new Notification('دابرناز', { body:'اعلان آزمایشی با موفقیت فعال است.' }); showToast('اعلان آزمایشی ارسال شد.'); }
     catch (_) { showToast('نمایش اعلان در این مرورگر ممکن نشد.'); }
   }
-  else if (action === 'reset-settings') { state.settings = { ...defaultState.settings }; saveState(); if ('speechSynthesis' in window) window.speechSynthesis.cancel(); render(); showToast('تنظیمات بازنشانی شد'); }
+  else if (action === 'reset-settings') { state.settings = { ...defaultState.settings }; saveState(); render(); showToast('تنظیمات بازنشانی شد'); }
 });
 function renderSettingsIntoView() { const y = window.scrollY; render(); window.scrollTo(0,y); }
 function callBingo() {
