@@ -71,7 +71,9 @@ function numberToPersianWords(number) {
 }
 
 let persianAudioContext = null;
-const persianAudioBuffers = new Map();
+let persianAudioAssetPromise = null;
+let persianAudioAsset = null;
+let persianAudioQueue = Promise.resolve();
 
 function unlockPersianAudio() {
   try {
@@ -85,7 +87,6 @@ function unlockPersianAudio() {
     }
     const context = persianAudioContext;
     if (context.state === 'suspended') context.resume().catch(() => {});
-    // Start a tiny silent Web Audio node directly in the tap/click gesture.
     const silent = context.createBufferSource();
     silent.buffer = context.createBuffer(1, Math.max(1, Math.floor(context.sampleRate * 0.025)), context.sampleRate);
     const gain = context.createGain();
@@ -105,53 +106,89 @@ function unlockPersianAudio() {
 async function loadPersianNumberAudio(number) {
   const value = Math.trunc(Number(number));
   if (!Number.isInteger(value) || value < 1 || value > 90) throw new Error('شماره صوتی معتبر نیست.');
-  if (!persianAudioContext) throw new Error('ابتدا روی دکمه فعال‌سازی صدا بزن.');
-  if (persianAudioBuffers.has(value)) return persianAudioBuffers.get(value);
-
-  const loadPromise = (async () => {
-    const response = await fetch(`/api/voice/${value}`, { method:'GET', cache:'force-cache', credentials:'same-origin' });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `دریافت فایل صوتی ناموفق بود (HTTP ${response.status}).`);
-    }
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.toLowerCase().includes('audio')) throw new Error('پاسخ سرویس صدا فایل صوتی معتبر نیست.');
-    const audioData = await response.arrayBuffer();
-    if (audioData.byteLength < 512) throw new Error('فایل صوتی دریافتی خالی است.');
-    return await persianAudioContext.decodeAudioData(audioData.slice(0));
-  })();
-  persianAudioBuffers.set(value, loadPromise);
-  try {
-    const buffer = await loadPromise;
-    persianAudioBuffers.set(value, buffer);
-    return buffer;
-  } catch (error) {
-    persianAudioBuffers.delete(value);
-    throw error;
+  if (!persianAudioContext) throw new Error('ابتدا روی دکمه فعال‌سازی صدای فارسی بزن.');
+  if (persianAudioAsset) {
+    const clip = persianAudioAsset.manifest.numbers[String(value)];
+    if (!clip) throw new Error('فایل صوتی این شماره پیدا نشد.');
+    return { buffer: persianAudioAsset.buffer, clip };
   }
+
+  if (!persianAudioAssetPromise) {
+    const loading = (async () => {
+      const base = new URL('./assets/voice/', document.baseURI);
+      const [manifestResponse, audioResponse] = await Promise.all([
+        fetch(new URL('fa-numbers.json?v=1', base), { method:'GET', cache:'force-cache', credentials:'same-origin' }),
+        fetch(new URL('fa-numbers.mp3?v=1', base), { method:'GET', cache:'force-cache', credentials:'same-origin' })
+      ]);
+      if (!manifestResponse.ok) throw new Error('دریافت فهرست صدای فارسی ناموفق بود (HTTP ' + manifestResponse.status + ').');
+      if (!audioResponse.ok) throw new Error('دریافت فایل صدای فارسی ناموفق بود (HTTP ' + audioResponse.status + ').');
+      const manifest = await manifestResponse.json();
+      if (!manifest || manifest.provider !== 'bundled-persian-audio' || !manifest.numbers ||
+          Object.keys(manifest.numbers).length !== 90) {
+        throw new Error('فهرست فایل‌های صدای فارسی کامل یا معتبر نیست.');
+      }
+      const audioData = await audioResponse.arrayBuffer();
+      if (audioData.byteLength < 200000 || !(audioResponse.headers.get('content-type') || '').toLowerCase().includes('audio')) {
+        throw new Error('فایل صوتی فارسی معتبر یا کامل نیست.');
+      }
+      const buffer = await persianAudioContext.decodeAudioData(audioData.slice(0));
+      if (buffer.duration < 150) throw new Error('فایل صوتی فارسی ناقص دریافت شده است.');
+      persianAudioAsset = { manifest, buffer };
+      return persianAudioAsset;
+    })();
+    persianAudioAssetPromise = loading.catch(error => {
+      persianAudioAssetPromise = null;
+      throw error;
+    });
+  }
+
+  await persianAudioAssetPromise;
+  const clip = persianAudioAsset.manifest.numbers[String(value)];
+  if (!clip || !Number.isFinite(Number(clip.start)) || !Number.isFinite(Number(clip.duration)) ||
+      Number(clip.start) < 0 || Number(clip.duration) <= 0 ||
+      Number(clip.start) + Number(clip.duration) > persianAudioAsset.buffer.duration + 0.2) {
+    throw new Error('محدوده صوتی شماره موردنظر معتبر نیست.');
+  }
+  return { buffer: persianAudioAsset.buffer, clip };
 }
 
-async function playPersianNumberAudio(number) {
-  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
-  if (!persianAudioContext && !unlockPersianAudio()) return false;
-  const context = persianAudioContext;
-  try {
+function playPersianNumberAudio(number) {
+  const value = Math.trunc(Number(number));
+  if (!Number.isInteger(value) || value < 1 || value > 90) return Promise.resolve(false);
+  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return Promise.resolve(false);
+  if (!persianAudioContext && !unlockPersianAudio()) return Promise.resolve(false);
+
+  const play = async () => {
+    if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
+    const context = persianAudioContext;
     if (context.state === 'suspended') await context.resume();
-    const buffer = await loadPersianNumberAudio(number);
+    const loaded = await loadPersianNumberAudio(value);
     if (context.state !== 'running') await context.resume();
-    const source = context.createBufferSource();
-    const gain = context.createGain();
-    source.buffer = buffer;
-    gain.gain.value = 1;
-    source.connect(gain);
-    gain.connect(context.destination);
-    source.start(0);
-    return true;
-  } catch (error) {
-    console.error('[Dabernaz Persian audio]', error);
-    showToast(error.message || 'پخش صدای فارسی انجام نشد.');
-    return false;
-  }
+    return await new Promise((resolve, reject) => {
+      try {
+        const source = context.createBufferSource();
+        const gain = context.createGain();
+        source.buffer = loaded.buffer;
+        gain.gain.value = 1;
+        source.connect(gain);
+        gain.connect(context.destination);
+        source.onended = () => resolve(true);
+        source.start(0, Number(loaded.clip.start), Number(loaded.clip.duration));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  };
+
+  persianAudioQueue = persianAudioQueue
+    .catch(() => false)
+    .then(play)
+    .catch(error => {
+      console.error('[Dabernaz Persian audio]', error);
+      showToast(error.message || 'پخش صدای فارسی انجام نشد.');
+      return false;
+    });
+  return persianAudioQueue;
 }
 
 function speakRoomNumber(number, room) {
@@ -823,7 +860,7 @@ function renderSettings() {
   return `${heading('تنظیمات', 'صدا، اعلام شماره‌ها و امکانات دستگاه را مطابق سلیقه خودت تنظیم کن.', 'PREFERENCES')}
   <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
     ${sw('sounds','صدای بازی','روشن یا خاموش کردن صداهای بازی')}
-    ${sw('voiceNumbers','اعلام صوتی شماره‌ها','پخش فایل صوتی فارسی برای هر شماره؛ بدون نیاز به صدای فارسی نصب‌شده روی گوشی')}
+    ${sw('voiceNumbers','اعلام صوتی شماره‌ها','پخش فایل‌های آماده فارسی؛ بدون نیاز به صدای نصب‌شده یا سرویس آنلاین')}
     <div class="setting-row"><div class="setting-copy"><b>آزمایش صدا</b><small>نمونه اعلام صوتی شماره دبرنا</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
     ${sw('vibration','لرزش','بازخورد لرزشی هنگام رویدادهای بازی در دستگاه‌های پشتیبانی‌شده')}
   </section>
@@ -1311,7 +1348,7 @@ document.addEventListener('click', async event => {
     if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) { showToast('ابتدا «صدای بازی» و «اعلام صوتی شماره‌ها» را فعال کن.'); return; }
     lastSpokenRoomAnnouncementKey = '';
     if (!unlockPersianAudio()) return;
-    showToast('در حال دریافت و پخش صدای فارسی: عدد چهل و دو');
+    showToast('در حال بارگذاری و پخش نمونه صدای فارسی: عدد چهل و دو');
     playPersianNumberAudio(42);
   }
   else if (action === 'enable-room-audio') {
