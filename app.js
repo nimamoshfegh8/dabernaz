@@ -1501,19 +1501,24 @@ document.addEventListener('click', async event => {
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
   else if (action === 'test-number-voice') {
-    if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) { showToast('ابتدا «صدای بازی» و «اعلام صوتی شماره‌ها» را فعال کن.'); return; }
+    // This runs directly inside the user's tap, which Android requires for media/speech.
     lastSpokenRoomAnnouncementKey = '';
-    if (!unlockPersianAudio()) return;
-    if (!voicePackReady) { showToast('صدای Sage Woman انتخاب شده، اما بسته کامل ۹۰ شماره هنوز در سایت قرار نگرفته است.'); return; }
-    showToast('در حال پخش نمونه: چهل و دو');
-    playPersianNumberAudio(42);
+    voicePlaybackErrorShown = false;
+    if (!settingEnabled('sounds')) { state.settings.sounds = true; saveState(); }
+    if (!settingEnabled('voiceNumbers')) { state.settings.voiceNumbers = true; saveState(); }
+    unlockPersianAudio();
+    refreshPersianBrowserVoices();
+    showToast('در حال پخش نمونه: چهل دو');
+    const ok = await playPersianNumberAudio(42);
+    if (!ok) showToast('تست صدا انجام نشد؛ صدای رسانه گوشی و موتور گفتار فارسی مرورگر را بررسی کن.');
+    renderSettingsIntoView();
   }
   else if (action === 'enable-room-audio') {
-    if (!voicePackReady) { showToast('بسته کامل صدای Sage Woman هنوز آماده نشده است.'); return; }
-    if (!unlockPersianAudio()) return;
+    unlockPersianAudio();
+    refreshPersianBrowserVoices();
     const latest = Number(roomServerSnapshot?.latestNumber);
     if (latest >= 1 && latest <= 90) {
-      showToast('صدای فارسی فعال شد؛ شماره بعدی هم به‌صورت صوتی اعلام می‌شود.');
+      showToast('صدای فارسی فعال شد؛ شماره فعلی پخش می‌شود.');
       playPersianNumberAudio(latest);
     } else showToast('صدای فارسی فعال شد؛ با اعلام شماره بعدی آن را می‌شنوی.');
   }
