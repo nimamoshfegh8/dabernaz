@@ -77,14 +77,28 @@ const health = await request('/api/health');
 assert.equal(health.ok, true);
 assert.equal(health.database, 'D1');
 
-// In isolated CI there are deliberately no cloud speech credentials.
-// The API must report this requirement clearly instead of silently returning fake/empty audio.
-const voiceHealthResponse = await fetch(baseUrl + '/api/voice/health');
-const voiceHealth = await voiceHealthResponse.json().catch(() => ({}));
-assert.equal(voiceHealthResponse.status, 503, 'Azure Speech must report missing Cloudflare secrets in isolated CI');
-assert.equal(voiceHealth.ok, false, 'voice health must not claim success before Azure is configured');
-assert.equal(voiceHealth.configured, false, 'voice API must identify missing Azure Speech configuration');
-assert.equal(voiceHealth.provider, 'azure-speech', 'Persian TTS must use the official Azure Speech provider');
+// Persian number announcements are served from bundled, same-origin static assets.
+// No Azure credentials or external TTS provider are required.
+const voiceHealth = await request('/api/voice/health');
+assert.equal(voiceHealth.ok, true);
+assert.equal(voiceHealth.configured, true);
+assert.equal(voiceHealth.provider, 'bundled-persian-audio');
+assert.equal(voiceHealth.numbers, 90);
+const voiceManifestResponse = await fetch(baseUrl + '/assets/voice/fa-numbers.json');
+assert.equal(voiceManifestResponse.status, 200, 'bundled Persian voice manifest must be published');
+const voiceManifest = await voiceManifestResponse.json();
+assert.equal(voiceManifest.provider, 'bundled-persian-audio');
+assert.equal(Object.keys(voiceManifest.numbers || {}).length, 90, 'voice manifest must contain all numbers 1..90');
+for (let number = 1; number <= 90; number++) {
+  const clip = voiceManifest.numbers[String(number)];
+  assert.ok(clip && Number(clip.start) >= 0 && Number(clip.duration) > 0,
+    'missing or invalid audio timing for number ' + number);
+}
+const voiceAudioResponse = await fetch(baseUrl + '/assets/voice/fa-numbers.mp3');
+assert.equal(voiceAudioResponse.status, 200, 'bundled Persian MP3 must be published');
+assert.match(voiceAudioResponse.headers.get('content-type') || '', /audio\/mpeg/i);
+assert.ok(Number(voiceAudioResponse.headers.get('content-length') || 0) > 200000,
+  'bundled Persian MP3 must not be empty');
 
 const publicTournamentLobby = await request('/api/tournaments');
 assert.equal(publicTournamentLobby.ok, true);
