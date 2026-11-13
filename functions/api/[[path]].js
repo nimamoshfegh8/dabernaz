@@ -558,7 +558,7 @@ async function saveRoom(db, room, awards = []) {
 async function withRoomLock(db, roomId, callback) {
   const token = randomToken(16);
   let acquired = false;
-  for (let attempt = 0; attempt < 16; attempt++) {
+  for (let attempt = 0; attempt < 40; attempt++) {
     // Refresh the clock on each attempt. A timestamp captured before waiting can
     // otherwise prevent acquisition even after a previous lease has expired.
     const now = Date.now();
@@ -566,11 +566,11 @@ async function withRoomLock(db, roomId, callback) {
       ON CONFLICT(room_id) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at
       WHERE room_locks.expires_at < ?
       RETURNING token`)
-      .bind(roomId, token, now + 10000, now).first();
+      .bind(roomId, token, now + 30000, now).first();
     if (lock?.token === token) { acquired = true; break; }
     // Room writes are serialized in D1. Wait longer for neighboring joins
     // instead of rejecting valid players during a short burst of activity.
-    await new Promise((resolve) => setTimeout(resolve, Math.min(45 + attempt * 25, 200)));
+    await new Promise((resolve) => setTimeout(resolve, Math.min(45 + attempt * 10, 150) + randomInt(60)));
   }
   if (!acquired) throw new HttpError(409, 'اتاق در حال به‌روزرسانی است؛ چند لحظه دیگر دوباره تلاش کن.');
   try { return await callback(); }
@@ -1045,20 +1045,30 @@ async function routeRequest(request, env) {
   // Keep a lightweight health probe independent from schema initialization so the
   // frontend can distinguish "API route is alive" from a D1/migration failure.
   if (request.method === 'GET' && path === '/api/health') {
-    if (!env.DB) return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'missing', mode: 'misconfigured' }, 503);
-    return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', binding: 'bound', mode: 'ready' });
+    if (!env.DB) return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'missing', binding: 'missing', mode: 'misconfigured' }, 503);
+    try {
+      const row = await env.DB.prepare('SELECT 1 AS ok').first();
+      if (Number(row?.ok) !== 1) throw new Error('D1 health query returned an unexpected result.');
+      return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', binding: 'bound', mode: 'ready' });
+    } catch (_) {
+      return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'unreachable', binding: 'bound', mode: 'degraded' }, 503);
+    }
   }
 
-  // Persian numbers are bundled as same-origin static audio; no speech API credentials are needed.
+  // The selected Kenerate Sage Woman voice is pending its complete 1..90 audio package.
+  // A one-line sample must never be represented as a ready production voice pack.
   if (request.method === 'GET' && path === '/api/voice/health') {
     return json({
       ok: true,
-      configured: true,
-      provider: 'bundled-persian-audio',
+      configured: false,
+      status: 'awaiting-audio-pack',
+      provider: 'kenerate-sage-woman',
+      voice: 'Sage Woman',
       language: 'fa-IR',
-      numbers: 90,
-      asset: '/assets/voice/fa-numbers.mp3',
-      manifest: '/assets/voice/fa-numbers.json'
+      numbers: 0,
+      requiredNumbers: 90,
+      asset: '/assets/voice/sage-woman.mp3',
+      manifest: '/assets/voice/sage-woman.json'
     });
   }
 
