@@ -4,7 +4,7 @@ const STORAGE_KEY = 'dabernaz_state_v1';
 const cloneData = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const defaultState = {
   username: '', memberId: '', balance: 0, joined: [], transactions: [],
-  settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 3, notifications: false, vibration: false },
+  settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 4, notifications: false, vibration: false },
   referralCode: '', gamesPlayed: 0, wins: 0, points: 0,
   bingoCoins: 0, coinTransactions: [], inviteCount: 0, inviteRewardMilestones: [],
   roomHistory: [], supportTickets: [], tournamentRooms: []
@@ -29,8 +29,8 @@ function loadState() {
       settings: (() => {
         const previous = saved.settings && typeof saved.settings === 'object' ? saved.settings : {};
         const merged = { ...defaultState.settings, ...previous };
-        if (Number(previous.voiceAudioVersion) !== 3) merged.voiceNumbers = false;
-        merged.voiceAudioVersion = 3;
+        if (Number(previous.voiceAudioVersion) !== 4) merged.voiceNumbers = false;
+        merged.voiceAudioVersion = 4;
         return merged;
       })()
     };
@@ -52,7 +52,9 @@ let currentPage = 'home';
 let toastTimer = null;
 let bingoGame = null;
 let tournamentLobbyTab = 'all';
-let lastSpokenRoomAnnouncementKey = '';
+const spokenRoomAnnouncementKeys = new Set();
+const roomSpeechInFlight = new Set();
+const roomSpeechRetryAt = new Map();
 let settingsAudioContext = null;
 let voicePackReady = false;
 let voicePackCheckPromise = null;
@@ -80,36 +82,95 @@ function numberToPersianWords(number) {
   return rest ? `${hundreds[hundred]} و ${numberToPersianWords(rest)}` : hundreds[hundred];
 }
 
+function numberToPersianSpeechText(number) {
+  return numberToPersianWords(number).replace(/\s+و\s+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 let persianAudioContext = null;
 let persianAudioAssetPromise = null;
 let persianAudioAsset = null;
 let persianAudioQueue = Promise.resolve();
-
 let browserSpeechVoice = null;
-let browserSpeechReady = false;
+let voicePackReady = false;
+let voicePackCheckPromise = null;
+let voicePlaybackErrorShown = false;
+const nativeSpeechPending = new Map();
+let nativeSpeechSequence = 0;
 
 function refreshPersianBrowserVoices() {
-  if (!('speechSynthesis' in window)) return null;
+  if (!('speechSynthesis' in window) || typeof window.speechSynthesis.getVoices !== 'function') return null;
   const voices = window.speechSynthesis.getVoices();
-  browserSpeechVoice = voices.find(v => /^fa(-|_)/i.test(v.lang) && /female|woman|زن|female/i.test(v.name)) ||
-    voices.find(v => /^fa(-|_)/i.test(v.lang)) ||
-    voices.find(v => /persian|farsi|فارسی/i.test(v.name)) || null;
-  browserSpeechReady = true;
+  const persianVoices = voices.filter(voice => /^fa(?:-|_)/i.test(voice.lang) || /persian|farsi|فارسی/i.test(voice.name));
+  browserSpeechVoice = persianVoices.find(voice => /female|woman|زن/i.test(voice.name)) || persianVoices[0] || null;
   return browserSpeechVoice;
 }
+
 if ('speechSynthesis' in window) {
-  window.speechSynthesis.onvoiceschanged = refreshPersianBrowserVoices;
+  window.speechSynthesis.addEventListener?.('voiceschanged', refreshPersianBrowserVoices);
   refreshPersianBrowserVoices();
+}
+
+function nativePersianTtsAvailable() {
+  try {
+    return !!(window.DabernazNativeTTS &&
+      typeof window.DabernazNativeTTS.isAvailable === 'function' &&
+      window.DabernazNativeTTS.isAvailable());
+  } catch (_) {
+    return false;
+  }
+}
+
+window.addEventListener('dabernaz-native-tts-result', event => {
+  const detail = event?.detail || {};
+  const pending = nativeSpeechPending.get(String(detail.requestId || ''));
+  if (!pending) return;
+  nativeSpeechPending.delete(String(detail.requestId));
+  clearTimeout(pending.timer);
+  if (detail.ok) pending.resolve(true);
+  else pending.reject(new Error(detail.error || 'موتور گفتار فارسی اندروید نتوانست شماره را پخش کند.'));
+});
+
+function speakPersianNumberNative(number) {
+  const value = Math.trunc(Number(number));
+  const bridge = window.DabernazNativeTTS;
+  if (!Number.isInteger(value) || value < 1 || value > 90 ||
+      !nativePersianTtsAvailable() || typeof bridge.speak !== 'function') {
+    return Promise.reject(new Error('موتور گفتار بومی فارسی اندروید در دسترس نیست.'));
+  }
+  const requestId = 'dabernaz-voice-' + (++nativeSpeechSequence);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      nativeSpeechPending.delete(requestId);
+      reject(new Error('موتور گفتار اندروید در زمان مقرر پاسخ نداد.'));
+    }, 18000);
+    nativeSpeechPending.set(requestId, { resolve, reject, timer });
+    try {
+      bridge.speak(numberToPersianSpeechText(value), 'fa-IR', requestId);
+    } catch (error) {
+      clearTimeout(timer);
+      nativeSpeechPending.delete(requestId);
+      reject(error);
+    }
+  });
 }
 
 function speakPersianNumberFallback(number) {
   const value = Math.trunc(Number(number));
-  if (!Number.isInteger(value) || value < 1 || value > 90 || !('speechSynthesis' in window) ||
-      typeof window.SpeechSynthesisUtterance !== 'function') {
-    return Promise.reject(new Error('موتور گفتار در این مرورگر در دسترس نیست. برای اعلام فارسی، موتور گفتار فارسی گوشی را نصب یا فعال کن.'));
+  if (!Number.isInteger(value) || value < 1 || value > 90) {
+    return Promise.reject(new Error('شمارهٔ صوتی معتبر نیست.'));
   }
+
+  // Prefer Android's native TTS bridge in the installed APK. Browser speech is
+  // retained only for the normal website/PWA where the native bridge is absent.
+  if (nativePersianTtsAvailable()) return speakPersianNumberNative(value);
+
+  if (!('speechSynthesis' in window) ||
+      typeof window.SpeechSynthesisUtterance !== 'function') {
+    return Promise.reject(new Error('موتور گفتار در این مرورگر موجود نیست. برای صدای Sage Woman باید بستهٔ کامل صوتی نصب شود.'));
+  }
+
   refreshPersianBrowserVoices();
-  const text = numberToPersianWords(value).replace(/ و /g, ' ');
+  const text = numberToPersianSpeechText(value);
   return new Promise((resolve, reject) => {
     let settled = false;
     let started = false;
@@ -126,12 +187,10 @@ function speakPersianNumberFallback(number) {
       settled = true;
       cleanup();
       if (ok) resolve(true);
-      else reject(error || new Error('پخش صدای فارسی توسط دستگاه متوقف شد.'));
+      else reject(error || new Error('پخش صدای فارسی توسط مرورگر متوقف شد.'));
     };
     try {
-      // IMPORTANT: callers may invoke this directly from a tap. Keep speak()
-      // synchronous here; deferring it to a Promise queue loses Android user activation.
-      window.speechSynthesis.cancel();
+      const synth = window.speechSynthesis;
       const utterance = new window.SpeechSynthesisUtterance(text);
       utterance.lang = browserSpeechVoice?.lang || 'fa-IR';
       if (browserSpeechVoice) utterance.voice = browserSpeechVoice;
@@ -141,17 +200,18 @@ function speakPersianNumberFallback(number) {
       utterance.onstart = () => {
         started = true;
         if (startTimeout) clearTimeout(startTimeout);
-        endTimeout = setTimeout(() => finish(false, new Error('موتور گفتار فارسی شروع به پخش نکرد. تنظیمات گفتار گوشی را بررسی کن.')), 12000);
+        endTimeout = setTimeout(() => finish(false, new Error('گفتار فارسی مرورگر شروع شد اما کامل نشد.')), 14000);
       };
       utterance.onend = () => finish(true);
-      utterance.onerror = event => finish(false, new Error(event?.error || 'پخش صدای فارسی توسط دستگاه متوقف شد.'));
-      window.speechSynthesis.speak(utterance);
+      utterance.onerror = event => finish(false, new Error(event?.error || 'مرورگر صدای فارسی را پخش نکرد.'));
+      synth.resume();
+      synth.speak(utterance);
       startTimeout = setTimeout(() => {
-        if (!started) finish(false, new Error('گفتار فارسی گوشی در دسترس نیست یا اجازه پخش ندارد.'));
-      }, 3500);
+        if (!started) finish(false, new Error('مرورگر نتوانست موتور گفتار فارسی را فعال کند؛ صدای فارسی دستگاه را بررسی کن.'));
+      }, 4000);
       keepAlive = setInterval(() => {
         if (settled) return cleanup();
-        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+        if (synth.paused) synth.resume();
       }, 250);
     } catch (error) {
       finish(false, error);
@@ -162,35 +222,31 @@ function speakPersianNumberFallback(number) {
 function unlockPersianAudio() {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextClass) {
-      showToast('پخش صوت در این مرورگر پشتیبانی نمی‌شود.');
-      return false;
-    }
+    if (!AudioContextClass) return false;
     if (!persianAudioContext || persianAudioContext.state === 'closed') {
       persianAudioContext = new AudioContextClass();
     }
     const context = persianAudioContext;
     if (context.state === 'suspended') context.resume().catch(() => {});
     const silent = context.createBufferSource();
-    silent.buffer = context.createBuffer(1, Math.max(1, Math.floor(context.sampleRate * 0.025)), context.sampleRate);
+    silent.buffer = context.createBuffer(1, Math.max(1, Math.floor(context.sampleRate * 0.02)), context.sampleRate);
     const gain = context.createGain();
     gain.gain.value = 0;
     silent.connect(gain);
     gain.connect(context.destination);
     silent.start();
-    silent.stop(context.currentTime + 0.025);
+    silent.stop(context.currentTime + 0.02);
     return true;
   } catch (error) {
-    console.warn('[Dabernaz voice unlock]', error);
-    showToast('فعال‌سازی صدای دستگاه ناموفق بود؛ صدای رسانه گوشی را بررسی کن.');
+    console.warn('[Dabernaz audio unlock]', error);
     return false;
   }
 }
 
 async function loadPersianNumberAudio(number) {
   const value = Math.trunc(Number(number));
-  if (!Number.isInteger(value) || value < 1 || value > 90) throw new Error('شماره صوتی معتبر نیست.');
-  if (!persianAudioContext) throw new Error('ابتدا روی دکمه فعال‌سازی صدای فارسی بزن.');
+  if (!Number.isInteger(value) || value < 1 || value > 90) throw new Error('شمارهٔ صوتی معتبر نیست.');
+  if (!persianAudioContext) throw new Error('خروجی صوتی مرورگر فعال نشده است.');
   if (persianAudioAsset) {
     const clip = persianAudioAsset.manifest.numbers[String(value)];
     if (!clip) throw new Error('فایل صوتی این شماره در بسته Sage Woman پیدا نشد.');
@@ -200,21 +256,22 @@ async function loadPersianNumberAudio(number) {
   if (!persianAudioAssetPromise) {
     const loading = (async () => {
       const base = new URL('./assets/voice/', document.baseURI);
-      const manifestResponse = await fetch(new URL('sage-woman.json?v=3', base), {
-        method:'GET', cache:'no-store', credentials:'same-origin'
+      const manifestResponse = await fetch(new URL('sage-woman.json?v=4', base), {
+        method: 'GET', cache: 'no-store', credentials: 'same-origin'
       });
-      if (!manifestResponse.ok) throw new Error('بسته صدای طبیعی Sage Woman هنوز در سایت قرار نگرفته است.');
+      if (!manifestResponse.ok) throw new Error('مانیفست صدای Sage Woman دریافت نشد.');
       const manifest = await manifestResponse.json();
       if (!manifest || manifest.provider !== 'kenerate-sage-woman' ||
-          manifest.voice !== 'Sage Woman' || manifest.configured !== true ||
-          !manifest.numbers || Object.keys(manifest.numbers).length !== 90) {
-        throw new Error('بسته کامل ۹۰ شماره با صدای Sage Woman هنوز آماده نیست.');
+          manifest.voice !== 'Sage Woman' || manifest.language !== 'fa-IR' ||
+          manifest.configured !== true || !manifest.numbers ||
+          Object.keys(manifest.numbers).length !== 90) {
+        throw new Error('بستهٔ کامل ۹۰ شماره با صدای Sage Woman نصب نشده است.');
       }
 
-      const audioResponse = await fetch(new URL('sage-woman.mp3?v=3', base), {
-        method:'GET', cache:'no-store', credentials:'same-origin'
+      const audioResponse = await fetch(new URL('sage-woman.mp3?v=4', base), {
+        method: 'GET', cache: 'no-store', credentials: 'same-origin'
       });
-      if (!audioResponse.ok) throw new Error('فایل صوتی Sage Woman دریافت نشد.');
+      if (!audioResponse.ok) throw new Error('فایل MP3 صدای Sage Woman دریافت نشد.');
       if (!(audioResponse.headers.get('content-type') || '').toLowerCase().includes('audio')) {
         throw new Error('نوع فایل صدای Sage Woman معتبر نیست.');
       }
@@ -224,17 +281,19 @@ async function loadPersianNumberAudio(number) {
       if (!Number.isFinite(buffer.duration) || buffer.duration < 20) {
         throw new Error('فایل صوتی باید شامل تمام ۹۰ شماره باشد.');
       }
+
+      let previousEnd = 0;
       for (let n = 1; n <= 90; n++) {
         const clip = manifest.numbers[String(n)];
-        if (!clip || !Number.isFinite(Number(clip.start)) || !Number.isFinite(Number(clip.duration)) ||
-            Number(clip.start) < 0 || Number(clip.duration) <= 0 ||
-            Number(clip.start) + Number(clip.duration) > buffer.duration + 0.2) {
-          throw new Error('زمان‌بندی صدای شماره ' + n + ' معتبر نیست.');
+        const start = Number(clip?.start);
+        const duration = Number(clip?.duration);
+        if (!clip || !Number.isFinite(start) || !Number.isFinite(duration) ||
+            start < 0 || duration <= 0 || start < previousEnd - 0.03 ||
+            start + duration > buffer.duration + 0.1 ||
+            String(clip.text || '').trim() !== numberToPersianSpeechText(n)) {
+          throw new Error('اطلاعات صوتی شمارهٔ ' + n + ' معتبر نیست.');
         }
-        const expectedText = numberToPersianWords(n);
-        if (String(clip.text || '').trim() !== expectedText) {
-          throw new Error('متن شماره ' + n + ' با تلفظ مورد انتظار هماهنگ نیست.');
-        }
+        previousEnd = start + duration;
       }
       persianAudioAsset = { manifest, buffer };
       voicePackReady = true;
@@ -256,13 +315,11 @@ async function checkPersianVoicePack() {
   voicePackCheckPromise = (async () => {
     try {
       const base = new URL('./assets/voice/', document.baseURI);
-      const manifestUrl = new URL('sage-woman.json?v=3', base);
-      const audioUrl = new URL('sage-woman.mp3?v=3', base);
       const [manifestResponse, audioHead] = await Promise.all([
-        fetch(manifestUrl, { cache:'no-store', credentials:'same-origin' }),
-        fetch(audioUrl, { method:'HEAD', cache:'no-store', credentials:'same-origin' })
+        fetch(new URL('sage-woman.json?v=4', base), { cache: 'no-store', credentials: 'same-origin' }),
+        fetch(new URL('sage-woman.mp3?v=4', base), { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' })
       ]);
-      if (!manifestResponse.ok || !audioHead.ok) throw new Error('voice assets missing');
+      if (!manifestResponse.ok || !audioHead.ok) throw new Error('Sage Woman audio files are missing');
       const manifest = await manifestResponse.json();
       const contentType = String(audioHead.headers.get('content-type') || '').toLowerCase();
       const contentLength = Number(audioHead.headers.get('content-length') || 0);
@@ -271,19 +328,15 @@ async function checkPersianVoicePack() {
           manifest.configured !== true || !manifest.numbers ||
           Object.keys(manifest.numbers).length !== 90 ||
           !contentType.includes('audio') || (contentLength > 0 && contentLength < 15000)) {
-        throw new Error('voice pack metadata is incomplete');
+        throw new Error('Sage Woman metadata is incomplete');
       }
-      let previousEnd = 0;
       for (let n = 1; n <= 90; n++) {
         const clip = manifest.numbers[String(n)];
-        const start = Number(clip?.start);
-        const duration = Number(clip?.duration);
-        if (!clip || !Number.isFinite(start) || !Number.isFinite(duration) ||
-            start < 0 || duration <= 0 || start < previousEnd - 0.03 ||
-            String(clip.text || '').trim() !== numberToPersianWords(n)) {
-          throw new Error('invalid Sage Woman clip ' + n);
+        if (!clip || String(clip.text || '').trim() !== numberToPersianSpeechText(n) ||
+            !Number.isFinite(Number(clip.start)) || !Number.isFinite(Number(clip.duration)) ||
+            Number(clip.start) < 0 || Number(clip.duration) <= 0) {
+          throw new Error('Sage Woman clip ' + n + ' is invalid');
         }
-        previousEnd = start + duration;
       }
       voicePackReady = true;
     } catch (_) {
@@ -295,86 +348,162 @@ async function checkPersianVoicePack() {
   return voicePackCheckPromise;
 }
 
-function playPersianNumberAudio(number, options = {}) {
-  const value = Math.trunc(Number(number));
-  if (!Number.isInteger(value) || value < 1 || value > 90) return Promise.resolve(false);
-  const allowFallback = options.allowFallback !== false;
-  if ((!persianAudioContext || persianAudioContext.state === 'closed') && voicePackReady) unlockPersianAudio();
-
-  const play = async () => {
-    if (voicePackReady && persianAudioContext) {
-      try {
-        const context = persianAudioContext;
-        if (context.state === 'suspended') await context.resume();
-        const loaded = await loadPersianNumberAudio(value);
-        return await new Promise((resolve, reject) => {
-          const source = context.createBufferSource();
-          const gain = context.createGain();
-          source.buffer = loaded.buffer;
-          gain.gain.value = 1;
-          source.connect(gain);
-          gain.connect(context.destination);
-          source.onended = () => resolve(true);
-          source.start(0, Number(loaded.clip.start), Number(loaded.clip.duration));
-        });
-      } catch (error) {
-        console.warn('[Dabernaz Sage Woman playback failed, using browser fallback]', error);
-      }
+async function playSageWomanNumber(number) {
+  if (!persianAudioContext && !unlockPersianAudio()) throw new Error('خروجی صوتی برای پخش Sage Woman در دسترس نیست.');
+  const context = persianAudioContext;
+  if (context.state === 'suspended') await context.resume();
+  const loaded = await loadPersianNumberAudio(number);
+  return new Promise((resolve, reject) => {
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = loaded.buffer;
+    gain.gain.value = 1;
+    source.connect(gain);
+    gain.connect(context.destination);
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { source.stop(); } catch (_) {}
+      reject(new Error('پخش فایل صوتی Sage Woman کامل نشد.'));
+    }, Math.max(2500, Number(loaded.clip.duration) * 1000 + 2500));
+    source.onended = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(true);
+    };
+    try {
+      source.start(0, Number(loaded.clip.start), Number(loaded.clip.duration));
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
     }
-    if (allowFallback) return speakPersianNumberFallback(value);
-    throw new Error('بسته Sage Woman آماده نیست.');
-  };
-
-  persianAudioQueue = persianAudioQueue.catch(() => false).then(play).catch(error => {
-    console.error('[Dabernaz Persian audio]', error);
-    if (!voicePlaybackErrorShown) { voicePlaybackErrorShown = true; showToast(error.message || 'پخش صدای فارسی انجام نشد.'); }
-    return false;
   });
-  return persianAudioQueue;
 }
 
+function playPersianNumberInternal(number) {
+  if (voicePackReady) {
+    return playSageWomanNumber(number).catch(error => {
+      console.warn('[Dabernaz Sage Woman playback failed; using device voice]', error);
+      return speakPersianNumberFallback(number);
+    });
+  }
+  return speakPersianNumberFallback(number);
+}
+
+const PersianAudioManager = {
+  supportsPlayback() {
+    return voicePackReady || nativePersianTtsAvailable() ||
+      ('speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function');
+  },
+  activateFromGesture() {
+    unlockPersianAudio();
+    if ('speechSynthesis' in window) {
+      try {
+        const synth = window.speechSynthesis;
+        synth.resume();
+        refreshPersianBrowserVoices();
+        if (!nativePersianTtsAvailable() && !voicePackReady &&
+            typeof window.SpeechSynthesisUtterance === 'function') {
+          const prime = new window.SpeechSynthesisUtterance(' ');
+          prime.lang = browserSpeechVoice?.lang || 'fa-IR';
+          prime.volume = 0;
+          synth.cancel();
+          synth.speak(prime);
+        }
+      } catch (error) {
+        console.warn('[Dabernaz browser speech activation]', error);
+      }
+    }
+    return this.supportsPlayback();
+  },
+  speak(number, options = {}) {
+    const value = Math.trunc(Number(number));
+    if (!Number.isInteger(value) || value < 1 || value > 90) return Promise.resolve(false);
+
+    if (options.fromGesture) this.activateFromGesture();
+
+    let task;
+    if (options.fromGesture) {
+      // Do not defer the first fallback call: Android/browser speech engines
+      // must be invoked synchronously inside the trusted tap event.
+      try { task = playPersianNumberInternal(value); }
+      catch (error) { task = Promise.reject(error); }
+    } else {
+      task = persianAudioQueue.catch(() => false).then(() => playPersianNumberInternal(value));
+    }
+
+    const result = Promise.resolve(task).then(ok => {
+      if (!ok) throw new Error('موتور صوتی شماره را پخش نکرد؛ امکان تلاش دوباره وجود دارد.');
+      voicePlaybackErrorShown = false;
+      return true;
+    }).catch(error => {
+      console.error('[Dabernaz Persian Audio Manager]', error);
+      if (!voicePlaybackErrorShown) {
+        voicePlaybackErrorShown = true;
+        showToast(error?.message || 'پخش صدای فارسی انجام نشد.');
+      }
+      return false;
+    });
+    persianAudioQueue = result.catch(() => false);
+    return result;
+  }
+};
+
 function speakRoomNumber(number, room) {
-  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
+  if (!settingEnabled('voiceNumbers')) return false;
   const value = Math.trunc(Number(number));
   if (!Number.isInteger(value) || value < 1 || value > 90) return false;
   const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || 'current');
-  const announcementKey = `${room?.id || activeRoomId}:${roundKey}:${value}`;
-  if (announcementKey === lastSpokenRoomAnnouncementKey) return false;
-  lastSpokenRoomAnnouncementKey = announcementKey;
-  playPersianNumberAudio(value);
-  if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
+  const announcementKey = (room?.id || activeRoomId) + ':' + roundKey + ':' + value;
+  if (spokenRoomAnnouncementKeys.has(announcementKey) || roomSpeechInFlight.has(announcementKey)) return false;
+  const now = Date.now();
+  if (now < (roomSpeechRetryAt.get(announcementKey) || 0)) return false;
+
+  roomSpeechInFlight.add(announcementKey);
+  roomSpeechRetryAt.set(announcementKey, now + 7000);
+  PersianAudioManager.speak(value).then(ok => {
+    roomSpeechInFlight.delete(announcementKey);
+    if (ok) {
+      spokenRoomAnnouncementKeys.add(announcementKey);
+      roomSpeechRetryAt.delete(announcementKey);
+      if (spokenRoomAnnouncementKeys.size > 300) {
+        spokenRoomAnnouncementKeys.delete(spokenRoomAnnouncementKeys.values().next().value);
+      }
+    } else {
+      // Failed announcements are deliberately not marked as spoken. Polling
+      // retries the same number after a cooldown, and the room button retries now.
+      roomSpeechRetryAt.set(announcementKey, Date.now() + 7000);
+    }
+  });
   return true;
 }
+
 function playSettingsTone() {
   if (!settingEnabled('sounds')) return;
   try {
     settingsAudioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (settingsAudioContext.state === 'suspended') settingsAudioContext.resume().catch(() => {});
     const oscillator = settingsAudioContext.createOscillator();
     const gain = settingsAudioContext.createGain();
     oscillator.frequency.value = 740;
     gain.gain.setValueAtTime(0.05, settingsAudioContext.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, settingsAudioContext.currentTime + 0.12);
-    oscillator.connect(gain); gain.connect(settingsAudioContext.destination);
-    oscillator.start(); oscillator.stop(settingsAudioContext.currentTime + 0.12);
+    oscillator.connect(gain);
+    gain.connect(settingsAudioContext.destination);
+    oscillator.start();
+    oscillator.stop(settingsAudioContext.currentTime + 0.12);
   } catch (_) {}
 }
-
 async function toggleSetting(key) {
   const next = !settingEnabled(key);
   if (key === 'voiceNumbers' && next) {
     voicePlaybackErrorShown = false;
-    unlockPersianAudio();
-    refreshPersianBrowserVoices();
-    // Prime the system speech engine during the trusted switch tap on Android.
-    try {
-      if ('speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function') {
-        const prime = new window.SpeechSynthesisUtterance(' ');
-        prime.lang = browserSpeechVoice?.lang || 'fa-IR';
-        prime.volume = 0;
-        window.speechSynthesis.cancel();
-        window.speechSynthesis.speak(prime);
-      }
-    } catch (error) { console.warn('[Dabernaz speech prime]', error); }
+    if (!PersianAudioManager.activateFromGesture()) {
+      showToast('هیچ موتور صوتی برای اعلام شماره در این دستگاه در دسترس نیست.');
+      return;
+    }
   }
   if (key === 'notifications' && next) {
     if (!('Notification' in window)) {
@@ -395,12 +524,11 @@ async function toggleSetting(key) {
   if (key === 'vibration' && next && navigator.vibrate) navigator.vibrate(25);
   renderSettingsIntoView();
   const labels = {
-    sounds:'صدای بازی', voiceNumbers:'اعلام صوتی شماره‌ها', notifications:'اعلان‌ها',
-    vibration:'لرزش', privacy:'نمایش وضعیت آنلاین'
+    sounds: 'صداهای محیط بازی', voiceNumbers: 'اعلام صوتی شماره‌ها', notifications: 'اعلان‌ها',
+    vibration: 'لرزش', privacy: 'نمایش وضعیت آنلاین'
   };
-  showToast(`${labels[key] || 'تنظیم'} ${next ? 'فعال' : 'غیرفعال'} شد`);
+  showToast((labels[key] || 'تنظیم') + ' ' + (next ? 'فعال' : 'غیرفعال') + ' شد');
 }
-
 const ROOM_CONFIGS = [
   { id:'room5000', price:5000, label:'۵,۰۰۰', code:'DB-5000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
   { id:'room10000', price:10000, label:'۱۰,۰۰۰', code:'DB-10000', linePrizePercent:10, fullPrizePercent:75, commissionPercent:15 },
@@ -1039,12 +1167,12 @@ function renderSettings() {
   const sw = (key, title, desc) => `<div class="setting-row"><div class="setting-copy"><b>${title}</b><small>${desc}</small></div><button class="switch ${state.settings[key] ? 'on' : ''}" type="button" role="switch" aria-checked="${!!state.settings[key]}" aria-label="${title}" data-setting="${key}"></button></div>`;
   const voiceControl = sw('voiceNumbers',
     voicePackReady ? 'اعلام صوتی شماره‌ها با Sage Woman' : 'اعلام صوتی شماره‌ها',
-    voicePackReady ? 'صدای زنانه Sage Woman برای اعلام شماره‌های ۱ تا ۹۰' : 'تا زمان قرار گرفتن فایل اصلی Sage Woman، تست و اعلام شماره با موتور فارسی خود دستگاه انجام می‌شود.');
+    voicePackReady ? 'صدای زنانه Sage Woman برای اعلام شماره‌های ۱ تا ۹۰' : 'بستهٔ Sage Woman هنوز نصب نشده؛ در APK از موتور بومی فارسی Android و در وب از موتور گفتار مرورگر استفاده می‌شود.');
   return `${heading('تنظیمات', 'صدای بازی، اعلام شماره‌ها و اعلان‌های دستگاه را مدیریت کن.', 'PREFERENCES')}
   <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
     ${sw('sounds','صدای بازی','روشن یا خاموش کردن بازخوردهای صوتی بازی')}
     ${voiceControl}
-    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${voicePackReady ? 'پخش عبارت «چهل دو» با صدای Sage Woman' : 'پخش فوری «چهل دو» با موتور گفتار فارسی گوشی'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
+    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${voicePackReady ? 'پخش نمونهٔ «چهل دو» با صدای Sage Woman' : 'پخش نمونه از موتور گفتار دستگاه؛ صدای Sage Woman پس از نصب بسته فعال می‌شود'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
     ${sw('vibration','لرزش','بازخورد لرزشی در دستگاه‌های پشتیبانی‌شده')}
   </section>
   <section class="setting-group"><h3 class="settings-title">اعلان‌های دستگاه</h3>
@@ -1533,29 +1661,27 @@ document.addEventListener('click', async event => {
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
   else if (action === 'test-number-voice') {
-    // Start SpeechSynthesis synchronously in this trusted click event. On Android,
-    // deferring speak() through fetch/decodeAudioData/Promise queues can lose activation.
-    lastSpokenRoomAnnouncementKey = '';
     voicePlaybackErrorShown = false;
-    state.settings.sounds = true;
+    const ok = await PersianAudioManager.speak(42, { fromGesture: true });
+    if (ok) {
+      state.settings.voiceNumbers = true;
+      saveState();
+      showToast(voicePackReady ? 'نمونه با صدای Sage Woman پخش شد.' : 'تست صدای فارسی با موفقیت پخش شد.');
+    }
+    renderSettingsIntoView();
+  }
+  else if (action === 'enable-room-audio') {
+    voicePlaybackErrorShown = false;
     state.settings.voiceNumbers = true;
     saveState();
-    refreshPersianBrowserVoices();
-    showToast('در حال پخش نمونه: چهل دو');
-    let ok = false;
-    if (voicePackReady) {
-      unlockPersianAudio();
-      ok = await playPersianNumberAudio(42, { allowFallback:false });
-    } else {
-      // Direct invocation starts speech before the first await in this click handler.
-      ok = await speakPersianNumberFallback(42).catch(error => {
-        console.warn('[Dabernaz direct voice test]', error);
-        showToast(error.message || 'پخش گفتار فارسی انجام نشد.');
-        return false;
-      });
+    const latest = Number(roomServerSnapshot?.latestNumber);
+    const sample = latest >= 1 && latest <= 90 ? latest : 42;
+    const ok = await PersianAudioManager.speak(sample, { fromGesture: true });
+    if (ok) {
+      showToast(latest >= 1 && latest <= 90
+        ? 'صدای فارسی فعال شد و شمارهٔ فعلی دوباره پخش شد.'
+        : 'صدای فارسی فعال شد؛ نمونه پخش شد و شماره‌های بعدی اعلام می‌شوند.');
     }
-    if (ok) showToast(voicePackReady ? 'نمونه با صدای Sage Woman پخش شد.' : 'تست صدای فارسی با موفقیت پخش شد.');
-    renderSettingsIntoView();
   }
   else if (action === 'enable-room-audio') {
     unlockPersianAudio();
