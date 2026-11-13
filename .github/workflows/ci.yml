@@ -39,6 +39,9 @@ jobs:
       - name: Validate Sage Woman voice package
         run: node scripts/voice-pack-validation.mjs
 
+      - name: Test Persian voice UI and Android playback path
+        run: node scripts/voice-ui-smoke.mjs
+
       - name: Install Wrangler for isolated D1 integration tests
         run: npm install --global wrangler@4
 
