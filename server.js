@@ -13,7 +13,9 @@ const ROOT = __dirname;
 const PRIVATE_DIR = process.env.DABERNAZ_DATA_DIR || path.join(ROOT, '.private');
 const DB_FILE = path.join(PRIVATE_DIR, 'store.json');
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
-const REGISTRATION_WINDOW_MS = 150000;
+const testRegistrationWindow = Number(process.env.DABERNAZ_TEST_REGISTRATION_WINDOW_MS);
+const REGISTRATION_WINDOW_MS = process.env.NODE_ENV === 'test' && Number.isInteger(testRegistrationWindow) && testRegistrationWindow >= 50 && testRegistrationWindow < 150000
+  ? testRegistrationWindow : 150000;
 const MIN_PLAYERS_TO_START = 5;
 const MAX_CARDS_PER_PLAYER = 5;
 const requestedDrawInterval = Number(process.env.DABERNAZ_DRAW_INTERVAL_MS || 3000);
