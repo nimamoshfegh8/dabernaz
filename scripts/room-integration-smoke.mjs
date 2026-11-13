@@ -77,6 +77,21 @@ const health = await request('/api/health');
 assert.equal(health.ok, true);
 assert.equal(health.database, 'D1');
 
+// Diagnostic only: list Persian voices and their commercial-use flags before selecting a provider.
+try {
+  const voiceListResponse = await fetch('https://api.tts.ai/v1/voices/?language=fa');
+  const voiceListBody = await voiceListResponse.json().catch(() => ({}));
+  console.log('TTS.ai Persian voice list:', JSON.stringify({
+    status: voiceListResponse.status,
+    voices: (voiceListBody.voices || []).map(voice => ({
+      id: voice.id, name: voice.name, model: voice.model,
+      commercial_use: voice.commercial_use, license: voice.license
+    }))
+  }));
+} catch (error) {
+  console.log('TTS.ai Persian voice list error:', String(error?.message || error));
+}
+
 // Verify the Persian voice provider, server-side MP3 proxy, and the full 1..90 range.
 const voiceHealthResponse = await fetch(baseUrl + '/api/voice/health');
 const voiceHealth = await voiceHealthResponse.json().catch(() => ({}));
