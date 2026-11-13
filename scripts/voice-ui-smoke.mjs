@@ -13,6 +13,7 @@ const [app, index, sw, swRegister, android, manifest, voiceScript, validator] = 
 ]);
 
 assert.match(app, /const PersianAudioManager = \{/);
+assert.match(app, /playEffectTone\(\)/);
 assert.match(app, /supportsPlayback\(\)/);
 assert.match(app, /speak\(number, options = \{\}\)/);
 assert.match(app, /DabernazNativeTTS/);
@@ -25,7 +26,7 @@ assert.match(testAction, /PersianAudioManager\.speak\(42,\s*\{\s*fromGesture:\s*
   'settings voice test must use the shared Audio Manager');
 
 const roomSpeakStart = app.indexOf('function speakRoomNumber(number, room)');
-const roomSpeakEnd = app.indexOf('\nfunction playSettingsTone()', roomSpeakStart);
+const roomSpeakEnd = app.indexOf('\nconst ROOM_CONFIGS', roomSpeakStart);
 const roomSpeak = app.slice(roomSpeakStart, roomSpeakEnd);
 assert.match(roomSpeak, /PersianAudioManager\.speak\(value\)/,
   'room numbers must use the same Audio Manager');
