@@ -2,6 +2,14 @@ node_modules/
 .private/
 *.log
 .DS_Store
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+.wrangler/
+*.pem
+*.key
 
 /dist/
 
