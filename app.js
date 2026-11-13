@@ -1195,6 +1195,7 @@ document.addEventListener('click', async event => {
   if (action === 'close-modal' || (action === 'backdrop-close' && event.target === actionEl)) { closeModal(); return; }
   if (action === 'room-join-auto') {
     if(!requireLogin()) return;
+    unlockPersianAudio();
     try {
       let result;
       // A short retry makes simultaneous joins resilient to a temporary D1 room lock.
@@ -1233,6 +1234,7 @@ document.addEventListener('click', async event => {
   }
   if (action === 'room-add-card') {
     if(!requireLogin() || actionEl.disabled) return;
+    unlockPersianAudio();
     actionEl.disabled=true;
     try {
       let result;
