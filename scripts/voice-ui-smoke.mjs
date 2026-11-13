@@ -1,45 +1,58 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [app, index, sw, swRegister] = await Promise.all([
+const [app, index, sw, swRegister, android, manifest, voiceScript, validator] = await Promise.all([
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../sw.js', import.meta.url), 'utf8'),
-  readFile(new URL('../sw-register.js', import.meta.url), 'utf8')
+  readFile(new URL('../sw-register.js', import.meta.url), 'utf8'),
+  readFile(new URL('../android/app/src/main/java/app/dabernaz/club/MainActivity.java', import.meta.url), 'utf8'),
+  readFile(new URL('../assets/voice/sage-woman.json', import.meta.url), 'utf8'),
+  readFile(new URL('../docs/kenerate-90-number-script.txt', import.meta.url), 'utf8'),
+  readFile(new URL('./voice-pack-validation.mjs', import.meta.url), 'utf8')
 ]);
 
-const settingsStart = app.indexOf('function renderSettings()');
-const settingsEnd = app.indexOf('\nfunction ', settingsStart + 12);
-assert.ok(settingsStart >= 0 && settingsEnd > settingsStart, 'settings renderer must exist');
-const settings = app.slice(settingsStart, settingsEnd);
-const testButton = settings.match(/<button[^>]*data-action="test-number-voice"[^>]*>/);
-assert.ok(testButton, 'number voice test button must render');
-assert.doesNotMatch(testButton[0], /\sdisabled(?:\s|>|=)/i,
-  'number voice test must never be disabled just because Sage Woman is missing');
+assert.match(app, /const PersianAudioManager = \{/);
+assert.match(app, /supportsPlayback\(\)/);
+assert.match(app, /speak\(number, options = \{\}\)/);
+assert.match(app, /DabernazNativeTTS/);
+assert.match(app, /speechSynthesis\.speak\(utterance\)/);
 
 const testActionStart = app.indexOf("else if (action === 'test-number-voice')");
-const testActionEnd = app.indexOf("\n  else if (action === 'enable-room-audio')", testActionStart);
-assert.ok(testActionStart >= 0 && testActionEnd > testActionStart, 'number test action must exist');
-const testAction = app.slice(testActionStart, testActionEnd);
-assert.match(testAction, /speakPersianNumberFallback\(42\)/,
-  'test must start device speech directly when Sage Woman pack is unavailable');
-assert.match(testAction, /playPersianNumberAudio\(42,\s*\{\s*allowFallback:false\s*\}\)/,
-  'test must use the chosen Sage Woman audio when the complete pack is ready');
-assert.match(testAction, /state\.settings\.sounds\s*=\s*true/);
-assert.match(testAction, /state\.settings\.voiceNumbers\s*=\s*true/);
+const roomActionStart = app.indexOf("else if (action === 'enable-room-audio')", testActionStart);
+const testAction = app.slice(testActionStart, roomActionStart);
+assert.match(testAction, /PersianAudioManager\.speak\(42,\s*\{\s*fromGesture:\s*true\s*\}\)/,
+  'settings voice test must use the shared Audio Manager');
 
-const fallbackStart = app.indexOf('function speakPersianNumberFallback(number)');
-const fallbackEnd = app.indexOf('\nfunction unlockPersianAudio()', fallbackStart);
-assert.ok(fallbackStart >= 0 && fallbackEnd > fallbackStart, 'device speech fallback must exist');
-const fallback = app.slice(fallbackStart, fallbackEnd);
-assert.match(fallback, /window\.speechSynthesis\.speak\(utterance\)/);
-assert.match(fallback, /numberToPersianWords\(value\)\.replace\(\/ و \/g, ' '\)/,
-  'fallback must say only the number without the spoken conjunction');
-assert.match(fallback, /utterance\.lang\s*=.*fa-IR/);
+const roomSpeakStart = app.indexOf('function speakRoomNumber(number, room)');
+const roomSpeakEnd = app.indexOf('\nfunction playSettingsTone()', roomSpeakStart);
+const roomSpeak = app.slice(roomSpeakStart, roomSpeakEnd);
+assert.match(roomSpeak, /PersianAudioManager\.speak\(value\)/,
+  'room numbers must use the same Audio Manager');
+assert.doesNotMatch(roomSpeak, /settingEnabled\('sounds'\)/,
+  'number announcements must not be silently disabled by the separate sound-effects switch');
+assert.match(roomSpeak, /spokenRoomAnnouncementKeys\.add\(announcementKey\)/,
+  'a number is marked announced only after successful playback');
+assert.match(roomSpeak, /roomSpeechRetryAt\.set\(announcementKey,\s*Date\.now\(\)\s*\+\s*7000\)/,
+  'failed room announcements must be retried after a cooldown');
 
-assert.match(index, /app\.js\?v=4\.17\.0/);
-assert.match(sw, /dabernaz-shell-v19/);
-assert.match(sw, /app\.js\?v=4\.17\.0/);
-assert.match(swRegister, /sw\.js\?v=10/);
+assert.match(android, /addJavascriptInterface\(new NativeTtsBridge\(\),\s*"DabernazNativeTTS"\)/);
+assert.match(android, /TextToSpeech\.QUEUE_ADD/);
+assert.match(android, /nativeTtsReady = true/);
+assert.match(android, /setOnUtteranceProgressListener/);
 
-console.log('Persian voice UI smoke test passed: test button enabled, direct Android gesture path, Sage Woman preference, number-only Persian wording, and fresh mobile cache versions.');
+assert.match(index, /app\.js\?v=4\.18\.0/);
+assert.match(sw, /dabernaz-shell-v20/);
+assert.match(sw, /app\.js\?v=4\.18\.0/);
+assert.match(swRegister, /sw\.js\?v=11/);
+assert.match(app, /4\.18\.0/);
+
+assert.match(voiceScript, /چهل دو/);
+assert.doesNotMatch(voiceScript, /چهل و دو/);
+assert.match(app, /numberToPersianSpeechText\(number\)/);
+assert.match(validator, /process\.exitCode = 1/);
+
+const currentManifest = JSON.parse(manifest);
+assert.equal(currentManifest.configured, false);
+assert.equal(Object.keys(currentManifest.numbers || {}).length, 0);
+console.log('Persian Audio Manager smoke tests passed. Sage Woman release readiness is separately and strictly validated.');
