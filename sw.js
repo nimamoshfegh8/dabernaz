@@ -2,12 +2,12 @@
 
 // The service worker must not pin old app.js/styles.css after a Pages deployment.
 // Core code is network-first; cached copies are used only when the device is offline.
-const CACHE_NAME = 'dabernaz-shell-v20';
+const CACHE_NAME = 'dabernaz-shell-v21';
 const CORE_ASSETS = [
   './',
   './index.html',
   './styles.css?v=4.5.0',
-  './app.js?v=4.18.0',
+  './app.js?v=4.19.0',
   './icon.svg',
   './manifest.webmanifest'
 ];
@@ -48,6 +48,12 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+
+  // Sage Woman clips and manifest are network-first and cached for offline room playback.
+  if (url.pathname.includes('/assets/voice/sage-woman')) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
 
   // HTML, JavaScript and CSS must reflect the most recent Cloudflare deployment.
   if (request.mode === 'navigate') {
