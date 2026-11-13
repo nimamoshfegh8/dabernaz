@@ -83,7 +83,7 @@ try {
   const firstRoom = first.data.room;
   assert.equal(firstRoom.capacity, null);
   assert.equal(firstRoom.registrationWindowMs, 500);
-  assert.equal(firstRoom.minPlayersToStart, 5);
+  assert.equal(firstRoom.minPlayersToStart, 2);
   assert.equal(firstRoom.maxCardsPerPlayer, 5);
   assert.equal(firstRoom.playerCount, 1);
   assert.equal(firstRoom.cardCount, 3);
@@ -128,7 +128,7 @@ try {
   assert.equal(leave.response.status, 409, 'purchased entries cannot be cancelled');
 
   // Expire the first round's fixed timer in isolated test storage. The server
-  // starts it only after the deadline and only when at least five people joined.
+  // starts it only after the deadline and only when at least two people joined.
   await delay(600);
   const started = await request('/api/rooms/room5000', { cookie: accounts[1].cookie });
   assert.equal(started.data.room.status, 'playing');
@@ -146,24 +146,31 @@ try {
   assert.equal(relogin.response.status, 200, relogin.data.error || 'relogin failed');
   accounts[0].cookie = (relogin.response.headers.get('set-cookie') || '').split(';', 1)[0];
 
-  // A round with only four players must stay waiting after the deadline; the
-  // fifth participant then starts it on the next room request.
-  for (const account of accounts.slice(0, 4)) {
-    const joined = await request('/api/rooms/room10000/join', {
-      method: 'POST', cookie: account.cookie, body: { cardsCount: 1 }
-    });
-    assert.equal(joined.response.status, 200);
-  }
-  await delay(600);
-  const underMinimum = await request('/api/rooms/room10000', { cookie: accounts[0].cookie });
-  assert.equal(underMinimum.data.room.status, 'waiting');
-  assert.equal(underMinimum.data.room.playerCount, 4);
-  const fifth = await request('/api/rooms/room10000/join', {
-    method: 'POST', cookie: accounts[4].cookie, body: { cardsCount: 1 }
+  // A single-player room must be cancelled when its fixed timer expires.
+  const solo = await request('/api/rooms/room10000/join', {
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1 }
   });
-  assert.equal(fifth.response.status, 200);
-  assert.equal(fifth.data.room.status, 'playing');
-  assert.equal(fifth.data.room.playerCount, 5);
+  assert.equal(solo.response.status, 200);
+  await delay(600);
+  const cancelled = await request('/api/rooms/room10000', { cookie: accounts[0].cookie });
+  assert.equal(cancelled.data.room.status, 'waiting');
+  assert.equal(cancelled.data.room.playerCount, 0);
+  assert.equal(cancelled.data.room.cardCount, 0);
+  assert.equal(cancelled.data.room.joined, false);
+
+  // The next purchase starts a fresh timer and a second player is enough to start.
+  const fresh = await request('/api/rooms/room10000/join', {
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1 }
+  });
+  assert.equal(fresh.response.status, 200);
+  const second = await request('/api/rooms/room10000/join', {
+    method: 'POST', cookie: accounts[1].cookie, body: { cardsCount: 1 }
+  });
+  assert.equal(second.response.status, 200);
+  await delay(600);
+  const startedWithTwo = await request('/api/rooms/room10000', { cookie: accounts[1].cookie });
+  assert.equal(startedWithTwo.data.room.status, 'playing');
+  assert.equal(startedWithTwo.data.room.playerCount, 2);
 
   console.log('Node fallback room parity smoke test passed.');
 } finally {

@@ -16,7 +16,7 @@ const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
 const testRegistrationWindow = Number(process.env.DABERNAZ_TEST_REGISTRATION_WINDOW_MS);
 const REGISTRATION_WINDOW_MS = process.env.NODE_ENV === 'test' && Number.isInteger(testRegistrationWindow) && testRegistrationWindow >= 50 && testRegistrationWindow < 150000
   ? testRegistrationWindow : 150000;
-const MIN_PLAYERS_TO_START = 5;
+const MIN_PLAYERS_TO_START = 2;
 const MAX_CARDS_PER_PLAYER = 5;
 const requestedDrawInterval = Number(process.env.DABERNAZ_DRAW_INTERVAL_MS || 3000);
 const DRAW_INTERVAL_MS = Number.isFinite(requestedDrawInterval) ? Math.max(20, Math.min(requestedDrawInterval, 60000)) : 3000;
@@ -117,7 +117,7 @@ async function loadDb() {
   for (const room of Object.values(db.rooms)) if (room.status === 'playing') startDrawTimer(room.id);
 }
 function freshRoom(id) {
-  return { id, status:'waiting', queue:[], cardCounts:{}, queuedCards:{}, players:[], calledNumbers:[], winners:{line:null,full:null}, registrationStartedAt:null, registrationDeadline:null, startedAt:null, finishedAt:null, updatedAt:Date.now(), resultsRecorded:false };
+  return { id, status:'waiting', queue:[], cardCounts:{}, queuedCards:{}, entryPayments:{}, players:[], calledNumbers:[], winners:{line:null,full:null}, registrationStartedAt:null, registrationDeadline:null, startedAt:null, finishedAt:null, updatedAt:Date.now(), resultsRecorded:false };
 }
 function secureShuffle(items) {
   for (let i = items.length - 1; i > 0; i--) {
@@ -171,7 +171,7 @@ function publicRoom(room, userId) {
     players:room.players.map(p=>({name:p.name,memberId:p.memberId})),
     calledNumbers:room.calledNumbers.slice(-15), allCalledNumbers:room.calledNumbers, drawCount:room.calledNumbers.length,
     latestNumber:room.calledNumbers.at(-1) ?? null, winners:{line:room.winners.line?{name:room.winners.line.name,memberId:room.winners.line.memberId,number:room.winners.line.number,at:room.winners.line.at}:null,full:room.winners.full?{name:room.winners.full.name,memberId:room.winners.full.memberId,number:room.winners.full.number,at:room.winners.full.at}:null},
-    myCards:me ? me.cards : (queued ? (room.queuedCards?.[userId] || []) : []), joined:queued || !!me,
+    myCards:room.status==='finished' ? [] : (me ? me.cards : (queued ? (room.queuedCards?.[userId] || []) : [])), joined:room.status==='finished' ? false : (queued || !!me),
     startedAt:room.startedAt, finishedAt:room.finishedAt,
     myBingoCoins:Number(account?.bingoCoins)||0,
     myCoinTransactions:Array.isArray(account?.coinTransactions)?account.coinTransactions.slice(0,50):[],
@@ -266,9 +266,23 @@ function startRoom(room) {
   startDrawTimer(room.id);
   return true;
 }
+function refundExpiredWaitingRoom(room) {
+  const now = new Date().toISOString();
+  for (const userId of room.queue || []) {
+    const user = db.users.find(item => item.id === userId);
+    const amount = Math.max(0, Number(room.entryPayments?.[userId]) || 0);
+    if (user && amount) {
+      user.balance = Math.max(0, Number(user.balance) || 0) + amount;
+      user.transactions = Array.isArray(user.transactions) ? user.transactions : [];
+      user.transactions.unshift({ amount, title:'لغو سانس به‌دلیل نرسیدن حداقل دو بازیکن؛ بازگشت وجه کارت', date:now });
+    }
+  }
+  Object.assign(room, freshRoom(room.id));
+  return true;
+}
 function advanceWaitingRoom(room) {
-  if (room.status !== 'waiting' || !room.registrationDeadline ||
-      Date.now() < Number(room.registrationDeadline) || room.queue.length < MIN_PLAYERS_TO_START) return false;
+  if (room.status !== 'waiting' || !room.registrationDeadline || Date.now() < Number(room.registrationDeadline)) return false;
+  if (room.queue.length < MIN_PLAYERS_TO_START) return refundExpiredWaitingRoom(room);
   return startRoom(room);
 }
 function authenticate(req) {
@@ -354,6 +368,7 @@ async function routeApi(req,res,url) {
     if (req.method==='POST' && action==='join') {
       const joinBody=await readBody(req);
       const requestedCards=Math.max(1,Math.min(MAX_CARDS_PER_PLAYER,Math.floor(Number(joinBody.cardsCount)||1)));
+      if (room.status==='waiting') advanceWaitingRoom(room);
       if (room.status==='finished') { Object.assign(room,freshRoom(roomId)); }
       if (room.status==='playing') return json(res,409,{error:'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.',room:publicRoom(room,user.id)});
       room.cardCounts=room.cardCounts||{}; room.queuedCards=room.queuedCards||{};
