@@ -156,7 +156,7 @@ function playPersianNumberAudio(number) {
   const value = Math.trunc(Number(number));
   if (!Number.isInteger(value) || value < 1 || value > 90) return Promise.resolve(false);
   if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return Promise.resolve(false);
-  if (!persianAudioContext && !unlockPersianAudio()) return Promise.resolve(false);
+  if ((!persianAudioContext || persianAudioContext.state === 'closed') && !unlockPersianAudio()) return Promise.resolve(false);
 
   const play = async () => {
     if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
