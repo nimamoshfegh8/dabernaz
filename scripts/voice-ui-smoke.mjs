@@ -53,6 +53,10 @@ assert.match(app, /numberToPersianSpeechText\(number\)/);
 assert.match(validator, /process\.exitCode = 1/);
 
 const currentManifest = JSON.parse(manifest);
-assert.equal(currentManifest.configured, false);
-assert.equal(Object.keys(currentManifest.numbers || {}).length, 0);
+assert.equal(currentManifest.provider, 'kenerate-sage-woman');
+assert.equal(currentManifest.voice, 'Sage Woman');
+assert.equal(currentManifest.language, 'fa-IR');
+assert.equal(Number(currentManifest.requiredNumbers), 90);
+assert.equal(typeof currentManifest.configured, 'boolean');
+assert.ok(currentManifest.numbers && typeof currentManifest.numbers === 'object');
 console.log('Persian Audio Manager smoke tests passed. Sage Woman release readiness is separately and strictly validated.');
