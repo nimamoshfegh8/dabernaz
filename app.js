@@ -365,6 +365,16 @@ async function toggleSetting(key) {
     voicePlaybackErrorShown = false;
     unlockPersianAudio();
     refreshPersianBrowserVoices();
+    // Prime the system speech engine during the trusted switch tap on Android.
+    try {
+      if ('speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function') {
+        const prime = new window.SpeechSynthesisUtterance(' ');
+        prime.lang = browserSpeechVoice?.lang || 'fa-IR';
+        prime.volume = 0;
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(prime);
+      }
+    } catch (error) { console.warn('[Dabernaz speech prime]', error); }
   }
   if (key === 'notifications' && next) {
     if (!('Notification' in window)) {
@@ -1532,13 +1542,19 @@ document.addEventListener('click', async event => {
     saveState();
     refreshPersianBrowserVoices();
     showToast('در حال پخش نمونه: چهل دو');
-    const testPromise = speakPersianNumberFallback(42);
-    const ok = await testPromise.catch(error => {
-      console.warn('[Dabernaz direct voice test]', error);
-      showToast(error.message || 'پخش گفتار فارسی انجام نشد.');
-      return false;
-    });
-    if (ok) showToast('تست صدای فارسی با موفقیت پخش شد.');
+    let ok = false;
+    if (voicePackReady) {
+      unlockPersianAudio();
+      ok = await playPersianNumberAudio(42, { allowFallback:false });
+    } else {
+      // Direct invocation starts speech before the first await in this click handler.
+      ok = await speakPersianNumberFallback(42).catch(error => {
+        console.warn('[Dabernaz direct voice test]', error);
+        showToast(error.message || 'پخش گفتار فارسی انجام نشد.');
+        return false;
+      });
+    }
+    if (ok) showToast(voicePackReady ? 'نمونه با صدای Sage Woman پخش شد.' : 'تست صدای فارسی با موفقیت پخش شد.');
     renderSettingsIntoView();
   }
   else if (action === 'enable-room-audio') {
