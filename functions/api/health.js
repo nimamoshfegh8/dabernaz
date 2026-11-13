@@ -1,16 +1,28 @@
 export async function onRequestGet({ env }) {
-  return new Response(JSON.stringify({
-    ok: !!env.DB,
+  let databaseReady = false;
+  if (env.DB) {
+    try {
+      const row = await env.DB.prepare('SELECT 1 AS ok').first();
+      databaseReady = Number(row?.ok) === 1;
+    } catch (_) {
+      databaseReady = false;
+    }
+  }
+  const configured = !!env.DB;
+  const body = {
+    ok: databaseReady,
     service: 'dabernaz',
     backend: 'cloudflare-pages-functions',
-    database: env.DB ? 'D1' : 'missing',
-    binding: env.DB ? 'bound' : 'missing',
-    mode: env.DB ? 'ready' : 'misconfigured'
-  }), {
-    status: env.DB ? 200 : 503,
+    database: databaseReady ? 'D1' : configured ? 'unreachable' : 'missing',
+    binding: configured ? 'bound' : 'missing',
+    mode: databaseReady ? 'ready' : configured ? 'degraded' : 'misconfigured'
+  };
+  return new Response(JSON.stringify(body), {
+    status: databaseReady ? 200 : 503,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      'cache-control': 'no-store, no-cache, must-revalidate, max-age=0'
+      'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
+      'x-content-type-options': 'nosniff'
     }
   });
 }
