@@ -4,14 +4,16 @@ import path from 'node:path';
 
 const root = process.cwd();
 const manifestPath = path.join(root, 'assets', 'voice', 'sage-woman.json');
-const audioPath = path.join(root, 'assets', 'voice', 'sage-woman.mp3');
+const audioDir = path.join(root, 'assets', 'voice', 'sage-woman');
 const allowPending = process.argv.includes('--allow-pending');
-
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+
+assert.equal(Number(manifest.version), 3);
 assert.equal(manifest.provider, 'kenerate-sage-woman');
 assert.equal(manifest.voice, 'Sage Woman');
 assert.equal(manifest.language, 'fa-IR');
 assert.equal(Number(manifest.requiredNumbers), 90);
+assert.ok(manifest.numbers && typeof manifest.numbers === 'object' && !Array.isArray(manifest.numbers));
 
 function numberToSpokenPersian(number) {
   const value = Math.trunc(Number(number));
@@ -22,41 +24,49 @@ function numberToSpokenPersian(number) {
   if (value < 20) return teens[value - 10];
   const ten = Math.floor(value / 10);
   const one = value % 10;
-  return (tens[ten] + (one ? ' ' + units[one] : '')).trim();
+  return (tens[ten] + (one ? ' و ' + units[one] : '')).trim();
 }
 
-const keys = Object.keys(manifest.numbers || {});
-const packageReady = manifest.configured === true &&
-  keys.length === 90 && existsSync(audioPath);
+function assertMp3(filePath, number) {
+  assert.ok(existsSync(filePath), 'missing Sage Woman MP3 for number ' + number);
+  const size = statSync(filePath).size;
+  assert.ok(size >= 500 && size <= 2_000_000, 'invalid file size for number ' + number + ': ' + size);
+  const bytes = readFileSync(filePath);
+  const hasId3 = bytes.subarray(0, 3).toString('ascii') === 'ID3';
+  const hasMpegFrame = bytes.length > 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
+  assert.ok(hasId3 || hasMpegFrame, 'file is not a recognizable MP3 for number ' + number);
+}
 
-if (!packageReady) {
-  const message = 'INCOMPLETE RELEASE: Sage Woman audio package is missing or incomplete. ' +
-    'The release requires assets/voice/sage-woman.mp3 and a manifest containing all 90 validated clips.';
+const missing = [];
+const declared = Object.keys(manifest.numbers);
+for (let number = 1; number <= 90; number++) {
+  const key = String(number);
+  const filename = String(number).padStart(3, '0') + '.mp3';
+  const clip = manifest.numbers[key];
+  if (!clip) {
+    missing.push(filename);
+    continue;
+  }
+  assert.equal(clip.file, filename, 'wrong filename for number ' + number);
+  assert.equal(String(clip.text || '').trim(), numberToSpokenPersian(number), 'wrong script text for number ' + number);
+  assertMp3(path.join(audioDir, filename), number);
+}
+for (const key of declared) {
+  assert.ok(Number.isInteger(Number(key)) && Number(key) >= 1 && Number(key) <= 90,
+    'manifest contains an out-of-range number key: ' + key);
+}
+const complete = missing.length === 0 && declared.length === 90 && manifest.configured === true;
+if (!complete) {
+  const message = 'INCOMPLETE RELEASE: Sage Woman voice pack has ' + (90 - missing.length) +
+    '/90 verified MP3 clips. Missing: ' + missing.join(', ');
   if (allowPending) {
     console.warn('WARNING: ' + message);
-    console.warn('This local override is for source-code testing only; it does not make the release audio-complete.');
+    console.warn('The local partial-pack override never marks this as a complete release.');
   } else {
     console.error('::error::' + message);
     console.error(message);
     process.exitCode = 1;
   }
 } else {
-  assert.ok(statSync(audioPath).size >= 15000, 'voice MP3 appears truncated or too small');
-  assert.ok(manifest.numbers && typeof manifest.numbers === 'object' && !Array.isArray(manifest.numbers));
-  let previousEnd = 0;
-  for (let number = 1; number <= 90; number++) {
-    const clip = manifest.numbers[String(number)];
-    const start = Number(clip?.start);
-    const duration = Number(clip?.duration);
-    assert.ok(clip, 'missing number ' + number);
-    assert.ok(Number.isFinite(start) && start >= 0, 'invalid start for number ' + number);
-    assert.ok(Number.isFinite(duration) && duration > 0, 'invalid duration for number ' + number);
-    assert.ok(start >= previousEnd - 0.03, 'clips overlap or are out of order at number ' + number);
-    assert.equal(String(clip.text || '').trim(), numberToSpokenPersian(number), 'wrong spoken text for number ' + number);
-    previousEnd = start + duration;
-  }
-  const audioDuration = Number(manifest.audioDurationSeconds);
-  assert.ok(Number.isFinite(audioDuration) && audioDuration > 0, 'manifest must declare decoded MP3 duration in seconds');
-  assert.ok(audioDuration + 0.1 >= previousEnd, 'one or more clips exceed the MP3 duration');
-  console.log('Sage Woman voice package is complete: MP3 present and all 90 clips validated.');
+  console.log('Sage Woman package complete: all 90 independent MP3 clips and Persian texts validated.');
 }
