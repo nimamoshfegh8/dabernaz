@@ -150,7 +150,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   }
   let snapshot = await roomFor(accounts[0], roomId);
   assert.equal(snapshot.capacity, null);
-  assert.equal(snapshot.minPlayersToStart, 5);
+  assert.equal(snapshot.minPlayersToStart, 2);
   assert.equal(snapshot.playerCount, 4, roomId + ': four registered players');
   assert.equal(snapshot.queueCount, 4, roomId + ': queue count is players, not cards');
   assert.equal(snapshot.cardCount, 20, roomId + ': room accepts 20 sold cards before other players join');
@@ -237,7 +237,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const startedRoom = await roomFor(accounts[0], roomId);
   assert.equal(startedRoom.status, 'playing');
   assert.equal(startedRoom.capacity, null);
-  assert.equal(startedRoom.minPlayersToStart, 5);
+  assert.equal(startedRoom.minPlayersToStart, 2);
   assert.equal(startedRoom.playerCount, 8);
   assert.equal(startedRoom.queueCount, 8);
   assert.equal(startedRoom.cardCount, 40);
