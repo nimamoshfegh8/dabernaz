@@ -15,7 +15,9 @@ session_set_cookie_params([
 ]);
 session_start();
 
-const DABERNAZ_CAPACITY = 20;
+const DABERNAZ_REGISTRATION_WINDOW_MS = 150000;
+const DABERNAZ_MIN_PLAYERS = 5;
+const DABERNAZ_MAX_CARDS_PER_PLAYER = 5;
 const DABERNAZ_DRAW_INTERVAL = 3;
 $privateDir = __DIR__ . '/.private';
 $dbFile = $privateDir . '/store-php.json';
@@ -71,8 +73,8 @@ function public_user(array $user): array {
 }
 function fresh_room(string $id): array {
     return ['id'=>$id,'status'=>'waiting','queue'=>[],'cardCounts'=>[],'queuedCards'=>[],'players'=>[],
-        'calledNumbers'=>[],'winners'=>['line'=>null,'full'=>null],'startedAt'=>null,'finishedAt'=>null,
-        'nextDrawAt'=>null,'updatedAt'=>time()];
+        'calledNumbers'=>[],'winners'=>['line'=>null,'full'=>null],'registrationStartedAt'=>null,'registrationDeadline'=>null,
+        'startedAt'=>null,'finishedAt'=>null,'nextDrawAt'=>null,'updatedAt'=>time()];
 }
 function random_int_safe(int $min, int $max): int { return random_int($min, $max); }
 function secure_shuffle(array $items): array {
@@ -129,16 +131,34 @@ function full_complete(array $card, array $called): bool {
 function finish_room(array &$room): void {
     $room['status']='finished'; $room['finishedAt']=time(); $room['updatedAt']=time(); $room['nextDrawAt']=null;
 }
-function start_room(array &$room, array $db): void {
+function start_room(array &$room, array $db): bool {
+    if (($room['status'] ?? '') !== 'waiting' || count($room['queue'] ?? []) < DABERNAZ_MIN_PLAYERS) return false;
     $players=[];
     foreach ($room['queue'] as $userId) {
         $user=null; foreach ($db['users'] as $candidate) if ($candidate['id']===$userId) { $user=$candidate; break; }
         if (!$user) continue;
-        $players[]=['userId'=>$userId,'name'=>$user['name'],'memberId'=>$user['memberId'],'cards'=>$room['queuedCards'][$userId] ?? [make_card()]];
+        $cards=$room['queuedCards'][$userId] ?? [];
+        if (!is_array($cards) || !$cards) continue;
+        $players[]=['userId'=>$userId,'name'=>$user['name'],'memberId'=>$user['memberId'],'cards'=>$cards];
     }
-    $room['players']=$players; $room['queue']=[]; $room['queuedCards']=[]; $room['status']='playing';
+    if (count($players) < DABERNAZ_MIN_PLAYERS) return false;
+    $room['players']=$players; $room['queue']=[]; $room['queuedCards']=[]; $room['cardCounts']=[]; $room['status']='playing';
     $room['calledNumbers']=[]; $room['winners']=['line'=>null,'full'=>null]; $room['startedAt']=time();
     $room['finishedAt']=null; $room['nextDrawAt']=time()+DABERNAZ_DRAW_INTERVAL; $room['updatedAt']=time();
+    return true;
+}
+function advance_waiting_room(array &$room, array $db): bool {
+    if (($room['status'] ?? '') !== 'waiting') return false;
+    if (!empty($room['queue']) && empty($room['registrationDeadline'])) {
+        $updated=(int)($room['updatedAt'] ?? time());
+        $started=$updated > 1000000000000 ? $updated : $updated * 1000;
+        $room['registrationStartedAt']=$started;
+        $room['registrationDeadline']=$started + DABERNAZ_REGISTRATION_WINDOW_MS;
+    }
+    if (empty($room['registrationDeadline']) ||
+        (int)$room['registrationDeadline'] > (int)floor(microtime(true)*1000) ||
+        count($room['queue'] ?? []) < DABERNAZ_MIN_PLAYERS) return false;
+    return start_room($room,$db);
 }
 function award_bingo_coin(array &$db, string $userId, int $amount, string $title): void {
     foreach ($db['users'] as &$user) if (($user['id'] ?? '') === $userId) {
@@ -151,6 +171,9 @@ function award_bingo_coin(array &$db, string $userId, int $amount, string $title
     unset($user);
 }
 function advance_room(array &$room, array &$db): void {
+    if (($room['status'] ?? '') === 'waiting') {
+        advance_waiting_room($room,$db);
+    }
     if (($room['status'] ?? '') !== 'playing') return;
     $now=time(); $guard=0;
     while ($room['status']==='playing' && !empty($room['nextDrawAt']) && $room['nextDrawAt'] <= $now && $guard < 90) {
@@ -183,10 +206,18 @@ function public_room(array $room, string $userId, array $db): array {
     $me=null; foreach ($room['players'] as $player) if ($player['userId']===$userId) {$me=$player;break;}
     $queued=in_array($userId,$room['queue'],true);
     $players=array_map(fn($p)=>['name'=>$p['name'],'memberId'=>$p['memberId']],$room['players']);
+    $playerCount=$room['status']==='waiting'?count($room['queue']):count($room['players']);
+    $cardCount=0;
+    if ($room['status']==='waiting') foreach (($room['cardCounts']??[]) as $count) $cardCount+=max(0,(int)$count);
+    else foreach (($room['players']??[]) as $player) $cardCount+=count($player['cards']??[]);
+    $deadline=(int)($room['registrationDeadline']??0);
     $accountIndex=get_user_index($db,$userId);
     $account=$accountIndex>=0?$db['users'][$accountIndex]:[];
-    return ['id'=>$room['id'],'status'=>$room['status'],'capacity'=>DABERNAZ_CAPACITY,
-        'queueCount'=>$room['status']==='waiting'?count($room['queue']):count($room['players']),
+    return ['id'=>$room['id'],'status'=>$room['status'],'capacity'=>null,'minPlayersToStart'=>DABERNAZ_MIN_PLAYERS,
+        'maxCardsPerPlayer'=>DABERNAZ_MAX_CARDS_PER_PLAYER,'registrationWindowMs'=>DABERNAZ_REGISTRATION_WINDOW_MS,
+        'registrationStartedAt'=>$room['registrationStartedAt']??null,'registrationDeadline'=>$room['registrationDeadline']??null,
+        'registrationRemainingMs'=>$deadline>0?max(0,$deadline-(int)floor(microtime(true)*1000)):0,
+        'playerCount'=>$playerCount,'cardCount'=>$cardCount,'queueCount'=>$playerCount,
         'players'=>$players,'calledNumbers'=>array_slice($room['calledNumbers'],-15),'allCalledNumbers'=>$room['calledNumbers'],
         'drawCount'=>count($room['calledNumbers']),'latestNumber'=>$room['calledNumbers'] ? end($room['calledNumbers']) : null,
         'winners'=>$room['winners'],'myCards'=>$me['cards'] ?? ($queued?($room['queuedCards'][$userId]??[]):[]),
@@ -283,13 +314,7 @@ if ($method==='GET' && $path==='/api/auth/me') {
 
 if ($method==='POST' && $path==='/api/auth/logout') {
     $userId=(string)($_SESSION['userId']??'');
-    if ($userId!=='') store_update(function (&$db) use ($userId) {
-        foreach ($db['rooms'] as &$room) if ($room['status']==='waiting') {
-            $room['queue']=array_values(array_filter($room['queue'],fn($id)=>$id!==$userId));
-            unset($room['queuedCards'][$userId],$room['cardCounts'][$userId]);
-        }
-        unset($room); return true;
-    });
+    // Purchased waiting-room tickets remain in the shared round after logout.
     $_SESSION=[]; if (ini_get('session.use_cookies')) { $p=session_get_cookie_params(); setcookie(session_name(),'',time()-42000,$p['path'],$p['domain'],$p['secure'],$p['httponly']); }
     session_destroy(); send_json(200,['ok'=>true]);
 }
@@ -319,16 +344,26 @@ if (preg_match('~^/api/rooms/(room5000|room10000|room20000|room50000)(?:/(join|l
         send_json(200,['ok'=>true,'room'=>$room]);
     }
     if ($method==='POST' && $action==='join') {
-        $body=request_body(); $cardCount=max(1,min(4,(int)($body['cardsCount']??1)));
+        $body=request_body(); $cardCount=max(1,min(DABERNAZ_MAX_CARDS_PER_PLAYER,(int)($body['cardsCount']??1)));
         $room=store_update(function (&$db) use ($roomId,$userId,$cardCount) {
             $room=&$db['rooms'][$roomId]; advance_room($room,$db);
             if($room['status']==='finished') $room=fresh_room($roomId);
             if($room['status']==='playing') return ['error'=>'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.','status'=>409,'room'=>public_room($room,$userId,$db)];
-            if(in_array($userId,$room['queue'],true)) return ['room'=>public_room($room,$userId,$db)];
-            $room['cardCounts'][$userId]=$cardCount; $room['queuedCards'][$userId]=[];
-            for($i=0;$i<$cardCount;$i++)$room['queuedCards'][$userId][]=make_card();
-            $room['queue'][]=$userId; $room['updatedAt']=time();
-            if(count($room['queue'])>=DABERNAZ_CAPACITY) start_room($room,$db);
+            $currentCards=max(0,(int)($room['cardCounts'][$userId]??0));
+            $addCards=min($cardCount,DABERNAZ_MAX_CARDS_PER_PLAYER-$currentCards);
+            if($addCards<=0) return ['error'=>'حداکثر ۵ کارت برای هر حساب در هر سانس مجاز است.','status'=>409,'room'=>public_room($room,$userId,$db)];
+            if(!in_array($userId,$room['queue'],true)) {
+                $room['queue'][]=$userId;
+                if(empty($room['registrationStartedAt'])) {
+                    $room['registrationStartedAt']=(int)floor(microtime(true)*1000);
+                    $room['registrationDeadline']=$room['registrationStartedAt']+DABERNAZ_REGISTRATION_WINDOW_MS;
+                }
+            }
+            $room['cardCounts'][$userId]=$currentCards+$addCards;
+            $room['queuedCards'][$userId]=$room['queuedCards'][$userId]??[];
+            for($i=0;$i<$addCards;$i++) $room['queuedCards'][$userId][]=make_card();
+            $room['updatedAt']=time();
+            advance_waiting_room($room,$db);
             return ['room'=>public_room($room,$userId,$db)];
         });
         if(isset($room['error'])) send_json($room['status'],['error'=>$room['error'],'room'=>$room['room']]);
@@ -336,9 +371,12 @@ if (preg_match('~^/api/rooms/(room5000|room10000|room20000|room50000)(?:/(join|l
     }
     if ($method==='POST' && $action==='leave') {
         $room=store_update(function (&$db) use ($roomId,$userId) { $room=&$db['rooms'][$roomId];
-            if($room['status']==='waiting') {$room['queue']=array_values(array_filter($room['queue'],fn($id)=>$id!==$userId));unset($room['queuedCards'][$userId],$room['cardCounts'][$userId]);}
-            $room['updatedAt']=time(); return public_room($room,$userId,$db); });
-        send_json(200,['ok'=>true,'room'=>$room]);
+            if($room['status']==='waiting' && in_array($userId,$room['queue'],true))
+                return ['error'=>'کارت خریداری‌شده قابل لغو یا بازپرداخت نیست.','status'=>409,'room'=>public_room($room,$userId,$db)];
+            return ['room'=>public_room($room,$userId,$db)];
+        });
+        if(isset($room['error'])) send_json($room['status'],['error'=>$room['error'],'room'=>$room['room']]);
+        send_json(200,['ok'=>true,'room'=>$room['room']]);
     }
 }
 send_json(404,['error'=>'مسیر API پیدا نشد.']);
