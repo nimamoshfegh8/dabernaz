@@ -56,9 +56,6 @@ const spokenRoomAnnouncementKeys = new Set();
 const roomSpeechInFlight = new Set();
 const roomSpeechRetryAt = new Map();
 let settingsAudioContext = null;
-let voicePackReady = false;
-let voicePackCheckPromise = null;
-let voicePlaybackErrorShown = false;
 let roomJoinBusy = false;
 
 function settingEnabled(key) { return !!state?.settings?.[key]; }
