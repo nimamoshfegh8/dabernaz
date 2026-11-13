@@ -81,7 +81,9 @@ assert.equal(health.database, 'D1');
 // the real 90-number manifest and MP3 before enabling the selected voice.
 const voiceHealth = await request('/api/voice/health');
 assert.equal(voiceHealth.ok, true);
-assert.equal(voiceHealth.status, 'client-asset-validation');
+assert.equal(voiceHealth.status, 'client-validation-required');
+assert.equal(voiceHealth.ready, null);
+assert.equal(voiceHealth.verifiedBy, 'client-audio-manager');
 assert.equal(voiceHealth.provider, 'kenerate-sage-woman');
 assert.equal(voiceHealth.voice, 'Sage Woman');
 assert.equal(voiceHealth.language, 'fa-IR');
