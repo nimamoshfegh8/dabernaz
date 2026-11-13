@@ -1,7 +1,7 @@
 /* Dabernaz Cloudflare Pages Function: authentication, D1 accounts and live Daberna rooms. */
 const REGISTRATION_WINDOW_MS = 150000;
 const MAX_CARDS_PER_PLAYER = 5;
-const MIN_PLAYERS_TO_START = 5;
+const MIN_PLAYERS_TO_START = 2;
 const ROOM_ECONOMICS = Object.freeze({
   room5000: { price: 5000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
   room10000: { price: 10000, linePrizePercent: 10, fullPrizePercent: 75, commissionPercent: 15 },
@@ -555,6 +555,17 @@ async function saveRoom(db, room, awards = []) {
   await db.batch(statements);
 }
 
+async function cancelExpiredWaitingRoom(db, room, reason = 'حداقل دو بازیکن در مهلت ثبت‌نام کارت نخریدند؛ مبلغ خرید کارت بازگردانده شد.') {
+  const createdAt = new Date().toISOString();
+  const awards = Object.entries(room.entryPayments || [])
+    .map(([userId, amount]) => ({ userId:Number(userId), amount:Math.max(0, Math.floor(Number(amount) || 0)) }))
+    .filter((item) => Number.isInteger(item.userId) && item.userId > 0 && item.amount > 0)
+    .map((item) => ({ kind:'balance', userId:item.userId, amount:item.amount, description:reason, createdAt }));
+  const reset = newRoom(room.id);
+  await saveRoom(db, reset, awards);
+  return reset;
+}
+
 async function withRoomLock(db, roomId, callback) {
   const token = randomToken(16);
   let acquired = false;
@@ -817,8 +828,9 @@ async function publicRoom(db, room, userId) {
     calledNumbers:room.calledNumbers.slice(-15), allCalledNumbers:room.calledNumbers,
     drawCount:room.calledNumbers.length,
     latestNumber:room.calledNumbers.length ? room.calledNumbers[room.calledNumbers.length - 1] : null,
-    winners:room.winners, myCards:me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : []),
-    joined:queued || !!me, startedAt:room.startedAt, finishedAt:room.finishedAt,
+    winners:room.winners,
+    myCards:room.status === 'finished' ? [] : (me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : [])),
+    joined:room.status === 'finished' ? false : (queued || !!me), startedAt:room.startedAt, finishedAt:room.finishedAt,
     myBingoCoins:Number(account?.bingo_coins) || 0,
     myCoinTransactions:await coinHistory(db, userId),
   };
@@ -840,6 +852,7 @@ async function handleRoom(db, request, user, path) {
         let started = false;
         if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
           started = await startRoom(db, room);
+          if (!started) room = await cancelExpiredWaitingRoom(db, room);
         }
         if (room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now()) {
           const advanced = advanceRoom(room);
@@ -863,6 +876,7 @@ async function handleRoom(db, request, user, path) {
       if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
         const started = await startRoom(db,room);
         if (started) await saveRoom(db,room);
+        else room = await cancelExpiredWaitingRoom(db, room);
       }
       if (room.status === 'playing') return {conflict:true,room:await publicRoom(db,room,userId)};
       if (room.status === 'finished') room = newRoom(roomId);
