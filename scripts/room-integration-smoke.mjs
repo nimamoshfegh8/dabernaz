@@ -97,8 +97,8 @@ for (let number = 1; number <= 90; number++) {
 const voiceAudioResponse = await fetch(baseUrl + '/assets/voice/fa-numbers.mp3');
 assert.equal(voiceAudioResponse.status, 200, 'bundled Persian MP3 must be published');
 assert.match(voiceAudioResponse.headers.get('content-type') || '', /audio\/mpeg/i);
-assert.ok(Number(voiceAudioResponse.headers.get('content-length') || 0) > 200000,
-  'bundled Persian MP3 must not be empty');
+const voiceAudioBytes = await voiceAudioResponse.arrayBuffer();
+assert.ok(voiceAudioBytes.byteLength > 200000, 'bundled Persian MP3 must not be empty');
 
 const publicTournamentLobby = await request('/api/tournaments');
 assert.equal(publicTournamentLobby.ok, true);
