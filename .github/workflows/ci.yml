@@ -36,9 +36,6 @@ jobs:
       - name: Test Node fallback room rules
         run: node scripts/node-fallback-room-smoke.mjs
 
-      - name: Validate Sage Woman voice package
-        run: node scripts/voice-pack-validation.mjs
-
       - name: Test Persian voice UI and Android playback path
         run: node scripts/voice-ui-smoke.mjs
 
@@ -93,3 +90,8 @@ jobs:
 
           cat /tmp/dabernaz-health.json
           BASE_URL=http://127.0.0.1:8788 node scripts/room-integration-smoke.mjs
+
+      # This is intentionally strict: a green test run must not call a release complete
+      # until the selected Sage Woman MP3 and all 90 indexed clips have been supplied.
+      - name: Verify release has complete Sage Woman audio assets
+        run: node scripts/voice-pack-validation.mjs
