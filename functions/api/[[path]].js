@@ -1046,61 +1046,56 @@ function persianNumberWords(number) {
   return unit ? `${tens[ten]} و ${units[unit]}` : tens[ten];
 }
 
-async function getPersianNumberAudio(number, requestUrl) {
-  const spokenText = `عدد ${persianNumberWords(number)}`;
+function escapeXmlText(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;',
+  })[character]);
+}
+
+async function getPersianNumberAudio(number, requestUrl, env) {
+  const speechKey = String(env.AZURE_SPEECH_KEY || '').trim();
+  const speechRegion = String(env.AZURE_SPEECH_REGION || '').trim().toLowerCase();
+  if (!speechKey || !speechRegion) {
+    const error = new Error('AZURE_SPEECH_NOT_CONFIGURED');
+    error.code = 'AZURE_SPEECH_NOT_CONFIGURED';
+    throw error;
+  }
+  if (!/^[a-z0-9-]{2,40}$/.test(speechRegion)) {
+    const error = new Error('AZURE_SPEECH_REGION_INVALID');
+    error.code = 'AZURE_SPEECH_REGION_INVALID';
+    throw error;
+  }
+
   const cacheKey = new Request(new URL(`/api/voice/${number}`, requestUrl).toString(), { method: 'GET' });
   const edgeCache = globalThis.caches?.default;
   if (edgeCache) {
     try {
       const cached = await edgeCache.match(cacheKey);
       if (cached) return cached;
-    } catch (_) { /* Continue to origin when cache is unavailable. */ }
+    } catch (_) { /* Continue to synthesis when cache is unavailable. */ }
   }
 
-  // Google changed its unofficial Translate TTS route in 2026. Try the current
-  // translate.googleapis.com endpoint first, then the legacy hosts as fallback.
-  const providers = [
-    { host: 'https://translate.googleapis.com/translate_tts', client: 'gtx', referer: 'https://translate.google.com/' },
-    { host: 'https://translate.google.com/translate_tts', client: 'gtx', referer: 'https://translate.google.com/' },
-    { host: 'https://translate.google.com/translate_tts', client: 'tw-ob', referer: 'https://translate.google.com/' },
-  ];
-  const failures = [];
-  let audio = null;
-  for (const provider of providers) {
-    const upstreamUrl = new URL(provider.host);
-    upstreamUrl.searchParams.set('ie', 'UTF-8');
-    upstreamUrl.searchParams.set('client', provider.client);
-    upstreamUrl.searchParams.set('tl', 'fa');
-    upstreamUrl.searchParams.set('q', spokenText);
-    try {
-      const upstream = await fetch(upstreamUrl.toString(), {
-        method: 'GET',
-        headers: {
-          'accept': 'audio/mpeg,audio/*;q=0.9,*/*;q=0.1',
-          'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0 Safari/537.36',
-          'referer': provider.referer,
-        },
-        cf: { cacheTtl: 86400, cacheEverything: true },
-      });
-      const contentType = upstream.headers.get('content-type') || '';
-      if (!upstream.ok || !contentType.toLowerCase().includes('audio')) {
-        failures.push(`${provider.host} (${upstream.status}, ${contentType || 'unknown type'})`);
-        continue;
-      }
-      const bytes = await upstream.arrayBuffer();
-      if (bytes.byteLength < 512) {
-        failures.push(`${provider.host} (empty audio: ${bytes.byteLength} bytes)`);
-        continue;
-      }
-      audio = bytes;
-      break;
-    } catch (error) {
-      failures.push(`${provider.host} (${String(error?.message || error)})`);
-    }
+  const spokenText = `عدد ${persianNumberWords(number)}`;
+  const ssml = `<speak version="1.0" xml:lang="fa-IR"><voice name="fa-IR-FaridNeural"><prosody rate="-5%">${escapeXmlText(spokenText)}</prosody></voice></speak>`;
+  const endpoint = `https://${speechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
+  const upstream = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Ocp-Apim-Subscription-Key': speechKey,
+      'Content-Type': 'application/ssml+xml',
+      'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3',
+      'User-Agent': 'DabernazClub/1.0',
+      'Accept': 'audio/mpeg,audio/*;q=0.9',
+    },
+    body: ssml,
+  });
+  const contentType = upstream.headers.get('content-type') || '';
+  if (!upstream.ok || !contentType.toLowerCase().includes('audio')) {
+    const detail = (await upstream.text().catch(() => '')).slice(0, 500);
+    throw new Error(`Azure Speech returned HTTP ${upstream.status} (${contentType || 'unknown content type'}) ${detail}`);
   }
-  if (!audio) {
-    throw new Error(`No Persian audio endpoint returned MP3. ${failures.join('; ')}`);
-  }
+  const audio = await upstream.arrayBuffer();
+  if (audio.byteLength < 512) throw new Error('Azure Speech returned an empty Persian audio clip.');
 
   const response = new Response(audio, {
     status: 200,
@@ -1142,24 +1137,35 @@ async function routeRequest(request, env) {
     const number = Number(voiceMatch[1]);
     if (!Number.isInteger(number) || number < 1 || number > 90) throw new HttpError(400, 'شماره صوتی باید بین ۱ تا ۹۰ باشد.');
     try {
-      return await getPersianNumberAudio(number, request.url);
+      return await getPersianNumberAudio(number, request.url, env);
     } catch (error) {
+      if (error?.code === 'AZURE_SPEECH_NOT_CONFIGURED') {
+        return json({ ok: false, configured: false, provider: 'azure-speech', error: 'برای فعال‌شدن صدای فارسی، AZURE_SPEECH_KEY و AZURE_SPEECH_REGION را در Secrets کلودفلر تنظیم کن.' }, 503);
+      }
+      if (error?.code === 'AZURE_SPEECH_REGION_INVALID') {
+        return json({ ok: false, configured: true, provider: 'azure-speech', error: 'مقدار منطقه Azure Speech معتبر نیست.' }, 503);
+      }
       console.error('[dabernaz-voice-error]', String(error?.message || error));
-      return json({ ok: false, error: 'سرویس ساخت صدای فارسی موقتاً در دسترس نیست.' }, 502);
+      return json({ ok: false, configured: true, provider: 'azure-speech', error: 'ساخت صدای فارسی از Azure Speech ناموفق بود.', detail: String(error?.message || error).slice(0, 600) }, 502);
     }
   }
 
   if (request.method === 'GET' && path === '/api/voice/health') {
     try {
-      const response = await getPersianNumberAudio(42, request.url);
+      const response = await getPersianNumberAudio(42, request.url, env);
       return json({
         ok: true,
-        provider: 'server-side-persian-mp3',
+        configured: true,
+        provider: 'azure-speech',
+        voice: 'fa-IR-FaridNeural',
         contentType: response.headers.get('content-type'),
         bytes: Number(response.headers.get('content-length')) || null,
       });
     } catch (error) {
-      return json({ ok: false, provider: 'server-side-persian-mp3', error: String(error?.message || error) }, 502);
+      if (error?.code === 'AZURE_SPEECH_NOT_CONFIGURED') {
+        return json({ ok: false, configured: false, provider: 'azure-speech', error: 'AZURE_SPEECH_KEY و AZURE_SPEECH_REGION هنوز در Cloudflare Pages تنظیم نشده‌اند.' }, 503);
+      }
+      return json({ ok: false, configured: true, provider: 'azure-speech', error: String(error?.message || error).slice(0, 600) }, 502);
     }
   }
 
