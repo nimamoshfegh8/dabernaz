@@ -266,9 +266,23 @@ function startRoom(room) {
   startDrawTimer(room.id);
   return true;
 }
+function refundExpiredWaitingRoom(room) {
+  const now = new Date().toISOString();
+  for (const userId of room.queue || []) {
+    const user = db.users.find(item => item.id === userId);
+    const amount = Math.max(0, Number(room.entryPayments?.[userId]) || 0);
+    if (user && amount) {
+      user.balance = Math.max(0, Number(user.balance) || 0) + amount;
+      user.transactions = Array.isArray(user.transactions) ? user.transactions : [];
+      user.transactions.unshift({ amount, title:'لغو سانس به‌دلیل نرسیدن حداقل دو بازیکن؛ بازگشت وجه کارت', date:now });
+    }
+  }
+  Object.assign(room, freshRoom(room.id));
+  return true;
+}
 function advanceWaitingRoom(room) {
-  if (room.status !== 'waiting' || !room.registrationDeadline ||
-      Date.now() < Number(room.registrationDeadline) || room.queue.length < MIN_PLAYERS_TO_START) return false;
+  if (room.status !== 'waiting' || !room.registrationDeadline || Date.now() < Number(room.registrationDeadline)) return false;
+  if (room.queue.length < MIN_PLAYERS_TO_START) return refundExpiredWaitingRoom(room);
   return startRoom(room);
 }
 function authenticate(req) {
