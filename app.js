@@ -327,13 +327,21 @@ async function checkPersianVoicePack() {
           !contentType.includes('audio') || (contentLength > 0 && contentLength < 15000)) {
         throw new Error('Sage Woman metadata is incomplete');
       }
+      let previousEnd = 0;
       for (let n = 1; n <= 90; n++) {
         const clip = manifest.numbers[String(n)];
+        const start = Number(clip?.start);
+        const duration = Number(clip?.duration);
         if (!clip || String(clip.text || '').trim() !== numberToPersianSpeechText(n) ||
-            !Number.isFinite(Number(clip.start)) || !Number.isFinite(Number(clip.duration)) ||
-            Number(clip.start) < 0 || Number(clip.duration) <= 0) {
+            !Number.isFinite(start) || !Number.isFinite(duration) ||
+            start < 0 || duration <= 0 || start < previousEnd - 0.03) {
           throw new Error('Sage Woman clip ' + n + ' is invalid');
         }
+        previousEnd = start + duration;
+      }
+      if (!Number.isFinite(Number(manifest.audioDurationSeconds)) ||
+          Number(manifest.audioDurationSeconds) + 0.1 < previousEnd) {
+        throw new Error('Sage Woman manifest duration does not cover all 90 clips');
       }
       voicePackReady = true;
     } catch (_) {
