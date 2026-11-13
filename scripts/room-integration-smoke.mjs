@@ -77,6 +77,22 @@ const health = await request('/api/health');
 assert.equal(health.ok, true);
 assert.equal(health.database, 'D1');
 
+// Verify the Persian voice provider, server-side MP3 proxy, and the full 1..90 range.
+const voiceHealthResponse = await fetch(baseUrl + '/api/voice/health');
+const voiceHealth = await voiceHealthResponse.json().catch(() => ({}));
+assert.equal(voiceHealthResponse.status, 200, 'Persian voice provider health endpoint must return HTTP 200');
+assert.equal(voiceHealth.ok, true, 'Persian voice provider must return a playable MP3');
+assert.equal(voiceHealth.contentType, 'audio/mpeg', 'voice health must report MPEG audio');
+assert.ok(Number(voiceHealth.bytes) > 512, 'Persian voice MP3 must contain audio data');
+for (const number of [1, 25, 42, 90]) {
+  const audioResponse = await fetch(baseUrl + '/api/voice/' + number);
+  assert.equal(audioResponse.status, 200, 'Persian voice clip ' + number + ' must be available');
+  assert.match(audioResponse.headers.get('content-type') || '', /audio\\/mpeg/i,
+    'Persian voice clip ' + number + ' must have audio/mpeg content type');
+  const audioBytes = await audioResponse.arrayBuffer();
+  assert.ok(audioBytes.byteLength > 512, 'Persian voice clip ' + number + ' must not be empty');
+}
+
 const publicTournamentLobby = await request('/api/tournaments');
 assert.equal(publicTournamentLobby.ok, true);
 assert.deepEqual(
