@@ -70,78 +70,103 @@ function numberToPersianWords(number) {
   return rest ? `${hundreds[hundred]} و ${numberToPersianWords(rest)}` : hundreds[hundred];
 }
 
+let persianAudioContext = null;
+const persianAudioBuffers = new Map();
+let roomVoiceUnlockReady = false;
+
+function unlockPersianAudio() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      showToast('پخش صوت در این مرورگر پشتیبانی نمی‌شود.');
+      return false;
+    }
+    if (!persianAudioContext || persianAudioContext.state === 'closed') {
+      persianAudioContext = new AudioContextClass();
+    }
+    const context = persianAudioContext;
+    if (context.state === 'suspended') context.resume().catch(() => {});
+    // Start a tiny silent Web Audio node directly in the tap/click gesture.
+    const silent = context.createBufferSource();
+    silent.buffer = context.createBuffer(1, Math.max(1, Math.floor(context.sampleRate * 0.025)), context.sampleRate);
+    const gain = context.createGain();
+    gain.gain.value = 0;
+    silent.connect(gain);
+    gain.connect(context.destination);
+    silent.start();
+    silent.stop(context.currentTime + 0.025);
+    roomVoiceUnlockReady = true;
+    return true;
+  } catch (error) {
+    console.warn('[Dabernaz voice unlock]', error);
+    showToast('فعال‌سازی صدای دستگاه ناموفق بود؛ صدای رسانه گوشی را بررسی کن.');
+    return false;
+  }
+}
+
+async function loadPersianNumberAudio(number) {
+  const value = Math.trunc(Number(number));
+  if (!Number.isInteger(value) || value < 1 || value > 90) throw new Error('شماره صوتی معتبر نیست.');
+  if (!persianAudioContext) throw new Error('ابتدا روی دکمه فعال‌سازی صدا بزن.');
+  if (persianAudioBuffers.has(value)) return persianAudioBuffers.get(value);
+
+  const loadPromise = (async () => {
+    const response = await fetch(`/api/voice/${value}`, { method:'GET', cache:'force-cache', credentials:'same-origin' });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `دریافت فایل صوتی ناموفق بود (HTTP ${response.status}).`);
+    }
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.toLowerCase().includes('audio')) throw new Error('پاسخ سرویس صدا فایل صوتی معتبر نیست.');
+    const audioData = await response.arrayBuffer();
+    if (audioData.byteLength < 512) throw new Error('فایل صوتی دریافتی خالی است.');
+    return await persianAudioContext.decodeAudioData(audioData.slice(0));
+  })();
+  persianAudioBuffers.set(value, loadPromise);
+  try {
+    const buffer = await loadPromise;
+    persianAudioBuffers.set(value, buffer);
+    return buffer;
+  } catch (error) {
+    persianAudioBuffers.delete(value);
+    throw error;
+  }
+}
+
+async function playPersianNumberAudio(number) {
+  if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
+  if (!persianAudioContext && !unlockPersianAudio()) return false;
+  const context = persianAudioContext;
+  try {
+    if (context.state === 'suspended') await context.resume();
+    const buffer = await loadPersianNumberAudio(number);
+    if (context.state !== 'running') await context.resume();
+    const source = context.createBufferSource();
+    const gain = context.createGain();
+    source.buffer = buffer;
+    gain.gain.value = 1;
+    source.connect(gain);
+    gain.connect(context.destination);
+    source.start(0);
+    return true;
+  } catch (error) {
+    console.error('[Dabernaz Persian audio]', error);
+    showToast(error.message || 'پخش صدای فارسی انجام نشد.');
+    return false;
+  }
+}
+
 function speakRoomNumber(number, room) {
   if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) return false;
   const value = Math.trunc(Number(number));
-  if (!Number.isFinite(value) || value < 1 || value > 90) return false;
-
-  const spokenNumber = numberToPersianWords(value);
-  const text = `عدد ${spokenNumber}`;
-  const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || Date.now());
+  if (!Number.isInteger(value) || value < 1 || value > 90) return false;
+  const roundKey = String(room?.roundId || room?.startedAt || room?.registrationDeadline || 'current');
   const announcementKey = `${room?.id || activeRoomId}:${roundKey}:${value}`;
   if (announcementKey === lastSpokenRoomAnnouncementKey) return false;
   lastSpokenRoomAnnouncementKey = announcementKey;
-
-  // First choice: the device speech engine. Do not require a pre-installed Persian
-  // voice; browsers can choose their own best matching voice when voice is omitted.
-  if ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
-    try {
-      const synth = window.speechSynthesis;
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'fa-IR';
-      utterance.rate = 0.82;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-      const voices = synth.getVoices?.() || [];
-      const persianVoice = voices.find(voice => /^fa(?:[-_]|$)/i.test(voice.lang));
-      if (persianVoice) utterance.voice = persianVoice;
-
-      utterance.onstart = () => {
-        window.clearTimeout(voiceFallbackTimer);
-        voiceFallbackTimer = null;
-      };
-      utterance.onerror = () => playPersianVoiceFallback(text);
-      window.clearTimeout(voiceFallbackTimer);
-      voiceFallbackTimer = window.setTimeout(() => playPersianVoiceFallback(text), 900);
-
-      // A user click starts the test, while real game announcements can arrive later.
-      // resume() handles Android engines that remain paused after a previous utterance.
-      synth.cancel();
-      synth.resume?.();
-      synth.speak(utterance);
-      window.setTimeout(() => { if (synth.paused) synth.resume?.(); }, 120);
-
-      if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
-      return true;
-    } catch (_) {
-      // Continue to the network audio fallback below.
-    }
-  }
-
-  return playPersianVoiceFallback(text);
-}
-
-let voiceFallbackTimer = null;
-let voiceFallbackAudio = null;
-
-function playPersianVoiceFallback(text) {
-  // Audio fallback for browsers/WebViews whose installed speech engine cannot
-  // pronounce Persian. This is only used after native speech fails to start.
-  try {
-    window.clearTimeout(voiceFallbackTimer);
-    const encoded = encodeURIComponent(text);
-    const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=fa&q=${encoded}`;
-    voiceFallbackAudio?.pause?.();
-    const audio = new Audio(url);
-    audio.preload = 'auto';
-    audio.volume = 1;
-    voiceFallbackAudio = audio;
-    audio.play().catch(() => showToast('صدای فارسی در این مرورگر مسدود شده است. اجازه پخش صدا را برای سایت فعال کن.'));
-    return true;
-  } catch (_) {
-    showToast('امکان پخش اعلام صوتی فارسی در این دستگاه فراهم نشد.');
-    return false;
-  }
+  playPersianNumberAudio(value);
+  if (settingEnabled('vibration') && navigator.vibrate) navigator.vibrate(35);
+  return true;
 }
 function playSettingsTone() {
   if (!settingEnabled('sounds')) return;
@@ -564,6 +589,7 @@ function renderRoomGame() {
     <div class="room-game-live-banner"><span class="live-dot"></span><b>${isFinished?'سانس پایان یافته':'بازی در حال اجرا'}</b><span>${room.code}</span><strong>${isFinished?'نتیجه نهایی':'قرعه‌کشی خودکار'}</strong></div>
     <section class="room-panel live-preview-panel"><div class="room-panel-heading"><div><span class="eyebrow">LIVE DRAW</span><h3>تابلوی اعلام شماره‌ها</h3><p>هر شماره فقط یک بار و به ترتیب تصادفی اعلام می‌شود.</p></div><span class="tag">${isFinished?'پایان':'زنده'}</span></div>
       <div class="room-current-number"><div><small>آخرین شماره اعلام‌شده</small><b id="roomLatestNumber">${roomServerSnapshot?.latestNumber??'—'}</b></div><div class="room-draw-count"><strong id="roomDrawCount">${faDigits(roomServerSnapshot?.drawCount||0)} / ۹۰</strong><small>شماره اعلام‌شده</small></div></div>
+      <button class="btn btn-outline btn-block" type="button" data-action="enable-room-audio">فعال‌سازی صدای فارسی شماره‌ها</button>
       <div class="room-number-history" id="roomNumberHistory">${roomCalledMarkup()}</div>
       <small class="room-safe-caption">${isFinished?'این سانس به پایان رسیده است.':'قرعه‌کشی توسط سرور انجام می‌شود؛ نیازی به فشردن دکمه نیست.'}</small>
     </section>
@@ -800,7 +826,7 @@ function renderSettings() {
   return `${heading('تنظیمات', 'صدا، اعلام شماره‌ها و امکانات دستگاه را مطابق سلیقه خودت تنظیم کن.', 'PREFERENCES')}
   <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
     ${sw('sounds','صدای بازی','روشن یا خاموش کردن صداهای بازی')}
-    ${sw('voiceNumbers','اعلام صوتی شماره‌ها','خواندن خودکار هر شماره جدید در بازی دبرنا')}
+    ${sw('voiceNumbers','اعلام صوتی شماره‌ها','پخش فایل صوتی فارسی برای هر شماره؛ بدون نیاز به صدای فارسی نصب‌شده روی گوشی')}
     <div class="setting-row"><div class="setting-copy"><b>آزمایش صدا</b><small>نمونه اعلام صوتی شماره دبرنا</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
     ${sw('vibration','لرزش','بازخورد لرزشی هنگام رویدادهای بازی در دستگاه‌های پشتیبانی‌شده')}
   </section>
@@ -1246,7 +1272,7 @@ document.addEventListener('click', async event => {
     }
     return;
   }
-  if (action === 'room-open-game') { if(roomServerSnapshot?.status==='playing'){setPage('roomGame');} else showToast('این سانس هنوز شروع نشده است.'); return; }
+  if (action === 'room-open-game') { unlockPersianAudio(); if(roomServerSnapshot?.status==='playing'){setPage('roomGame');} else showToast('این سانس هنوز شروع نشده است.'); return; }
   if (action === 'room-back-lobby') { setPage(activeRoomId); return; }
   if (action === 'copy-ref') {
     try { await navigator.clipboard.writeText(state.referralCode); showToast('کد دعوت کپی شد'); }
@@ -1285,8 +1311,17 @@ document.addEventListener('click', async event => {
   else if (action === 'test-number-voice') {
     if (!settingEnabled('sounds') || !settingEnabled('voiceNumbers')) { showToast('ابتدا «صدای بازی» و «اعلام صوتی شماره‌ها» را فعال کن.'); return; }
     lastSpokenRoomAnnouncementKey = '';
-    const played = speakRoomNumber(42, {id:'settings-test',roundId:Date.now()});
-    if (played) showToast('در حال پخش: عدد چهل و دو — ابتدا موتور صدای دستگاه و در صورت نیاز صدای جایگزین فعال می‌شود.');
+    if (!unlockPersianAudio()) return;
+    showToast('در حال دریافت و پخش صدای فارسی: عدد چهل و دو');
+    playPersianNumberAudio(42);
+  }
+  else if (action === 'enable-room-audio') {
+    if (!unlockPersianAudio()) return;
+    const latest = Number(roomServerSnapshot?.latestNumber);
+    if (latest >= 1 && latest <= 90) {
+      showToast('صدای فارسی فعال شد؛ شماره بعدی هم به‌صورت صوتی اعلام می‌شود.');
+      playPersianNumberAudio(latest);
+    } else showToast('صدای فارسی فعال شد؛ با اعلام شماره بعدی آن را می‌شنوی.');
   }
   else if (action === 'test-notification') {
     if (!settingEnabled('notifications')) { showToast('ابتدا اعلان‌های دستگاه را فعال کن.'); return; }
