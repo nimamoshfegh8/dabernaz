@@ -14,7 +14,6 @@ import android.speech.tts.UtteranceProgressListener;
 import android.speech.tts.Voice;
 import android.net.Uri;
 import android.os.Build;
-import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
