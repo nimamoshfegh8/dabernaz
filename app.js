@@ -104,36 +104,58 @@ if ('speechSynthesis' in window) {
 
 function speakPersianNumberFallback(number) {
   const value = Math.trunc(Number(number));
-  if (!Number.isInteger(value) || value < 1 || value > 90 || !('speechSynthesis' in window)) {
-    return Promise.reject(new Error('موتور اعلام صوتی فارسی در این مرورگر در دسترس نیست.'));
+  if (!Number.isInteger(value) || value < 1 || value > 90 || !('speechSynthesis' in window) ||
+      typeof window.SpeechSynthesisUtterance !== 'function') {
+    return Promise.reject(new Error('موتور گفتار در این مرورگر در دسترس نیست. برای اعلام فارسی، موتور گفتار فارسی گوشی را نصب یا فعال کن.'));
   }
   refreshPersianBrowserVoices();
   const text = numberToPersianWords(value).replace(/ و /g, ' ');
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let started = false;
+    let keepAlive = null;
+    let startTimeout = null;
+    let endTimeout = null;
+    const cleanup = () => {
+      if (keepAlive) clearInterval(keepAlive);
+      if (startTimeout) clearTimeout(startTimeout);
+      if (endTimeout) clearTimeout(endTimeout);
+    };
+    const finish = (ok, error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (ok) resolve(true);
+      else reject(error || new Error('پخش صدای فارسی توسط دستگاه متوقف شد.'));
+    };
     try {
+      // IMPORTANT: callers may invoke this directly from a tap. Keep speak()
+      // synchronous here; deferring it to a Promise queue loses Android user activation.
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
+      const utterance = new window.SpeechSynthesisUtterance(text);
       utterance.lang = browserSpeechVoice?.lang || 'fa-IR';
       if (browserSpeechVoice) utterance.voice = browserSpeechVoice;
-      utterance.rate = 0.82;
+      utterance.rate = 0.84;
       utterance.pitch = 1;
       utterance.volume = 1;
-      let settled = false;
-      const finish = ok => {
-        if (settled) return;
-        settled = true;
-        ok ? resolve(true) : reject(new Error('پخش صدای فارسی توسط دستگاه متوقف شد.'));
+      utterance.onstart = () => {
+        started = true;
+        if (startTimeout) clearTimeout(startTimeout);
+        endTimeout = setTimeout(() => finish(false, new Error('موتور گفتار فارسی شروع به پخش نکرد. تنظیمات گفتار گوشی را بررسی کن.')), 12000);
       };
       utterance.onend = () => finish(true);
-      utterance.onerror = () => finish(false);
+      utterance.onerror = event => finish(false, new Error(event?.error || 'پخش صدای فارسی توسط دستگاه متوقف شد.'));
       window.speechSynthesis.speak(utterance);
-      // Android/Chrome occasionally pauses queued speech after a navigation/render.
-      const keepAlive = setInterval(() => {
-        if (settled) return clearInterval(keepAlive);
+      startTimeout = setTimeout(() => {
+        if (!started) finish(false, new Error('گفتار فارسی گوشی در دسترس نیست یا اجازه پخش ندارد.'));
+      }, 3500);
+      keepAlive = setInterval(() => {
+        if (settled) return cleanup();
         if (window.speechSynthesis.paused) window.speechSynthesis.resume();
       }, 250);
-      setTimeout(() => { clearInterval(keepAlive); if (!settled && !window.speechSynthesis.speaking) finish(true); }, 8000);
-    } catch (error) { reject(error); }
+    } catch (error) {
+      finish(false, error);
+    }
   });
 }
 
@@ -1012,7 +1034,7 @@ function renderSettings() {
   <section class="setting-group"><h3 class="settings-title">صدا و بازی</h3>
     ${sw('sounds','صدای بازی','روشن یا خاموش کردن بازخوردهای صوتی بازی')}
     ${voiceControl}
-    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${voicePackReady ? 'پخش عبارت «چهل و دو» با صدای Sage Woman' : 'پس از بارگذاری بسته کامل صدای Sage Woman فعال می‌شود'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice" ${voicePackReady ? '' : 'disabled'}>تست</button></div>
+    <div class="setting-row"><div class="setting-copy"><b>آزمایش صدای شماره ۴۲</b><small>${voicePackReady ? 'پخش عبارت «چهل دو» با صدای Sage Woman' : 'پخش فوری «چهل دو» با موتور گفتار فارسی گوشی'}</small></div><button class="btn btn-outline" type="button" data-action="test-number-voice">تست</button></div>
     ${sw('vibration','لرزش','بازخورد لرزشی در دستگاه‌های پشتیبانی‌شده')}
   </section>
   <section class="setting-group"><h3 class="settings-title">اعلان‌های دستگاه</h3>
@@ -1501,26 +1523,43 @@ document.addEventListener('click', async event => {
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
   else if (action === 'test-number-voice') {
-    // This runs directly inside the user's tap, which Android requires for media/speech.
+    // Start SpeechSynthesis synchronously in this trusted click event. On Android,
+    // deferring speak() through fetch/decodeAudioData/Promise queues can lose activation.
     lastSpokenRoomAnnouncementKey = '';
     voicePlaybackErrorShown = false;
-    if (!settingEnabled('sounds')) { state.settings.sounds = true; saveState(); }
-    if (!settingEnabled('voiceNumbers')) { state.settings.voiceNumbers = true; saveState(); }
-    unlockPersianAudio();
+    state.settings.sounds = true;
+    state.settings.voiceNumbers = true;
+    saveState();
     refreshPersianBrowserVoices();
     showToast('در حال پخش نمونه: چهل دو');
-    const ok = await playPersianNumberAudio(42);
-    if (!ok) showToast('تست صدا انجام نشد؛ صدای رسانه گوشی و موتور گفتار فارسی مرورگر را بررسی کن.');
+    const testPromise = speakPersianNumberFallback(42);
+    const ok = await testPromise.catch(error => {
+      console.warn('[Dabernaz direct voice test]', error);
+      showToast(error.message || 'پخش گفتار فارسی انجام نشد.');
+      return false;
+    });
+    if (ok) showToast('تست صدای فارسی با موفقیت پخش شد.');
     renderSettingsIntoView();
   }
   else if (action === 'enable-room-audio') {
     unlockPersianAudio();
     refreshPersianBrowserVoices();
+    state.settings.sounds = true;
+    state.settings.voiceNumbers = true;
+    saveState();
     const latest = Number(roomServerSnapshot?.latestNumber);
     if (latest >= 1 && latest <= 90) {
       showToast('صدای فارسی فعال شد؛ شماره فعلی پخش می‌شود.');
-      playPersianNumberAudio(latest);
-    } else showToast('صدای فارسی فعال شد؛ با اعلام شماره بعدی آن را می‌شنوی.');
+      // Same direct gesture path as the test button, to unlock Android TTS.
+      speakPersianNumberFallback(latest).catch(error => showToast(error.message));
+    } else {
+      // Prime speech output from the user's tap; subsequent numbers use the same engine.
+      const prime = new window.SpeechSynthesisUtterance(' ');
+      prime.lang = browserSpeechVoice?.lang || 'fa-IR';
+      prime.volume = 0;
+      try { window.speechSynthesis.cancel(); window.speechSynthesis.speak(prime); } catch (_) {}
+      showToast('صدای فارسی فعال شد؛ شماره بعدی به‌صورت صوتی اعلام می‌شود.');
+    }
   }
   else if (action === 'test-notification') {
     if (!settingEnabled('notifications')) { showToast('ابتدا اعلان‌های دستگاه را فعال کن.'); return; }
