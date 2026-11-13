@@ -1033,6 +1033,69 @@ async function advanceServerGame(db,user,request,path) {
   return null;
 }
 
+function persianNumberWords(number) {
+  const value = Math.trunc(Number(number));
+  if (!Number.isInteger(value) || value < 0 || value > 90) return '';
+  const units = ['صفر','یک','دو','سه','چهار','پنج','شش','هفت','هشت','نه'];
+  const teens = ['ده','یازده','دوازده','سیزده','چهارده','پانزده','شانزده','هفده','هجده','نوزده'];
+  const tens = ['','','بیست','سی','چهل','پنجاه','شصت','هفتاد','هشتاد','نود'];
+  if (value < 10) return units[value];
+  if (value < 20) return teens[value - 10];
+  const ten = Math.floor(value / 10);
+  const unit = value % 10;
+  return unit ? `${tens[ten]} و ${units[unit]}` : tens[ten];
+}
+
+async function getPersianNumberAudio(number) {
+  const spokenText = `عدد ${persianNumberWords(number)}`;
+  const upstreamUrl = new URL('https://translate.google.com/translate_tts');
+  upstreamUrl.searchParams.set('ie', 'UTF-8');
+  upstreamUrl.searchParams.set('client', 'tw-ob');
+  upstreamUrl.searchParams.set('tl', 'fa');
+  upstreamUrl.searchParams.set('q', spokenText);
+
+  const cacheKey = new Request(`https://dabernaz-voice-cache.invalid/fa/number/${number}`, { method: 'GET' });
+  const edgeCache = globalThis.caches?.default;
+  if (edgeCache) {
+    try {
+      const cached = await edgeCache.match(cacheKey);
+      if (cached) return cached;
+    } catch (_) { /* Continue to origin when cache is unavailable. */ }
+  }
+
+  const upstream = await fetch(upstreamUrl.toString(), {
+    method: 'GET',
+    headers: {
+      'accept': 'audio/mpeg,audio/*;q=0.9,*/*;q=0.1',
+      'user-agent': 'Mozilla/5.0 (compatible; DabernazVoice/1.0)',
+      'referer': 'https://translate.google.com/',
+    },
+    cf: { cacheTtl: 86400, cacheEverything: true },
+  });
+  const contentType = upstream.headers.get('content-type') || '';
+  if (!upstream.ok || !contentType.toLowerCase().includes('audio')) {
+    throw new Error(`Persian voice provider returned HTTP ${upstream.status} (${contentType || 'unknown content type'})`);
+  }
+  const audio = await upstream.arrayBuffer();
+  if (audio.byteLength < 512) throw new Error('Persian voice provider returned an empty audio clip.');
+
+  const response = new Response(audio, {
+    status: 200,
+    headers: {
+      'content-type': 'audio/mpeg',
+      'content-length': String(audio.byteLength),
+      'cache-control': 'public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400',
+      'content-disposition': `inline; filename="dabernaz-fa-${number}.mp3"`,
+      'x-content-type-options': 'nosniff',
+      'access-control-allow-origin': '*',
+    },
+  });
+  if (edgeCache) {
+    try { await edgeCache.put(cacheKey, response.clone()); } catch (_) {}
+  }
+  return response;
+}
+
 async function routeRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -1047,6 +1110,34 @@ async function routeRequest(request, env) {
   if (request.method === 'GET' && path === '/api/health') {
     if (!env.DB) return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'missing', mode: 'misconfigured' }, 503);
     return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', binding: 'bound', mode: 'ready' });
+  }
+
+  // Audio is generated server-side, so mobile browsers do not need a Persian
+  // system voice, and the client only fetches same-origin MP3 data.
+  const voiceMatch = path.match(/^\/api\/voice\/(\d{1,2})$/);
+  if (request.method === 'GET' && voiceMatch) {
+    const number = Number(voiceMatch[1]);
+    if (!Number.isInteger(number) || number < 1 || number > 90) throw new HttpError(400, 'شماره صوتی باید بین ۱ تا ۹۰ باشد.');
+    try {
+      return await getPersianNumberAudio(number);
+    } catch (error) {
+      console.error('[dabernaz-voice-error]', String(error?.message || error));
+      return json({ ok: false, error: 'سرویس ساخت صدای فارسی موقتاً در دسترس نیست.' }, 502);
+    }
+  }
+
+  if (request.method === 'GET' && path === '/api/voice/health') {
+    try {
+      const response = await getPersianNumberAudio(42);
+      return json({
+        ok: true,
+        provider: 'server-side-persian-mp3',
+        contentType: response.headers.get('content-type'),
+        bytes: Number(response.headers.get('content-length')) || null,
+      });
+    } catch (error) {
+      return json({ ok: false, provider: 'server-side-persian-mp3', error: String(error?.message || error) }, 502);
+    }
   }
 
   if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
