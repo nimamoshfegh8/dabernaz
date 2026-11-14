@@ -3,7 +3,8 @@
   "provider": "kenerate-sage-woman",
   "voice": "Sage Woman",
   "language": "fa-IR",
-  "configured": false,
+  "configured": true,
   "requiredNumbers": 90,
-  "numbers": {}
+  "numbers": {},
+  "audioDurationSeconds": 138.52725
 }
