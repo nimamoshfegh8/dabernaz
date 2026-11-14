@@ -4,7 +4,7 @@ const STORAGE_KEY = 'dabernaz_state_v1';
 const cloneData = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const defaultState = {
   username: '', memberId: '', balance: 0, joined: [], transactions: [],
-  settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 4, notifications: false, vibration: false },
+  settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 5, notifications: false, vibration: false },
   referralCode: '', gamesPlayed: 0, wins: 0, points: 0,
   bingoCoins: 0, coinTransactions: [], inviteCount: 0, inviteRewardMilestones: [],
   roomHistory: [], supportTickets: [], tournamentRooms: []
@@ -29,8 +29,8 @@ function loadState() {
       settings: (() => {
         const previous = saved.settings && typeof saved.settings === 'object' ? saved.settings : {};
         const merged = { ...defaultState.settings, ...previous };
-        if (Number(previous.voiceAudioVersion) !== 4) merged.voiceNumbers = false;
-        merged.voiceAudioVersion = 4;
+        if (!Number.isFinite(Number(previous.voiceAudioVersion)) || Number(previous.voiceAudioVersion) < 4) merged.voiceNumbers = false;
+        merged.voiceAudioVersion = 5;
         return merged;
       })()
     };
@@ -252,7 +252,7 @@ async function loadPersianNumberAudio(number) {
   if (!persianAudioAssetPromise) {
     const loading = (async () => {
       const base = new URL('./assets/voice/', document.baseURI);
-      const manifestResponse = await fetch(new URL('sage-woman.json?v=4', base), {
+      const manifestResponse = await fetch(new URL('sage-woman.json?v=5', base), {
         method: 'GET', cache: 'no-store', credentials: 'same-origin'
       });
       if (!manifestResponse.ok) throw new Error('مانیفست صدای Sage Woman دریافت نشد.');
@@ -264,7 +264,7 @@ async function loadPersianNumberAudio(number) {
         throw new Error('بستهٔ کامل ۹۰ شماره با صدای Sage Woman نصب نشده است.');
       }
 
-      const audioResponse = await fetch(new URL('sage-woman.mp3?v=4', base), {
+      const audioResponse = await fetch(new URL('sage-woman.mp3?v=5', base), {
         method: 'GET', cache: 'no-store', credentials: 'same-origin'
       });
       if (!audioResponse.ok) throw new Error('فایل MP3 صدای Sage Woman دریافت نشد.');
@@ -312,8 +312,8 @@ async function checkPersianVoicePack() {
     try {
       const base = new URL('./assets/voice/', document.baseURI);
       const [manifestResponse, audioHead] = await Promise.all([
-        fetch(new URL('sage-woman.json?v=4', base), { cache: 'no-store', credentials: 'same-origin' }),
-        fetch(new URL('sage-woman.mp3?v=4', base), { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' })
+        fetch(new URL('sage-woman.json?v=5', base), { cache: 'no-store', credentials: 'same-origin' }),
+        fetch(new URL('sage-woman.mp3?v=5', base), { method: 'HEAD', cache: 'no-store', credentials: 'same-origin' })
       ]);
       if (!manifestResponse.ok || !audioHead.ok) throw new Error('Sage Woman audio files are missing');
       const manifest = await manifestResponse.json();
@@ -1188,7 +1188,7 @@ function renderSettings() {
   </section>
   <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
     <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
-    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.18.0</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.19.0</span></div>
   </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
