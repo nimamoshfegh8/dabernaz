@@ -1,10 +1,555 @@
 {
-  "version": 2,
+  "version": 3,
   "provider": "kenerate-sage-woman",
   "voice": "Sage Woman",
   "language": "fa-IR",
   "configured": true,
   "requiredNumbers": 90,
-  "numbers": {},
-  "audioDurationSeconds": 138.52725
+  "audioFormat": "mp3",
+  "sampleRate": 22050,
+  "channels": 1,
+  "gapSeconds": 0.18,
+  "audioDurationSeconds": 138.52725,
+  "numbers": {
+    "1": {
+      "start": 0,
+      "duration": 0.775556,
+      "text": "یک",
+      "source": "001.mp3"
+    },
+    "2": {
+      "start": 0.955556,
+      "duration": 0.704354,
+      "text": "دو",
+      "source": "002.mp3"
+    },
+    "3": {
+      "start": 1.839909,
+      "duration": 0.867075,
+      "text": "سه",
+      "source": "003.mp3"
+    },
+    "4": {
+      "start": 2.886984,
+      "duration": 1.028934,
+      "text": "چهار",
+      "source": "004.mp3"
+    },
+    "5": {
+      "start": 4.095918,
+      "duration": 0.919456,
+      "text": "پنج",
+      "source": "005.mp3"
+    },
+    "6": {
+      "start": 5.195374,
+      "duration": 0.851247,
+      "text": "شش",
+      "source": "006.mp3"
+    },
+    "7": {
+      "start": 6.226621,
+      "duration": 0.839093,
+      "text": "هفت",
+      "source": "007.mp3"
+    },
+    "8": {
+      "start": 7.245714,
+      "duration": 0.835057,
+      "text": "هشت",
+      "source": "008.mp3"
+    },
+    "9": {
+      "start": 8.260771,
+      "duration": 0.772971,
+      "text": "نه",
+      "source": "009.mp3"
+    },
+    "10": {
+      "start": 9.213741,
+      "duration": 0.721315,
+      "text": "ده",
+      "source": "010.mp3"
+    },
+    "11": {
+      "start": 10.115057,
+      "duration": 1.056009,
+      "text": "یازده",
+      "source": "011.mp3"
+    },
+    "12": {
+      "start": 11.351066,
+      "duration": 1.12576,
+      "text": "دوازده",
+      "source": "012.mp3"
+    },
+    "13": {
+      "start": 12.656825,
+      "duration": 1.07873,
+      "text": "سیزده",
+      "source": "013.mp3"
+    },
+    "14": {
+      "start": 13.915556,
+      "duration": 1.207302,
+      "text": "چهارده",
+      "source": "014.mp3"
+    },
+    "15": {
+      "start": 15.302857,
+      "duration": 1.140091,
+      "text": "پانزده",
+      "source": "015.mp3"
+    },
+    "16": {
+      "start": 16.622948,
+      "duration": 1.177642,
+      "text": "شانزده",
+      "source": "016.mp3"
+    },
+    "17": {
+      "start": 17.98059,
+      "duration": 0.983583,
+      "text": "هفده",
+      "source": "017.mp3"
+    },
+    "18": {
+      "start": 19.144172,
+      "duration": 1.035646,
+      "text": "هجده",
+      "source": "018.mp3"
+    },
+    "19": {
+      "start": 20.359819,
+      "duration": 1.142494,
+      "text": "نوزده",
+      "source": "019.mp3"
+    },
+    "20": {
+      "start": 21.682313,
+      "duration": 0.851791,
+      "text": "بیست",
+      "source": "020.mp3"
+    },
+    "21": {
+      "start": 22.714104,
+      "duration": 1.319955,
+      "text": "بیست یک",
+      "source": "021.mp3"
+    },
+    "22": {
+      "start": 24.214059,
+      "duration": 1.32195,
+      "text": "بیست دو",
+      "source": "022.mp3"
+    },
+    "23": {
+      "start": 25.716009,
+      "duration": 1.422086,
+      "text": "بیست سه",
+      "source": "023.mp3"
+    },
+    "24": {
+      "start": 27.318095,
+      "duration": 1.574694,
+      "text": "بیست چهار",
+      "source": "024.mp3"
+    },
+    "25": {
+      "start": 29.072789,
+      "duration": 1.465351,
+      "text": "بیست پنج",
+      "source": "025.mp3"
+    },
+    "26": {
+      "start": 30.718141,
+      "duration": 1.405941,
+      "text": "بیست شش",
+      "source": "026.mp3"
+    },
+    "27": {
+      "start": 32.304082,
+      "duration": 1.39356,
+      "text": "بیست هفت",
+      "source": "027.mp3"
+    },
+    "28": {
+      "start": 33.877642,
+      "duration": 1.389524,
+      "text": "بیست هشت",
+      "source": "028.mp3"
+    },
+    "29": {
+      "start": 35.447166,
+      "duration": 1.325079,
+      "text": "بیست نه",
+      "source": "029.mp3"
+    },
+    "30": {
+      "start": 36.952245,
+      "duration": 0.811927,
+      "text": "سی",
+      "source": "030.mp3"
+    },
+    "31": {
+      "start": 37.944172,
+      "duration": 1.27229,
+      "text": "سی یک",
+      "source": "031.mp3"
+    },
+    "32": {
+      "start": 39.396463,
+      "duration": 1.287483,
+      "text": "سی دو",
+      "source": "032.mp3"
+    },
+    "33": {
+      "start": 40.863946,
+      "duration": 1.376281,
+      "text": "سی سه",
+      "source": "033.mp3"
+    },
+    "34": {
+      "start": 42.420227,
+      "duration": 1.527483,
+      "text": "سی چهار",
+      "source": "034.mp3"
+    },
+    "35": {
+      "start": 44.12771,
+      "duration": 1.428571,
+      "text": "سی پنج",
+      "source": "035.mp3"
+    },
+    "36": {
+      "start": 45.736281,
+      "duration": 1.360499,
+      "text": "سی شش",
+      "source": "036.mp3"
+    },
+    "37": {
+      "start": 47.27678,
+      "duration": 1.348073,
+      "text": "سی هفت",
+      "source": "037.mp3"
+    },
+    "38": {
+      "start": 48.804853,
+      "duration": 1.344036,
+      "text": "سی هشت",
+      "source": "038.mp3"
+    },
+    "39": {
+      "start": 50.328889,
+      "duration": 1.269751,
+      "text": "سی نه",
+      "source": "039.mp3"
+    },
+    "40": {
+      "start": 51.778639,
+      "duration": 0.971837,
+      "text": "چهل",
+      "source": "040.mp3"
+    },
+    "41": {
+      "start": 52.930476,
+      "duration": 1.504671,
+      "text": "چهل یک",
+      "source": "041.mp3"
+    },
+    "42": {
+      "start": 54.615147,
+      "duration": 1.507029,
+      "text": "چهل دو",
+      "source": "042.mp3"
+    },
+    "43": {
+      "start": 56.302177,
+      "duration": 1.608707,
+      "text": "چهل سه",
+      "source": "043.mp3"
+    },
+    "44": {
+      "start": 58.090884,
+      "duration": 1.759365,
+      "text": "چهل چهار",
+      "source": "044.mp3"
+    },
+    "45": {
+      "start": 60.030249,
+      "duration": 1.660454,
+      "text": "چهل پنج",
+      "source": "045.mp3"
+    },
+    "46": {
+      "start": 61.870703,
+      "duration": 1.59229,
+      "text": "چهل شش",
+      "source": "046.mp3"
+    },
+    "47": {
+      "start": 63.642993,
+      "duration": 1.580091,
+      "text": "چهل هفت",
+      "source": "047.mp3"
+    },
+    "48": {
+      "start": 65.403084,
+      "duration": 1.576054,
+      "text": "چهل هشت",
+      "source": "048.mp3"
+    },
+    "49": {
+      "start": 67.159138,
+      "duration": 1.501633,
+      "text": "چهل نه",
+      "source": "049.mp3"
+    },
+    "50": {
+      "start": 68.840771,
+      "duration": 1.006032,
+      "text": "پنجاه",
+      "source": "050.mp3"
+    },
+    "51": {
+      "start": 70.026803,
+      "duration": 1.517234,
+      "text": "پنجاه یک",
+      "source": "051.mp3"
+    },
+    "52": {
+      "start": 71.724036,
+      "duration": 1.531383,
+      "text": "پنجاه دو",
+      "source": "052.mp3"
+    },
+    "53": {
+      "start": 73.43542,
+      "duration": 1.621723,
+      "text": "پنجاه سه",
+      "source": "053.mp3"
+    },
+    "54": {
+      "start": 75.237143,
+      "duration": 1.771293,
+      "text": "پنجاه چهار",
+      "source": "054.mp3"
+    },
+    "55": {
+      "start": 77.188435,
+      "duration": 1.673968,
+      "text": "پنجاه پنج",
+      "source": "055.mp3"
+    },
+    "56": {
+      "start": 79.042404,
+      "duration": 1.604127,
+      "text": "پنجاه شش",
+      "source": "056.mp3"
+    },
+    "57": {
+      "start": 80.826531,
+      "duration": 1.591791,
+      "text": "پنجاه هفت",
+      "source": "057.mp3"
+    },
+    "58": {
+      "start": 82.598322,
+      "duration": 1.587755,
+      "text": "پنجاه هشت",
+      "source": "058.mp3"
+    },
+    "59": {
+      "start": 84.366077,
+      "duration": 1.513923,
+      "text": "پنجاه نه",
+      "source": "059.mp3"
+    },
+    "60": {
+      "start": 86.06,
+      "duration": 0.871655,
+      "text": "شصت",
+      "source": "060.mp3"
+    },
+    "61": {
+      "start": 87.111655,
+      "duration": 1.399229,
+      "text": "شصت یک",
+      "source": "061.mp3"
+    },
+    "62": {
+      "start": 88.690884,
+      "duration": 1.413379,
+      "text": "شصت دو",
+      "source": "062.mp3"
+    },
+    "63": {
+      "start": 90.284263,
+      "duration": 1.513197,
+      "text": "شصت سه",
+      "source": "063.mp3"
+    },
+    "64": {
+      "start": 91.97746,
+      "duration": 1.664399,
+      "text": "شصت چهار",
+      "source": "064.mp3"
+    },
+    "65": {
+      "start": 93.821859,
+      "duration": 1.554785,
+      "text": "شصت پنج",
+      "source": "065.mp3"
+    },
+    "66": {
+      "start": 95.556644,
+      "duration": 1.496871,
+      "text": "شصت شش",
+      "source": "066.mp3"
+    },
+    "67": {
+      "start": 97.233515,
+      "duration": 1.484444,
+      "text": "شصت هفت",
+      "source": "067.mp3"
+    },
+    "68": {
+      "start": 98.897959,
+      "duration": 1.480408,
+      "text": "شصت هشت",
+      "source": "068.mp3"
+    },
+    "69": {
+      "start": 100.558367,
+      "duration": 1.3961,
+      "text": "شصت نه",
+      "source": "069.mp3"
+    },
+    "70": {
+      "start": 102.134467,
+      "duration": 1.029342,
+      "text": "هفتاد",
+      "source": "070.mp3"
+    },
+    "71": {
+      "start": 103.34381,
+      "duration": 1.569478,
+      "text": "هفتاد یک",
+      "source": "071.mp3"
+    },
+    "72": {
+      "start": 105.093288,
+      "duration": 1.571791,
+      "text": "هفتاد دو",
+      "source": "072.mp3"
+    },
+    "73": {
+      "start": 106.845079,
+      "duration": 1.673968,
+      "text": "هفتاد سه",
+      "source": "073.mp3"
+    },
+    "74": {
+      "start": 108.699048,
+      "duration": 1.824127,
+      "text": "هفتاد چهار",
+      "source": "074.mp3"
+    },
+    "75": {
+      "start": 110.703175,
+      "duration": 1.726213,
+      "text": "هفتاد پنج",
+      "source": "075.mp3"
+    },
+    "76": {
+      "start": 112.609388,
+      "duration": 1.657052,
+      "text": "هفتاد شش",
+      "source": "076.mp3"
+    },
+    "77": {
+      "start": 114.44644,
+      "duration": 1.644853,
+      "text": "هفتاد هفت",
+      "source": "077.mp3"
+    },
+    "78": {
+      "start": 116.271293,
+      "duration": 1.640816,
+      "text": "هفتاد هشت",
+      "source": "078.mp3"
+    },
+    "79": {
+      "start": 118.092109,
+      "duration": 1.566395,
+      "text": "هفتاد نه",
+      "source": "079.mp3"
+    },
+    "80": {
+      "start": 119.838503,
+      "duration": 1.025306,
+      "text": "هشتاد",
+      "source": "080.mp3"
+    },
+    "81": {
+      "start": 121.04381,
+      "duration": 1.565397,
+      "text": "هشتاد یک",
+      "source": "081.mp3"
+    },
+    "82": {
+      "start": 122.789206,
+      "duration": 1.569478,
+      "text": "هشتاد دو",
+      "source": "082.mp3"
+    },
+    "83": {
+      "start": 124.538685,
+      "duration": 1.669433,
+      "text": "هشتاد سه",
+      "source": "083.mp3"
+    },
+    "84": {
+      "start": 126.388118,
+      "duration": 1.820091,
+      "text": "هشتاد چهار",
+      "source": "084.mp3"
+    },
+    "85": {
+      "start": 128.388209,
+      "duration": 1.721179,
+      "text": "هشتاد پنج",
+      "source": "085.mp3"
+    },
+    "86": {
+      "start": 130.289388,
+      "duration": 1.653016,
+      "text": "هشتاد شش",
+      "source": "086.mp3"
+    },
+    "87": {
+      "start": 132.122404,
+      "duration": 1.640816,
+      "text": "هشتاد هفت",
+      "source": "087.mp3"
+    },
+    "88": {
+      "start": 133.94322,
+      "duration": 1.63678,
+      "text": "هشتاد هشت",
+      "source": "088.mp3"
+    },
+    "89": {
+      "start": 135.76,
+      "duration": 1.562358,
+      "text": "هشتاد نه",
+      "source": "089.mp3"
+    },
+    "90": {
+      "start": 137.502358,
+      "duration": 0.954649,
+      "text": "نود",
+      "source": "090.mp3"
+    }
+  }
 }
