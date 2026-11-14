@@ -17,6 +17,9 @@ assert.match(app, /playEffectTone\(\)/);
 assert.match(app, /supportsPlayback\(\)/);
 assert.match(app, /speak\(number, options = \{\}\)/);
 assert.match(app, /DabernazNativeTTS/);
+assert.match(app, /voiceAudioVersion:\s*5/);
+assert.match(app, /sage-woman\.json\?v=5/);
+assert.match(app, /sage-woman\.mp3\?v=5/);
 assert.match(app, /synth\.speak\(utterance\)/);
 
 const testActionStart = app.indexOf("else if (action === 'test-number-voice')");
@@ -42,11 +45,11 @@ assert.match(android, /TextToSpeech\.QUEUE_ADD/);
 assert.match(android, /nativeTtsReady = true/);
 assert.match(android, /setOnUtteranceProgressListener/);
 
-assert.match(index, /app\.js\?v=4\.18\.0/);
-assert.match(sw, /dabernaz-shell-v20/);
-assert.match(sw, /app\.js\?v=4\.18\.0/);
-assert.match(swRegister, /sw\.js\?v=11/);
-assert.match(app, /4\.18\.0/);
+assert.match(index, /app\.js\?v=4\.19\.0/);
+assert.match(sw, /dabernaz-shell-v21/);
+assert.match(sw, /app\.js\?v=4\.19\.0/);
+assert.match(swRegister, /sw\.js\?v=12/);
+assert.match(app, /4\.19\.0/);
 
 assert.match(voiceScript, /چهل دو/);
 assert.doesNotMatch(voiceScript, /چهل و دو/);
