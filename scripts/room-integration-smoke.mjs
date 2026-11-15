@@ -181,7 +181,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const sixthCardResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
     method: 'POST',
     headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
-    body: JSON.stringify({ cardsCount: 1 }),
+    body: JSON.stringify({ cardsCount: 1, purchaseConfirmed: true }),
   });
   assert.equal(sixthCardResponse.status, 409, roomId + ': sixth card must be rejected');
   assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeSixthCard,
@@ -266,7 +266,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const latePurchase = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
     method: 'POST',
     headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
-    body: JSON.stringify({ cardsCount: 1 }),
+    body: JSON.stringify({ cardsCount: 1, purchaseConfirmed: true }),
   });
   assert.equal(latePurchase.status, 409, roomId + ': purchases after the timer must be rejected');
 
