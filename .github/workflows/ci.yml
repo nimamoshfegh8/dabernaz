@@ -57,7 +57,7 @@ jobs:
             "name": "dabernaz-ci",
             "compatibility_date": "2026-11-06",
             "pages_build_output_dir": "./dist",
-            "vars": { "DABERNAZ_TEST_DIAGNOSTICS": "1" },
+            "vars": { "DABERNAZ_TEST_DIAGNOSTICS": "1", "SUPPORT_ADMIN_MEMBER_IDS": "999999" },
             "d1_databases": [
               {
                 "binding": "DB",
@@ -97,6 +97,12 @@ jobs:
 
           cat /tmp/dabernaz-health.json
           if ! BASE_URL=http://127.0.0.1:8788 node scripts/room-integration-smoke.mjs; then
+            echo '--- Cloudflare Pages local runtime logs ---'
+            cat /tmp/dabernaz-pages.log
+            exit 1
+          fi
+
+          if ! BASE_URL=http://127.0.0.1:8788 node scripts/manual-wallet-smoke.mjs; then
             echo '--- Cloudflare Pages local runtime logs ---'
             cat /tmp/dabernaz-pages.log
             exit 1
