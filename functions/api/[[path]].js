@@ -1568,7 +1568,13 @@ async function myRecurringTournamentData(db, userId) {
     delete event.current_round.line_winner_ids;
     delete event.current_round.full_winner_ids;
   }
-  return { events, entries: ownedEntries, rooms: events };
+  const wallet = await db.prepare("SELECT bingo_coins FROM users WHERE id=?").bind(userId).first();
+  return {
+    events,
+    entries: ownedEntries,
+    rooms: events,
+    bingo_coins: Number(wallet && wallet.bingo_coins) || 0
+  };
 }
 
 
