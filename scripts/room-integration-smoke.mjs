@@ -421,6 +421,40 @@ assert.equal(duplicateTournament.status, 409, 'duplicate tournament entry must b
 assert.equal(Number((await accountMe(accounts[0])).bingoCoins), Number(tournamentBalance.bingoCoins),
   'duplicate tournament entry must not deduct BGC');
 
+// A scheduled simple cup with five entries must start its server-owned Bingo round,
+// assign a private 3x9 card to each entry, and keep card data out of the public lobby.
+for (const account of accounts.slice(1, 5)) {
+  const extraEntry = await request('/api/tournaments/register', {
+    account, method: 'POST', body: { type: 'simple' },
+  });
+  assert.equal(extraEntry.tournament, 'simple');
+}
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', "UPDATE tournament_events SET scheduled_at = datetime('now', '-1 second') WHERE id = (SELECT id FROM tournament_events WHERE tournament_type='simple' AND status='registration' ORDER BY scheduled_at LIMIT 1)",
+], { stdio: 'inherit' });
+
+const publicLiveLobby = await request('/api/tournaments');
+const publicLiveSimple = publicLiveLobby.rooms.find(room => room.tournament_type === 'simple');
+assert.ok(publicLiveSimple, 'public lobby must preserve the simple tournament event');
+assert.equal(publicLiveSimple.status, 'running', 'five registered players must start the tournament');
+assert.equal(Object.hasOwn(publicLiveSimple, 'current_round'), false,
+  'public tournament data must not expose private player cards or active draw state');
+assert.equal(Object.hasOwn(publicLiveSimple, 'top_players'), false,
+  'public tournament data must not expose player identities or scores');
+
+const privateTournament = await request('/api/tournaments/me', { account: accounts[0] });
+const privateSimple = privateTournament.rooms.find(room => room.tournament_type === 'simple');
+assert.ok(privateSimple && privateSimple.current_round, 'registered players must receive the active round snapshot');
+assert.equal(privateSimple.my_card.length, 3, 'each player must receive a private 3-row card');
+assert.ok(privateSimple.my_card.every(row => row.length === 9), 'private card must have 9 columns');
+const privateNumbers = privateSimple.my_card.flat().filter(Number.isInteger);
+assert.equal(privateNumbers.length, 15, 'private card must contain exactly 15 numbers');
+assert.equal(new Set(privateNumbers).size, 15, 'private card numbers must be unique');
+assert.equal(privateSimple.my_matched_count, 0, 'newly created card starts with no matched numbers');
+
+
 // Client-supplied outcomes are rejected; only server-computed game sessions count.
 const statsBefore = await accountMe(accounts[0]);
 const forgedResult = await fetch(baseUrl + '/api/games/result', {

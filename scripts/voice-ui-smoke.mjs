@@ -58,6 +58,9 @@ assert.match(android, /versionName '4\.21\.0'/);
 assert.match(voiceScript, /چهل دو/);
 assert.doesNotMatch(voiceScript, /چهل و دو/);
 assert.match(app, /numberToPersianSpeechText\(number\)/);
+assert.match(app, /tour-my-card-grid/);
+assert.match(app, /room\.my_card/);
+assert.match(app, /tour-my-card-stats/);
 assert.match(validator, /process\.exitCode = 1/);
 
 const currentManifest = JSON.parse(manifest);
