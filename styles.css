@@ -596,3 +596,115 @@
  .tour-step-grid{grid-template-columns:1fr}.tour-next-cup{align-items:flex-start;flex-direction:column}
  .tour-tabs{width:100%}.tour-tabs button{flex:1}
 }
+
+
+/* Live weekly/monthly tournament panels */
+.tour-live-panel {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(218, 174, 91, .22);
+  border-radius: 16px;
+  background: linear-gradient(145deg, rgba(18, 26, 43, .96), rgba(9, 14, 25, .98));
+  color: #f4f0e6;
+}
+.tour-live-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.tour-live-heading small {
+  display: block;
+  color: #d6b46d;
+  font-size: 9px;
+  letter-spacing: .12em;
+}
+.tour-live-heading h3 {
+  margin: 3px 0 0;
+  color: #fff;
+  font-size: 15px;
+}
+.tour-live-state {
+  color: #8fd6ae;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.tour-live-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 3px;
+  min-height: 116px;
+  border: 1px solid rgba(214, 180, 109, .3);
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 30%, rgba(214, 180, 109, .18), transparent 65%), rgba(0,0,0,.18);
+}
+.tour-live-number small,
+.tour-live-number span {
+  color: #c7c0b1;
+  font-size: 10px;
+}
+.tour-live-number b {
+  color: #f4cf7a;
+  font-size: 46px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.tour-called-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.tour-called-list span {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 50px;
+  background: rgba(255,255,255,.055);
+  color: #e8e0d0;
+  font-size: 11px;
+}
+.tour-live-leaders {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid rgba(255,255,255,.09);
+}
+.tour-live-leaders > b {
+  display: block;
+  margin-bottom: 8px;
+  color: #e9c77f;
+  font-size: 11px;
+}
+.tour-live-leaders ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tour-live-leaders li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+}
+.tour-live-leaders li > b,
+.tour-live-leaders li > span {
+  color: #eee7d8;
+}
+.tour-live-leaders li > span {
+  color: #d6b46d;
+  white-space: nowrap;
+}
+.tour-winner-notice {
+  margin: 10px 0 0;
+  color: #f6d889;
+  font-size: 11px;
+}
