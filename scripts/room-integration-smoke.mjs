@@ -672,6 +672,33 @@ assert.equal(refundedTournament.events.find(event => event.id === refundFixtureI
 assert.equal(Number(refundedTournament.events.find(event => event.id === refundFixtureId)?.prize_pool), 0,
   'a cancelled and fully refunded tournament must show no remaining prize pool');
 
+// Old cancelled events that have already refunded everyone must not fill the
+// scheduler's work queue and starve a new tournament that is due to start.
+const schedulerProbeId = 'scheduler-probe-' + runId;
+const schedulerBacklogSql = [
+  ...Array.from({ length: 13 }, (_, index) =>
+    "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,created_at,updated_at) VALUES ('cancelled-backlog-" +
+      runId + "-" + index + "','simple',datetime('now','-" + (40 + index) + " days'),datetime('now','-" + (47 + index) + " days'),'cancelled',0,30,0,5,'cancelled','[]',1,1,datetime('now'),datetime('now'))"
+  ),
+  "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,created_at,updated_at) VALUES ('" +
+    schedulerProbeId + "','simple',datetime('now','-1 second'),datetime('now','-8 days'),'registration',5,30,100,5,'registration','[]',1,1,datetime('now'),datetime('now'))",
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,total_points,line_wins,full_wins,rounds_played,created_at) VALUES ('" +
+      schedulerProbeId + "'," + Number(account.id) + ",20,'registered',0,0,0,0,datetime('now'))"
+  )
+].join('; ');
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', schedulerBacklogSql,
+], { stdio: 'inherit' });
+const schedulerProbeLobby = await request('/api/tournaments');
+assert.equal(
+  schedulerProbeLobby.rooms.find(room => room.tournament_type === 'simple')?.status,
+  'running',
+  'a newly due tournament must start even after more than twelve old cancelled events'
+);
+
 // Client-supplied outcomes are rejected; only server-computed game sessions count.
 const statsBefore = await accountMe(accounts[0]);
 const forgedResult = await fetch(baseUrl + '/api/games/result', {
