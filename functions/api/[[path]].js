@@ -1403,7 +1403,7 @@ async function recurringTournamentSnapshots(db, advanceDraws = true) {
     const round = event.current_round_id
       ? await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(event.current_round_id).first()
       : null;
-    const leaders = await db.prepare("SELECT u.username,u.member_id,e.total_points,e.line_wins,e.full_wins,e.status,e.user_id FROM tournament_event_entries e JOIN users u ON u.id=e.user_id WHERE e.event_id=? AND e.status!='refunded' ORDER BY e.total_points DESC,e.full_wins DESC,e.line_wins DESC,e.rounds_played DESC,e.created_at ASC,u.member_id ASC,e.user_id ASC LIMIT 5")
+    const leaders = await db.prepare("SELECT u.username,u.member_id,e.total_points,e.line_wins,e.full_wins,e.status,e.user_id FROM tournament_event_entries e JOIN users u ON u.id=e.user_id WHERE e.event_id=? AND e.status IN ('registered','qualified','winner_1','winner_2','winner_3') ORDER BY e.total_points DESC,e.full_wins DESC,e.line_wins DESC,e.rounds_played DESC,e.created_at ASC,u.member_id ASC,e.user_id ASC LIMIT 5")
       .bind(event.id).all();
     const lineWinnerIds = round ? parseTournamentArray(round.line_winner_ids_json).map(Number) : [];
     const fullWinnerIds = round ? parseTournamentArray(round.full_winner_ids_json).map(Number) : [];
