@@ -1339,8 +1339,8 @@ async function startOrCancelDueTournament(db, event, nowMs) {
   const playerCount = Number(totals && totals.player_count || 0);
   const pool = Number(totals && totals.prize_pool || 0);
   if (playerCount < Number(event.min_players || 5)) {
-    const update = await db.prepare("UPDATE tournament_events SET status='cancelled',stage='cancelled',registered_count=?,prize_pool=?,finished_at=?,updated_at=? WHERE id=? AND status IN ('scheduled','registration')")
-      .bind(playerCount, pool, nowText, nowText, event.id).run();
+    const update = await db.prepare("UPDATE tournament_events SET status='cancelled',stage='cancelled',registered_count=?,prize_pool=0,finished_at=?,updated_at=? WHERE id=? AND status IN ('scheduled','registration')")
+      .bind(playerCount, nowText, nowText, event.id).run();
     if (Number(update.meta && update.meta.changes || 0) || event.status === "cancelled") {
       await refundTournamentEvent(db, event, nowMs);
     }
