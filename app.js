@@ -1105,7 +1105,7 @@ function configureTournamentPolling() {
   if (tournamentPollTimer) clearInterval(tournamentPollTimer);
   tournamentPollTimer = null;
   if (['tournaments','tournamentRoom','bingoTournament'].includes(currentPage)) {
-    tournamentPollTimer = setInterval(refreshTournamentData, 4000);
+    tournamentPollTimer = setInterval(refreshTournamentData, 3000);
   }
 }
 function tournamentScheduleText(room, type) {
