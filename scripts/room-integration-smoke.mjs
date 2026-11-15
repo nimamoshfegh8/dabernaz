@@ -271,10 +271,23 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
       roomId + ': wallet must immediately reflect actual card fees');
   }
 
-  await new Promise(resolve => setTimeout(resolve, 3300));
+  const forceOverdueDrawSql = "UPDATE room_states SET payload = json_set(payload, '$.nextDrawAt', 1) WHERE room_id = '" + roomId + "'";
+  execFileSync('wrangler', [
+    'd1', 'execute', 'dabernaz-ci', '--local',
+    '--persist-to', '.wrangler/test-state',
+    '--command', forceOverdueDrawSql,
+  ], { stdio: 'inherit' });
   const liveRoom = await roomFor(accounts[0], roomId);
-  assert.ok(liveRoom.drawCount >= 1);
+  assert.equal(liveRoom.drawCount, 1,
+    roomId + ': even a very overdue room must advance by only one number per request');
   assert.equal(new Set(liveRoom.allCalledNumbers).size, liveRoom.allCalledNumbers.length);
+  const immediateRepeatDraw = await roomFor(accounts[0], roomId);
+  assert.equal(immediateRepeatDraw.drawCount, 1,
+    roomId + ': repeated refreshes before the next three-second deadline must not fast-forward');
+  await new Promise(resolve => setTimeout(resolve, 3100));
+  const secondLiveDraw = await roomFor(accounts[0], roomId);
+  assert.equal(secondLiveDraw.drawCount, 2,
+    roomId + ': the next draw must become available after the three-second interval');
 
   // Finish a deterministic local-only round: call 1..89 first, then the server's
   // next draw is 90. All cards become complete together, so simultaneous winner
@@ -309,13 +322,17 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.ok(finishedRoom.winners.line);
   assert.ok(finishedRoom.winners.full);
 
-  const expectedPrizes = new Map(accounts.map((account) => [String(account.id), 0]));
+  for (const winner of [...finishedRoom.winners.line, ...finishedRoom.winners.full]) {
+    assert.equal(Object.hasOwn(winner, 'userId'), false,
+      roomId + ': public room snapshots must not expose internal database user IDs');
+  }
+  const expectedPrizes = new Map(accounts.map((account) => [String(account.memberId), 0]));
   const addSplitPrize = (winners, prize) => {
     assert.ok(Array.isArray(winners) && winners.length > 0, roomId + ': winner list must be non-empty');
     const base = Math.floor(prize / winners.length);
     const remainder = prize % winners.length;
     winners.forEach((winner, index) => {
-      const key = String(winner.userId);
+      const key = String(winner.memberId);
       expectedPrizes.set(key, (expectedPrizes.get(key) || 0) + base + (index < remainder ? 1 : 0));
     });
   };
@@ -326,7 +343,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     const account = accounts[index];
     const cardCount = 5;
     const expectedBalance = balancesBeforeBuy.get(account.memberId) -
-      economics.price * cardCount + expectedPrizes.get(String(account.id));
+      economics.price * cardCount + expectedPrizes.get(String(account.memberId));
     assert.equal(Number((await accountMe(account)).balance), expectedBalance,
       roomId + ': split winner prizes and card charges must match the wallet');
   }
@@ -346,7 +363,32 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     roomId + ': line winners must be persisted in room_finances');
   assert.ok(Array.isArray(storedRound.fullWinners) && storedRound.fullWinners.length > 0,
     roomId + ': full winners must be persisted in room_finances');
+  assert.equal(Object.hasOwn(storedRound, 'line_winners_json'), false,
+    roomId + ': public history must not expose raw winner JSON with internal IDs');
+  assert.equal(Object.hasOwn(storedRound, 'full_winners_json'), false,
+    roomId + ': public history must not expose raw full-winner JSON');
+  for (const winner of [...storedRound.lineWinners, ...storedRound.fullWinners]) {
+    assert.equal(Object.hasOwn(winner, 'userId'), false,
+      roomId + ': public history must hide internal database user IDs');
+  }
 }
+
+// An expired single-player room must be cancelled, fully refunded and reset.
+const beforeSoloRefund = Number((await accountMe(accounts[0])).balance);
+const soloRoomPurchase = await join(accounts[0], 'room5000', 1);
+assert.equal(soloRoomPurchase.status, 'waiting');
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', "UPDATE room_states SET payload=json_set(payload,'$.registrationDeadline',1) WHERE room_id='room5000'",
+], { stdio: 'inherit' });
+const refundedRoom = await roomFor(accounts[0], 'room5000');
+assert.equal(refundedRoom.status, 'waiting');
+assert.equal(refundedRoom.joined, false);
+assert.equal(refundedRoom.playerCount, 0);
+assert.equal(refundedRoom.cardCount, 0);
+assert.equal(Number((await accountMe(accounts[0])).balance), beforeSoloRefund,
+  'an expired room below the two-player minimum must return the exact card payment');
 
 // Referral reward: five distinct newly registered accounts grant exactly one milestone.
 const inviterBefore = await accountMe(accounts[0]);
@@ -705,6 +747,8 @@ assert.equal(
 
 // Client-supplied outcomes are rejected; only server-computed game sessions count.
 const statsBefore = await accountMe(accounts[0]);
+const activeBeforeRps = await request('/api/games/active?gameType=rps', { account: accounts[0] });
+assert.equal(activeBeforeRps.match, null);
 const forgedResult = await fetch(baseUrl + '/api/games/result', {
   method: 'POST',
   headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
@@ -721,6 +765,11 @@ let rpsMatch = (await request('/api/games/start', {
 assert.ok(rpsMatch.id);
 const activeRps = await request('/api/games/active?gameType=rps', { account: accounts[0] });
 assert.equal(activeRps.match.id, rpsMatch.id, 'active RPS match must survive reload');
+const duplicateRpsStart = await request('/api/games/start', {
+  account: accounts[0], method: 'POST', body: { gameType: 'rps' },
+});
+assert.equal(duplicateRpsStart.match.id, rpsMatch.id,
+  'starting an already active game must resume the same session instead of creating a duplicate');
 for (let attempt = 0; attempt < 40 && !rpsMatch.finished; attempt++) {
   const moved = await request('/api/games/move', {
     account: accounts[0], method: 'POST',
@@ -734,10 +783,25 @@ assert.equal(rpsMatch.finished, true, 'server must finish best-of-three RPS');
 assert.ok(['win','lose'].includes(rpsMatch.result));
 
 // Tic-tac-toe server match validates legal moves and determines bot replies + final result.
+const abandonedTic = (await request('/api/games/start', {
+  account: accounts[0], method: 'POST', body: { gameType: 'tic' },
+})).match;
+assert.ok(abandonedTic.id);
+const abandonedTicMove = await request('/api/games/move', {
+  account: accounts[0], method: 'POST', body: { matchId: abandonedTic.id, index: 0 },
+});
+assert.equal(abandonedTicMove.match.moves, 2, 'one user move and one server reply must be recorded');
+const abandonedTicResponse = await request('/api/games/abandon', {
+  account: accounts[0], method: 'POST', body: { matchId: abandonedTic.id },
+});
+assert.equal(abandonedTicResponse.abandoned, true);
+assert.equal((await request('/api/games/active?gameType=tic', { account: accounts[0] })).match, null,
+  'an abandoned game must no longer block a new tic match');
 let ticMatch = (await request('/api/games/start', {
   account: accounts[0], method: 'POST', body: { gameType: 'tic' },
 })).match;
 assert.ok(ticMatch.id);
+assert.notEqual(ticMatch.id, abandonedTic.id, 'tic reset must create a new server session');
 const activeTic = await request('/api/games/active?gameType=tic', { account: accounts[0] });
 assert.equal(activeTic.match.id, ticMatch.id);
 for (let attempt = 0; attempt < 9 && !ticMatch.finished; attempt++) {
@@ -750,6 +814,13 @@ for (let attempt = 0; attempt < 9 && !ticMatch.finished; attempt++) {
 }
 assert.equal(ticMatch.finished, true, 'tic-tac-toe must finish based on server moves');
 assert.ok(['win','lose','draw'].includes(ticMatch.result));
+const repeatedFinishedMove = await fetch(baseUrl + '/api/games/move', {
+  method: 'POST',
+  headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+  body: JSON.stringify({ matchId: ticMatch.id, index: 0 }),
+});
+assert.equal(repeatedFinishedMove.status, 409,
+  'a finished game must reject further moves and never credit another result');
 const statsAfter = await accountMe(accounts[0]);
 assert.equal(Number(statsAfter.stats.gamesPlayed), Number(statsBefore.stats.gamesPlayed) + 2);
 assert.equal(Number(statsAfter.stats.wins), Number(statsBefore.stats.wins) + (rpsMatch.result === 'win' ? 1 : 0) + (ticMatch.result === 'win' ? 1 : 0));
