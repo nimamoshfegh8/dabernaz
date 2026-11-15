@@ -1052,7 +1052,7 @@ async function advanceServerGame(db,user,request,path) {
 
 async function ensureRecurringTournamentTables(db) {
   const sqls = [
-    "CREATE TABLE IF NOT EXISTS tournament_events (id TEXT PRIMARY KEY, tournament_type TEXT NOT NULL, scheduled_at TEXT NOT NULL, registration_opens_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'scheduled', registered_count INTEGER NOT NULL DEFAULT 0, prize_pool INTEGER NOT NULL DEFAULT 0, min_players INTEGER NOT NULL DEFAULT 5, stage TEXT NOT NULL DEFAULT 'registration', stages_json TEXT NOT NULL DEFAULT '[]', stage_round INTEGER NOT NULL DEFAULT 1, stage_rounds INTEGER NOT NULL DEFAULT 1, current_round_id TEXT, started_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT, UNIQUE(tournament_type, scheduled_at))",
+    "CREATE TABLE IF NOT EXISTS tournament_events (id TEXT PRIMARY KEY, tournament_type TEXT NOT NULL, scheduled_at TEXT NOT NULL, registration_opens_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'scheduled', registered_count INTEGER NOT NULL DEFAULT 0, capacity INTEGER NOT NULL DEFAULT 30, prize_pool INTEGER NOT NULL DEFAULT 0, min_players INTEGER NOT NULL DEFAULT 5, stage TEXT NOT NULL DEFAULT 'registration', stages_json TEXT NOT NULL DEFAULT '[]', stage_round INTEGER NOT NULL DEFAULT 1, stage_rounds INTEGER NOT NULL DEFAULT 1, current_round_id TEXT, started_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT, UNIQUE(tournament_type, scheduled_at))",
     "CREATE INDEX IF NOT EXISTS idx_tournament_events_schedule ON tournament_events(tournament_type, scheduled_at)",
     "CREATE INDEX IF NOT EXISTS idx_tournament_events_status ON tournament_events(status, scheduled_at)",
     "CREATE TABLE IF NOT EXISTS tournament_event_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, user_id INTEGER NOT NULL, entry_cost INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'registered', total_points INTEGER NOT NULL DEFAULT 0, line_wins INTEGER NOT NULL DEFAULT 0, full_wins INTEGER NOT NULL DEFAULT 0, rounds_played INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(event_id, user_id))",
@@ -1066,6 +1066,7 @@ async function ensureRecurringTournamentTables(db) {
   for (const sql of sqls) await db.prepare(sql).run();
 
   const migrations = [
+    ["tournament_events", "capacity", "INTEGER NOT NULL DEFAULT 30"],
     ["tournament_events", "stage_round", "INTEGER NOT NULL DEFAULT 1"],
     ["tournament_events", "stage_rounds", "INTEGER NOT NULL DEFAULT 1"],
     ["tournament_events", "current_round_id", "TEXT"],
@@ -1412,6 +1413,8 @@ async function recurringTournamentSnapshots(db) {
       stage_round: Number(event.stage_round) || 0,
       stage_rounds: Number(event.stage_rounds) || 0,
       registered_count: Number(event.registered_count) || 0,
+      capacity: Number(event.capacity) || 30,
+      registration_full: Number(event.registered_count) >= Number(event.capacity || 30),
       min_players: Number(event.min_players) || 5,
       entry_cost: tournamentCost(event.tournament_type),
       prize_pool: Number(event.prize_pool) || 0,
@@ -1439,6 +1442,35 @@ async function recurringTournamentSnapshots(db) {
   return output;
 }
 
+async function publicTournamentSnapshots(db) {
+  const detailed = await recurringTournamentSnapshots(db);
+  const rooms = [];
+  for (const type of ["simple", "bingo"]) {
+    const selected = detailed.find((event) => event.tournament_type === type &&
+      ["scheduled", "registration", "running"].includes(event.status)) ||
+      detailed.find((event) => event.tournament_type === type);
+    if (!selected) continue;
+    rooms.push({
+      id: selected.id,
+      tournament_type: selected.tournament_type,
+      scheduled_at: selected.scheduled_at,
+      registration_opens_at: selected.registration_opens_at,
+      status: selected.status,
+      stage: selected.stage,
+      stage_label: selected.stage_label,
+      stage_round: selected.stage_round,
+      stage_rounds: selected.stage_rounds,
+      registered_count: selected.registered_count,
+      capacity: selected.capacity,
+      registration_full: selected.registration_full,
+      min_players: selected.min_players,
+      entry_cost: selected.entry_cost,
+      prize_pool: selected.prize_pool
+    });
+  }
+  return rooms;
+}
+
 async function registerRecurringTournament(db, user, request) {
   validateWriteOrigin(request);
   const body = await readJson(request);
@@ -1447,7 +1479,7 @@ async function registerRecurringTournament(db, user, request) {
   if (!cost) throw new HttpError(400, "نوع تورنومنت معتبر نیست.");
   await advanceTournamentSystem(db);
   const nowText = new Date().toISOString();
-  const event = await db.prepare("SELECT * FROM tournament_events WHERE tournament_type=? AND status='registration' AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1")
+  const event = await db.prepare("SELECT * FROM tournament_events WHERE tournament_type=? AND status='registration' AND registered_count<capacity AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1")
     .bind(type, nowText).first();
   if (!event) throw new HttpError(409, "ثبت‌نام این دوره در حال حاضر باز نیست.");
   const result = await db.batch([
@@ -1526,8 +1558,8 @@ async function routeRequest(request, env) {
   }
 
   if (request.method === 'GET' && path === '/api/tournaments') {
-    const events = await recurringTournamentSnapshots(env.DB);
-    return json({ ok:true, events, rooms:events });
+    const rooms = await publicTournamentSnapshots(env.DB);
+    return json({ ok:true, rooms, events:rooms });
   }
 
   const authResponse = await handleAuth(env.DB, request, path);
