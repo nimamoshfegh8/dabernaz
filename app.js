@@ -1022,6 +1022,7 @@ function hasTournamentEntry(type) {
 }
 function tournamentStatus(room) {
   if (room.status === 'scheduled') return 'ثبت‌نام هنوز باز نشده';
+  if (room.registration_full) return 'ظرفیت ۳۰ نفره تکمیل شده';
   if (room.status === 'cancelled') return 'این دوره لغو شد';
   if (room.status === 'running') return room.stage_label || 'در حال برگزاری';
   if (room.status === 'completed') return 'پایان‌یافته';
@@ -1088,17 +1089,18 @@ function tournamentCard(type, index) {
   const room = getTournamentRoom(type);
   const cost = bingo ? 100 : 20;
   const minimum = Math.max(5, Number(room.min_players) || 5);
+  const capacity = Math.max(minimum, Number(room.capacity) || 30);
   const registered = Math.max(0, Number(room.registered_count) || 0);
   const entered = hasTournamentEntry(type);
-  const full = room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
-  const progress = Math.min(100, Math.round(registered / minimum * 100));
+  const full = !!room.registration_full || room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
+  const progress = Math.min(100, Math.round(registered / capacity * 100));
   const title = bingo ? 'جام ویژه بینگو' : 'جام کلاسیک دبرنا';
   const subtitle = bingo ? 'تورنومنت VIP ماهانه · آخرین پنجشنبه هر ماه ساعت ۲۲' : 'تورنومنت ساده هفتگی · پنجشنبه‌ها ساعت ۲۱';
   const typeLabel = bingo ? 'BINGO CUP' : 'CLASSIC CUP';
   return `<article class="tour-card ${bingo ? 'tour-card-gold' : 'tour-card-red'}">
     <div class="tour-card-top"><span class="tour-card-icon">${bingo ? '🎱' : '🏆'}</span><span class="tour-card-type">${typeLabel}</span><span class="tour-card-state ${full ? 'is-full' : entered ? 'is-entered' : 'is-open'}">${entered ? 'ثبت‌نام تو' : full ? 'تکمیل' : 'آزاد'}</span></div>
     <div class="tour-card-title"><h3>${title}</h3><p>${subtitle}</p></div>
-    <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>صندوق جایزه</small><b>${faDigits(Number(room.prize_pool)||0)} <em>BGC</em></b></div></div>
+    <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>ثبت‌نام فعلی</small><b>${faDigits(registered)} <em>از ${faDigits(capacity)}</em></b></div></div>
     <div class="tour-progress"><span style="width:${progress}%"></span></div>
     <div class="tour-card-meta"><span>${tournamentScheduleText(room,type)}</span><span>${faDigits(registered)} شرکت‌کننده · حداقل ${faDigits(minimum)}</span></div>
     <div class="tour-card-meta"><span>۹۰ توپ · کارت ۱۵ عددی</span><span>${tournamentStatus(room)}</span></div>${tournamentLivePanel(room,type)}
@@ -1152,11 +1154,12 @@ function renderTournamentDetail(bingo=false) {
   const cost = bingo ? 100 : 20;
   const room = getTournamentRoom(type);
   const minimum = Math.max(5, Number(room.min_players) || 5);
+  const capacity = Math.max(minimum, Number(room.capacity) || 30);
   const registered = Math.max(0, Number(room.registered_count) || 0);
-  const full = room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
+  const full = !!room.registration_full || room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
   const entered = hasTournamentEntry(type);
-  const left = Math.max(0, minimum - registered);
-  const progress = Math.min(100, Math.round(registered / minimum * 100));
+  const left = Math.max(0, capacity - registered);
+  const progress = Math.min(100, Math.round(registered / capacity * 100));
   const statusText = entered ? 'ثبت‌نام تو تکمیل شده' : tournamentStatus(room);
   const entryId = bingo ? 'bingoTournamentEntry' : 'simpleTournamentEntry';
   const otherPage = bingo ? 'tournamentRoom' : 'bingoTournament';
@@ -1170,7 +1173,7 @@ function renderTournamentDetail(bingo=false) {
   </section>
   <section class="tour-registration-panel">
     <div class="tour-registration-heading"><div><small>REGISTRATION STATUS</small><h2>وضعیت ثبت‌نام</h2></div><span class="tour-registration-icon">${entered ? '✓' : full ? '!' : '♟'}</span></div>
-    <div class="tour-registration-numbers"><div><b>${faDigits(registered)}</b><small>ثبت‌نام‌شده</small></div><div><b>${faDigits(left)}</b><small>نفر تا حداقل شروع</small></div><div><b>${faDigits(Number(room.prize_pool)||0)}</b><small>صندوق جایزه BGC</small></div></div>
+    <div class="tour-registration-numbers"><div><b>${faDigits(registered)}</b><small>ثبت‌نام‌شده</small></div><div><b>${faDigits(left)}</b><small>ظرفیت باقی‌مانده</small></div><div><b>${faDigits(Number(room.prize_pool)||0)}</b><small>صندوق جایزه BGC</small></div></div>
     <div class="tour-progress tour-progress-large"><span style="width:${progress}%"></span></div>
     <div class="tour-registration-foot"><span>زمان برگزاری: ${tournamentScheduleText(room,type)}</span><span>${tournamentStatus(room)}</span></div>
     <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full || room.status === 'scheduled' ? 'disabled' : ''}>${entered ? '✓ ثبت‌نام تو قبلاً انجام شده' : room.status === 'scheduled' ? 'ثبت‌نام هنوز باز نشده' : full ? 'ثبت‌نام بسته است' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
