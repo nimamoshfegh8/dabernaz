@@ -12,6 +12,10 @@ assert.equal(manifest.provider, 'kenerate-sage-woman');
 assert.equal(manifest.voice, 'Sage Woman');
 assert.equal(manifest.language, 'fa-IR');
 assert.equal(Number(manifest.requiredNumbers), 90);
+assert.equal(manifest.trimming, 'none', 'all original source audio must be retained without trimming');
+assert.equal(Number(manifest.gapSeconds), 0.18, 'the number clips must use the agreed 180 ms gap');
+assert.equal(Number(manifest.sampleRate), 22050);
+assert.equal(Number(manifest.channels), 1);
 
 function numberToSpokenPersian(number) {
   const value = Math.trunc(Number(number));
@@ -51,6 +55,9 @@ if (!packageReady) {
     assert.ok(clip, 'missing number ' + number);
     assert.ok(Number.isFinite(start) && start >= 0, 'invalid start for number ' + number);
     assert.ok(Number.isFinite(duration) && duration > 0, 'invalid duration for number ' + number);
+    assert.equal(Number(clip.trimStartSeconds), 0, 'number ' + number + ' must not be trimmed at the start');
+    assert.equal(Number(clip.trimEndSeconds), 0, 'number ' + number + ' must not be trimmed at the end');
+    assert.ok(Math.abs(Number(clip.sourceDurationSeconds) - duration) <= 0.000001, 'number ' + number + ' must retain its full decoded source duration');
     assert.ok(start >= previousEnd - 0.03, 'clips overlap or are out of order at number ' + number);
     assert.equal(String(clip.text || '').trim(), numberToSpokenPersian(number), 'wrong spoken text for number ' + number);
     previousEnd = start + duration;
