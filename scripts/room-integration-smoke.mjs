@@ -456,6 +456,10 @@ assert.equal(Object.hasOwn(publicLiveSimple, 'top_players'), false,
 const privateTournament = await request('/api/tournaments/me', { account: accounts[0] });
 const privateSimple = privateTournament.rooms.find(room => room.tournament_type === 'simple');
 assert.ok(privateSimple && privateSimple.current_round, 'registered players must receive the active round snapshot');
+assert.equal(Object.hasOwn(privateSimple.current_round, 'line_winner_ids'), false,
+  'authenticated tournament snapshots must not expose internal line-winner database IDs');
+assert.equal(Object.hasOwn(privateSimple.current_round, 'full_winner_ids'), false,
+  'authenticated tournament snapshots must not expose internal full-winner database IDs');
 assert.equal(privateSimple.my_card.length, 3, 'each player must receive a private 3-row card');
 assert.ok(privateSimple.my_card.every(row => row.length === 9), 'private card must have 9 columns');
 const privateNumbers = privateSimple.my_card.flat().filter(Number.isInteger);
@@ -505,6 +509,8 @@ execFileSync('wrangler', [
 
 const settledTournament = await request('/api/tournaments/me', { account: accounts[0] });
 const settledSimple = settledTournament.events.find(event => event.id === publicLiveSimple.id);
+assert.equal(Number(settledTournament.bingo_coins), Number((await accountMe(accounts[0])).bingoCoins),
+  'tournament refresh must return the updated wallet balance after prize settlement');
 assert.equal(settledSimple.status, 'completed', 'final tournament round must settle and complete the event');
 const expectedShares = [60, 25, 15, 0, 0];
 const balancesAfterSettlement = await Promise.all(accounts.slice(0, 5).map(async account =>
@@ -527,6 +533,25 @@ assert.deepEqual(
   'each player account must store its own final tournament status and winner rank'
 );
 
+// The live top-five list must use the same eligible-player scope as final prize ranking.
+// An eliminated entrant must never appear above current finalists or winners.
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', "UPDATE tournament_event_entries SET status='eliminated' WHERE event_id='" + publicLiveSimple.id + "' AND user_id=" + Number(accounts[4].id),
+], { stdio: 'inherit' });
+const standingsSnapshot = await request('/api/tournaments/me', { account: accounts[0] });
+const completedStandings = standingsSnapshot.events.find(event => event.id === publicLiveSimple.id);
+assert.ok(completedStandings, 'completed tournament standings must remain available');
+assert.ok(
+  !completedStandings.top_players.some(player => String(player.memberId) === String(accounts[4].memberId)),
+  'eliminated players must not appear in the live top-five ranking'
+);
+assert.ok(
+  completedStandings.top_players.some(player => ['winner_1','winner_2','winner_3'].includes(player.status)),
+  'the completed ranking must continue to show the paid winners'
+);
+
 // Repeated refreshes or scheduler invocations must never pay the same final prize twice.
 await request('/api/tournaments/me', { account: accounts[0] });
 const balancesAfterRepeatedSettlement = await Promise.all(accounts.slice(0, 5).map(async account =>
@@ -534,6 +559,91 @@ const balancesAfterRepeatedSettlement = await Promise.all(accounts.slice(0, 5).m
 ));
 assert.deepEqual(balancesAfterRepeatedSettlement, balancesAfterSettlement,
   'a completed tournament must not issue duplicate prize credits');
+
+// VIP final settlement uses its own 50/30/20 split, with integer remainders
+// and one-time credits just like the weekly tournament's 60/25/15 split.
+const vipFixtureId = 'vip-payout-' + runId;
+const vipRoundId = vipFixtureId + '-final-1';
+const vipCard = JSON.stringify([
+  [1,null,21,null,41,null,61,null,81],
+  [2,12,null,32,null,52,null,72,null],
+  [null,13,23,null,43,null,63,73,null]
+]);
+const vipCalledNumbers = JSON.stringify(Array.from({ length: 90 }, (_, index) => index + 1));
+const vipBalancesBefore = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+const vipFixtureSql = [
+  "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,current_round_id,started_at,created_at,updated_at) VALUES ('" +
+    vipFixtureId + "','bingo',datetime('now','-1 second'),datetime('now','-8 days'),'running',5,30,500,5,'final',json_array(json_object('key','final','rounds',1)),1,1,'" +
+    vipRoundId + "',datetime('now'),datetime('now'),datetime('now'))",
+  ...accounts.slice(0, 5).map(account =>
+    "UPDATE users SET bingo_coins=bingo_coins-100 WHERE id=" + Number(account.id) + " AND bingo_coins>=100"
+  ),
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,total_points,line_wins,full_wins,rounds_played,created_at) VALUES ('" +
+      vipFixtureId + "'," + Number(account.id) + ",100,'registered',0,0,0,0,datetime('now'))"
+  ),
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO transactions (user_id,type,amount,description,created_at) VALUES (" +
+      Number(account.id) + ",'bingo_coin',-100,'QA VIP fixture entry',datetime('now'))"
+  ),
+  "INSERT INTO tournament_rounds (id,event_id,stage,round_number,status,called_numbers_json,line_winner_ids_json,full_winner_ids_json,next_draw_at,started_at,finished_at) VALUES ('" +
+    vipRoundId + "','" + vipFixtureId + "','final',1,'finished','" + vipCalledNumbers + "','[]','[]',NULL," + Date.now() + ",datetime('now'))",
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO tournament_round_players (id,event_id,round_id,user_id,card_json) VALUES ('" +
+      vipRoundId + "-" + Number(account.id) + "','" + vipFixtureId + "','" + vipRoundId + "'," +
+      Number(account.id) + ",'" + vipCard + "')"
+  )
+].join('; ');
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', vipFixtureSql,
+], { stdio: 'inherit' });
+
+const vipSettled = await request('/api/tournaments/me', { account: accounts[0] });
+assert.equal(vipSettled.events.find(event => event.id === vipFixtureId)?.status, 'completed',
+  'VIP final tournament must settle and complete');
+const vipRankedAccounts = [...accounts.slice(0, 5)].sort((a, b) =>
+  String(a.memberId).localeCompare(String(b.memberId))
+);
+const vipExpectedPrize = new Map([
+  [String(vipRankedAccounts[0].id), 250],
+  [String(vipRankedAccounts[1].id), 150],
+  [String(vipRankedAccounts[2].id), 100],
+  [String(vipRankedAccounts[3].id), 0],
+  [String(vipRankedAccounts[4].id), 0]
+]);
+const vipBalancesAfter = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+for (let index = 0; index < 5; index++) {
+  const account = accounts[index];
+  assert.equal(
+    vipBalancesAfter[index] - vipBalancesBefore[index],
+    -100 + vipExpectedPrize.get(String(account.id)),
+    'VIP tournament must debit the entry and pay the 50/30/20 split exactly once'
+  );
+}
+const vipStatuses = await Promise.all(accounts.slice(0, 5).map(async account => {
+  const personal = await request('/api/tournaments/me', { account });
+  return personal.entries.find(entry => entry.event_id === vipFixtureId)?.status || null;
+}));
+assert.deepEqual(
+  vipStatuses,
+  accounts.slice(0, 5).map(account => {
+    const rank = vipRankedAccounts.findIndex(player => String(player.id) === String(account.id));
+    return rank < 3 ? 'winner_' + String(rank + 1) : 'registered';
+  }),
+  'VIP accounts must retain their own final rank'
+);
+await request('/api/tournaments/me', { account: accounts[0] });
+const vipBalancesAfterRepeat = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+assert.deepEqual(vipBalancesAfterRepeat, vipBalancesAfter,
+  'VIP prize credits must not be duplicated after repeated refreshes');
 
 // A due event below the five-player minimum must cancel and refund its single entry.
 const refundFixtureId = 'refund-' + runId;
@@ -555,12 +665,43 @@ execFileSync('wrangler', [
 ], { stdio: 'inherit' });
 await request('/api/tournaments');
 const refundedTournament = await request('/api/tournaments/me', { account: refundAccount });
+assert.equal(Number(refundedTournament.bingo_coins), Number((await accountMe(refundAccount)).bingoCoins),
+  'tournament refresh must return the updated wallet balance after an entry refund');
 assert.equal(Number((await accountMe(refundAccount)).bingoCoins), refundBalanceBefore,
   'a tournament cancelled below five participants must refund the exact entry amount');
 assert.equal(refundedTournament.entries.find(entry => entry.event_id === refundFixtureId)?.status, 'refunded',
   'cancelled tournament entries must be marked refunded');
 assert.equal(refundedTournament.events.find(event => event.id === refundFixtureId)?.status, 'cancelled',
   'the underfilled tournament must be marked cancelled');
+assert.equal(Number(refundedTournament.events.find(event => event.id === refundFixtureId)?.prize_pool), 0,
+  'a cancelled and fully refunded tournament must show no remaining prize pool');
+
+// Old cancelled events that have already refunded everyone must not fill the
+// scheduler's work queue and starve a new tournament that is due to start.
+const schedulerProbeId = 'scheduler-probe-' + runId;
+const schedulerBacklogSql = [
+  ...Array.from({ length: 13 }, (_, index) =>
+    "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,created_at,updated_at) VALUES ('cancelled-backlog-" +
+      runId + "-" + index + "','simple',datetime('now','-" + (40 + index) + " days'),datetime('now','-" + (47 + index) + " days'),'cancelled',0,30,0,5,'cancelled','[]',1,1,datetime('now'),datetime('now'))"
+  ),
+  "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,created_at,updated_at) VALUES ('" +
+    schedulerProbeId + "','simple',datetime('now','-1 second'),datetime('now','-8 days'),'registration',5,30,100,5,'registration','[]',1,1,datetime('now'),datetime('now'))",
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,total_points,line_wins,full_wins,rounds_played,created_at) VALUES ('" +
+      schedulerProbeId + "'," + Number(account.id) + ",20,'registered',0,0,0,0,datetime('now'))"
+  )
+].join('; ');
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', schedulerBacklogSql,
+], { stdio: 'inherit' });
+const schedulerProbeLobby = await request('/api/tournaments');
+assert.equal(
+  schedulerProbeLobby.rooms.find(room => room.tournament_type === 'simple')?.status,
+  'running',
+  'a newly due tournament must start even after more than twelve old cancelled events'
+);
 
 // Client-supplied outcomes are rejected; only server-computed game sessions count.
 const statsBefore = await accountMe(accounts[0]);

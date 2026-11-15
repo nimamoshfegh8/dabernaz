@@ -1339,8 +1339,8 @@ async function startOrCancelDueTournament(db, event, nowMs) {
   const playerCount = Number(totals && totals.player_count || 0);
   const pool = Number(totals && totals.prize_pool || 0);
   if (playerCount < Number(event.min_players || 5)) {
-    const update = await db.prepare("UPDATE tournament_events SET status='cancelled',stage='cancelled',registered_count=?,prize_pool=?,finished_at=?,updated_at=? WHERE id=? AND status IN ('scheduled','registration')")
-      .bind(playerCount, pool, nowText, nowText, event.id).run();
+    const update = await db.prepare("UPDATE tournament_events SET status='cancelled',stage='cancelled',registered_count=?,prize_pool=0,finished_at=?,updated_at=? WHERE id=? AND status IN ('scheduled','registration')")
+      .bind(playerCount, nowText, nowText, event.id).run();
     if (Number(update.meta && update.meta.changes || 0) || event.status === "cancelled") {
       await refundTournamentEvent(db, event, nowMs);
     }
@@ -1387,7 +1387,7 @@ async function advanceTournamentEvent(db, event, nowMs, advanceDraws = true) {
 async function advanceTournamentSystem(db, nowMs, advanceDraws = true) {
   const current = Number(nowMs || Date.now());
   await ensureRecurringTournamentSchedule(db, current);
-  const active = await db.prepare("SELECT * FROM tournament_events WHERE status IN ('scheduled','registration','running','cancelled') ORDER BY scheduled_at ASC LIMIT 12")
+  const active = await db.prepare("SELECT * FROM tournament_events e WHERE e.status IN ('scheduled','registration','running') OR (e.status='cancelled' AND EXISTS (SELECT 1 FROM tournament_event_entries pending WHERE pending.event_id=e.id AND pending.status='registered')) ORDER BY e.scheduled_at ASC LIMIT 12")
     .all();
   for (const event of active.results || []) {
     await advanceTournamentEvent(db, event, current, advanceDraws);
@@ -1403,7 +1403,7 @@ async function recurringTournamentSnapshots(db, advanceDraws = true) {
     const round = event.current_round_id
       ? await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(event.current_round_id).first()
       : null;
-    const leaders = await db.prepare("SELECT u.username,u.member_id,e.total_points,e.line_wins,e.full_wins,e.status,e.user_id FROM tournament_event_entries e JOIN users u ON u.id=e.user_id WHERE e.event_id=? AND e.status!='refunded' ORDER BY e.total_points DESC,e.full_wins DESC,e.line_wins DESC,e.rounds_played DESC,e.created_at ASC,u.member_id ASC,e.user_id ASC LIMIT 5")
+    const leaders = await db.prepare("SELECT u.username,u.member_id,e.total_points,e.line_wins,e.full_wins,e.status,e.user_id FROM tournament_event_entries e JOIN users u ON u.id=e.user_id WHERE e.event_id=? AND e.status IN ('registered','qualified','winner_1','winner_2','winner_3') ORDER BY e.total_points DESC,e.full_wins DESC,e.line_wins DESC,e.rounds_played DESC,e.created_at ASC,u.member_id ASC,e.user_id ASC LIMIT 5")
       .bind(event.id).all();
     const lineWinnerIds = round ? parseTournamentArray(round.line_winner_ids_json).map(Number) : [];
     const fullWinnerIds = round ? parseTournamentArray(round.full_winner_ids_json).map(Number) : [];
@@ -1561,7 +1561,20 @@ async function myRecurringTournamentData(db, userId) {
     event.my_entry_status = ownEntry.status;
     event.my_total_points = Number(ownEntry.total_points) || 0;
   }
-  return { events, entries: ownedEntries, rooms: events };
+  // Internal database user IDs are never needed by the browser. Public player
+  // IDs and winner profiles are sufficient for the live tournament UI.
+  for (const event of events) {
+    if (!event.current_round) continue;
+    delete event.current_round.line_winner_ids;
+    delete event.current_round.full_winner_ids;
+  }
+  const wallet = await db.prepare("SELECT bingo_coins FROM users WHERE id=?").bind(userId).first();
+  return {
+    events,
+    entries: ownedEntries,
+    rooms: events,
+    bingo_coins: Number(wallet && wallet.bingo_coins) || 0
+  };
 }
 
 
