@@ -1,5 +1,5 @@
 /* Dabernaz Cloudflare Pages Function: authentication, D1 accounts and live Daberna rooms. */
-import { nextTournamentStartAt, buildTournamentStages } from '../tournament-rules.mjs';
+import { nextTournamentStartAt, buildTournamentStages, makeTournamentCard, scoreTournamentPlayers } from '../tournament-rules.mjs';
 
 const REGISTRATION_WINDOW_MS = 150000;
 const MAX_CARDS_PER_PLAYER = 5;
