@@ -1896,9 +1896,11 @@ async function routeRequest(request, env) {
 
   const supportAdminIds=String(env.SUPPORT_ADMIN_MEMBER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
   const isSupportAdmin=supportAdminIds.includes(String(user.member_id||''));
+  const walletAdminIds=String(env.WALLET_ADMIN_MEMBER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
+  const isWalletAdmin=walletAdminIds.includes(String(user.member_id||''));
 
   if (path.startsWith('/api/admin/wallet')) {
-    if (!isSupportAdmin) throw new HttpError(403, 'دسترسی مدیر کیف پول برای این حساب فعال نیست.');
+    if (!isWalletAdmin) throw new HttpError(403, 'دسترسی مدیر مالی برای این حساب فعال نیست.');
     if (request.method === 'GET' && path === '/api/admin/wallet') {
       const status = String(new URL(request.url).searchParams.get('status') || 'all');
       const allowed = ['all','awaiting_receipt','pending_review','pending_transfer','approved','rejected','paid','cancelled'];
