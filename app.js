@@ -7,7 +7,7 @@ const defaultState = {
   settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 6, notifications: false, vibration: false },
   referralCode: '', gamesPlayed: 0, wins: 0, points: 0,
   bingoCoins: 0, coinTransactions: [], inviteCount: 0, inviteRewardMilestones: [],
-  roomHistory: [], supportTickets: [], tournamentRooms: []
+  roomHistory: [], supportTickets: [], tournamentRooms: [], tournamentEntries: []
 };
 
 function loadState() {
@@ -25,7 +25,8 @@ function loadState() {
       inviteRewardMilestones: Array.isArray(saved.inviteRewardMilestones) ? saved.inviteRewardMilestones : [],
       roomHistory: Array.isArray(saved.roomHistory) ? saved.roomHistory.slice(0,12) : [],
       supportTickets: Array.isArray(saved.supportTickets) ? saved.supportTickets.slice(0,20) : [],
-      tournamentRooms: Array.isArray(saved.tournamentRooms) ? saved.tournamentRooms.slice(0,2) : [],
+      tournamentRooms: Array.isArray(saved.tournamentRooms) ? saved.tournamentRooms.slice(0,12) : [],
+      tournamentEntries: Array.isArray(saved.tournamentEntries) ? saved.tournamentEntries.slice(0,30) : [],
       settings: (() => {
         const previous = saved.settings && typeof saved.settings === 'object' ? saved.settings : {};
         const merged = { ...defaultState.settings, ...previous };
@@ -52,6 +53,9 @@ let currentPage = 'home';
 let toastTimer = null;
 let bingoGame = null;
 let tournamentLobbyTab = 'all';
+let tournamentPollTimer = null;
+let tournamentPollBusy = false;
+const spokenTournamentAnnouncementKeys = new Set();
 const spokenRoomAnnouncementKeys = new Set();
 const roomSpeechInFlight = new Set();
 const roomSpeechRetryAt = new Map();
@@ -610,7 +614,7 @@ function applyAuthenticatedUser(user) {
   state.balance = Math.max(0, Number(user.balance)||0); state.bingoCoins = Math.max(0, Number(user.bingoCoins)||0);
   state.coinTransactions = Array.isArray(user.coinTransactions) ? user.coinTransactions.slice(0,50) : [];
   state.gamesPlayed = Number(user.stats?.gamesPlayed)||0; state.wins = Number(user.stats?.wins)||0; state.points = Number(user.stats?.points)||0;
-  state.transactions = []; state.joined = [];
+  state.transactions = []; state.joined = []; state.tournamentEntries = [];
   saveState(); updateHeader();
 }
 async function loadAuthenticatedUser() {
@@ -637,6 +641,7 @@ async function loadAuthenticatedUser() {
       state = { ...cloneData(defaultState), settings:state.settings };
       state.supportTickets = [];
       state.tournamentRooms = [];
+      state.tournamentEntries = [];
     }
   } catch (error) {
     apiReady = false;
@@ -672,9 +677,8 @@ async function loadAuthenticatedUser() {
     }
     if (tournamentResult.status === 'fulfilled') {
       const data = tournamentResult.value;
-      state.joined = (data.entries || [])
-        .filter(entry => entry.status === 'registered')
-        .map(entry => entry.tournament_type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
+      state.tournamentEntries = Array.isArray(data.entries) ? data.entries : [];
+      state.joined = state.tournamentEntries.filter(entry => entry.status !== 'refunded').map(entry => entry.tournament_type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
       state.tournamentRooms = Array.isArray(data.rooms) ? data.rooms : [];
     }
     if (ticketResult.status === 'fulfilled') {
@@ -725,6 +729,7 @@ function setPage(page, options = {}) {
   if (sync) syncPageLocation(page);
   render();
   if (scroll) window.scrollTo({ top: 0, behavior: 'smooth' });
+  configureTournamentPolling();
   if (ROOM_CONFIGS.some(room => room.id === page) || page === 'roomGame') pollCurrentRoom();
 }
 function heading(title, subtitle, label = '') {
@@ -1011,14 +1016,66 @@ function getTournamentRoom(type) {
   return (state.tournamentRooms || []).find(item => item.tournament_type === type) || {};
 }
 function hasTournamentEntry(type) {
-  return (state.joined || []).includes(type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
+  const room = getTournamentRoom(type);
+  if (!room.id) return false;
+  return (state.tournamentEntries || []).some(entry => entry.tournament_type === type && entry.event_id === room.id && entry.status !== 'refunded');
 }
 function tournamentStatus(room) {
   if (room.status === 'scheduled') return 'ثبت‌نام هنوز باز نشده';
   if (room.status === 'cancelled') return 'این دوره لغو شد';
-  if (room.status === 'running') return room.stage ? 'در حال برگزاری · ' + room.stage : 'در حال برگزاری';
+  if (room.status === 'running') return room.stage_label || 'در حال برگزاری';
   if (room.status === 'completed') return 'پایان‌یافته';
   return 'ثبت‌نام باز است';
+}
+function tournamentLivePanel(room, type) {
+  if (!room) return '';
+  const stage = room.stage_label || tournamentStatus(room);
+  const current = room.current_round;
+  const called = Array.isArray(current?.called_numbers) ? current.called_numbers : [];
+  const latest = Number(current?.latest_number) || 0;
+  if (current && latest) {
+    const key = String(room.id) + ':' + String(current.id) + ':' + String(latest);
+    if (settingEnabled('voiceNumbers') && !spokenTournamentAnnouncementKeys.has(key)) {
+      spokenTournamentAnnouncementKeys.add(key);
+      PersianAudioManager.speak(latest);
+      if (spokenTournamentAnnouncementKeys.size > 250) spokenTournamentAnnouncementKeys.delete(spokenTournamentAnnouncementKeys.values().next().value);
+    }
+  }
+  const winners = Array.isArray(current?.full_winner_ids) ? current.full_winner_ids : [];
+  const top = Array.isArray(room.top_players) ? room.top_players : [];
+  const recent = called.slice(-12).reverse().map(number => '<span>' + faDigits(number) + '</span>').join('');
+  const leaderboard = top.length ? top.map((player,index) => '<li><b>' + faDigits(index+1) + '. ' + escapeHTML(player.name || 'بازیکن') + '</b><span>' + faDigits(Number(player.points)||0) + ' امتیاز</span></li>').join('') : '<li class="muted-note">هنوز امتیازی ثبت نشده است.</li>';
+  return `<section class="tour-live-panel"><div class="tour-live-heading"><div><small>LIVE TOURNAMENT</small><h3>${escapeHTML(stage)}</h3></div><span class="tour-live-state">${room.status === 'running' ? '● زنده' : '● برنامه‌ریزی‌شده'}</span></div>
+    ${current ? `<div class="tour-live-number"><small>آخرین شماره اعلام‌شده</small><b>${latest ? faDigits(latest) : '—'}</b><span>${faDigits(called.length)} / ۹۰ شماره</span></div><div class="tour-called-list">${recent || '<span>هنوز شماره‌ای اعلام نشده</span>'}</div>` : '<p class="muted-note">پس از شروع مسابقه، شماره‌های اعلام‌شده و جدول زنده در این بخش نمایش داده می‌شوند.</p>'}
+    ${winners.length ? '<p class="tour-winner-notice">🏆 برنده کامل این دور: ' + winners.map(faDigits).join('، ') + '</p>' : ''}
+    <div class="tour-live-leaders"><b>رتبه‌بندی برترها</b><ol>${leaderboard}</ol></div></section>`;
+}
+async function refreshTournamentData() {
+  if (tournamentPollBusy || !['tournaments','tournamentRoom','bingoTournament'].includes(currentPage)) return;
+  tournamentPollBusy = true;
+  try {
+    const publicData = await apiRequest('/api/tournaments', { method:'GET', headers:{} });
+    state.tournamentRooms = Array.isArray(publicData.rooms) ? publicData.rooms : [];
+    if (currentUser) {
+      const mine = await apiRequest('/api/tournaments/me', { method:'GET', headers:{} });
+      state.tournamentRooms = Array.isArray(mine.rooms) ? mine.rooms : state.tournamentRooms;
+      state.tournamentEntries = Array.isArray(mine.entries) ? mine.entries : [];
+      state.joined = state.tournamentEntries.filter(entry => entry.status !== 'refunded').map(entry => entry.tournament_type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
+    }
+    saveState();
+    if (['tournaments','tournamentRoom','bingoTournament'].includes(currentPage)) render();
+  } catch (_) {
+    // Retain the last successful server snapshot when polling fails temporarily.
+  } finally {
+    tournamentPollBusy = false;
+  }
+}
+function configureTournamentPolling() {
+  if (tournamentPollTimer) clearInterval(tournamentPollTimer);
+  tournamentPollTimer = null;
+  if (['tournaments','tournamentRoom','bingoTournament'].includes(currentPage)) {
+    tournamentPollTimer = setInterval(refreshTournamentData, 4000);
+  }
 }
 function tournamentScheduleText(room, type) {
   if (!room?.scheduled_at) return type === 'bingo' ? 'ماهانه · آخرین پنجشنبه' : 'هفتگی · پنجشنبه';
@@ -1030,21 +1087,21 @@ function tournamentCard(type, index) {
   const bingo = type === 'bingo';
   const room = getTournamentRoom(type);
   const cost = bingo ? 100 : 20;
-  const capacity = Math.max(5, Number(room.capacity) || Number(room.min_players) || 30);
+  const minimum = Math.max(5, Number(room.min_players) || 5);
   const registered = Math.max(0, Number(room.registered_count) || 0);
   const entered = hasTournamentEntry(type);
   const full = room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
-  const progress = Math.min(100, Math.round(registered / Math.max(capacity, registered || 1) * 100));
+  const progress = Math.min(100, Math.round(registered / minimum * 100));
   const title = bingo ? 'جام ویژه بینگو' : 'جام کلاسیک دبرنا';
   const subtitle = bingo ? 'تورنومنت VIP ماهانه · آخرین پنجشنبه هر ماه ساعت ۲۲' : 'تورنومنت ساده هفتگی · پنجشنبه‌ها ساعت ۲۱';
   const typeLabel = bingo ? 'BINGO CUP' : 'CLASSIC CUP';
   return `<article class="tour-card ${bingo ? 'tour-card-gold' : 'tour-card-red'}">
     <div class="tour-card-top"><span class="tour-card-icon">${bingo ? '🎱' : '🏆'}</span><span class="tour-card-type">${typeLabel}</span><span class="tour-card-state ${full ? 'is-full' : entered ? 'is-entered' : 'is-open'}">${entered ? 'ثبت‌نام تو' : full ? 'تکمیل' : 'آزاد'}</span></div>
     <div class="tour-card-title"><h3>${title}</h3><p>${subtitle}</p></div>
-    <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>ثبت‌نام فعلی</small><b>${faDigits(registered)} <em>از ${faDigits(capacity)}</em></b></div></div>
+    <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>صندوق جایزه</small><b>${faDigits(Number(room.prize_pool)||0)} <em>BGC</em></b></div></div>
     <div class="tour-progress"><span style="width:${progress}%"></span></div>
-    <div class="tour-card-meta"><span>${tournamentScheduleText(room,type)}</span><span>حداقل ${faDigits(Number(room.min_players)||5)} نفر</span></div>
-    <div class="tour-card-meta"><span>۹۰ توپ · کارت ۱۵ عددی</span><span>${tournamentStatus(room)}</span></div>
+    <div class="tour-card-meta"><span>${tournamentScheduleText(room,type)}</span><span>${faDigits(registered)} شرکت‌کننده · حداقل ${faDigits(minimum)}</span></div>
+    <div class="tour-card-meta"><span>۹۰ توپ · کارت ۱۵ عددی</span><span>${tournamentStatus(room)}</span></div>${tournamentLivePanel(room,type)}
     <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} tour-card-button" data-page="${bingo ? 'bingoTournament' : 'tournamentRoom'}">${entered ? 'مشاهده ثبت‌نام' : 'مشاهده و ثبت‌نام'} <span>←</span></button>
   </article>`;
 }
@@ -1094,12 +1151,12 @@ function renderTournamentDetail(bingo=false) {
   const type = bingo ? 'bingo' : 'simple';
   const cost = bingo ? 100 : 20;
   const room = getTournamentRoom(type);
-  const capacity = Math.max(5, Number(room.capacity) || Number(room.min_players) || 30);
+  const minimum = Math.max(5, Number(room.min_players) || 5);
   const registered = Math.max(0, Number(room.registered_count) || 0);
   const full = room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
   const entered = hasTournamentEntry(type);
-  const left = Math.max(0, capacity - registered);
-  const progress = Math.min(100, Math.round(registered / capacity * 100));
+  const left = Math.max(0, minimum - registered);
+  const progress = Math.min(100, Math.round(registered / minimum * 100));
   const statusText = entered ? 'ثبت‌نام تو تکمیل شده' : tournamentStatus(room);
   const entryId = bingo ? 'bingoTournamentEntry' : 'simpleTournamentEntry';
   const otherPage = bingo ? 'tournamentRoom' : 'bingoTournament';
@@ -1113,11 +1170,12 @@ function renderTournamentDetail(bingo=false) {
   </section>
   <section class="tour-registration-panel">
     <div class="tour-registration-heading"><div><small>REGISTRATION STATUS</small><h2>وضعیت ثبت‌نام</h2></div><span class="tour-registration-icon">${entered ? '✓' : full ? '!' : '♟'}</span></div>
-    <div class="tour-registration-numbers"><div><b>${faDigits(registered)}</b><small>ثبت‌نام‌شده</small></div><div><b>${faDigits(left)}</b><small>ظرفیت باقی‌مانده</small></div><div><b>${faDigits(capacity)}</b><small>ظرفیت این صف</small></div></div>
+    <div class="tour-registration-numbers"><div><b>${faDigits(registered)}</b><small>ثبت‌نام‌شده</small></div><div><b>${faDigits(left)}</b><small>نفر تا حداقل شروع</small></div><div><b>${faDigits(Number(room.prize_pool)||0)}</b><small>صندوق جایزه BGC</small></div></div>
     <div class="tour-progress tour-progress-large"><span style="width:${progress}%"></span></div>
     <div class="tour-registration-foot"><span>زمان برگزاری: ${tournamentScheduleText(room,type)}</span><span>${tournamentStatus(room)}</span></div>
     <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full || room.status === 'scheduled' ? 'disabled' : ''}>${entered ? '✓ ثبت‌نام تو قبلاً انجام شده' : room.status === 'scheduled' ? 'ثبت‌نام هنوز باز نشده' : full ? 'ثبت‌نام بسته است' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
     <p class="tour-balance-note">موجودی فعلی تو: <b>${state.bingoCoins.toLocaleString('fa-IR')} BGC</b> · هزینه فقط یک‌بار و پس از تأیید سرور کسر می‌شود.</p>
+    ${tournamentLivePanel(room,type)}
   </section>
   <section class="tour-detail-grid">
     <div class="tour-rules-card"><div class="tour-panel-heading"><span>📜</span><div><small>GAME RULES</small><h3>قوانین مسابقه</h3></div></div>
