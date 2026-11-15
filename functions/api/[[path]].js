@@ -1052,7 +1052,7 @@ async function advanceServerGame(db,user,request,path) {
 
 async function ensureRecurringTournamentTables(db) {
   const sqls = [
-    \`CREATE TABLE IF NOT EXISTS tournament_events (
+    `CREATE TABLE IF NOT EXISTS tournament_events (
       id TEXT PRIMARY KEY,
       tournament_type TEXT NOT NULL,
       scheduled_at TEXT NOT NULL,
@@ -1067,9 +1067,9 @@ async function ensureRecurringTournamentTables(db) {
       updated_at TEXT NOT NULL,
       finished_at TEXT,
       UNIQUE(tournament_type, scheduled_at)
-    )\`,
-    \`CREATE INDEX IF NOT EXISTS idx_tournament_events_schedule ON tournament_events(tournament_type, scheduled_at)\`,
-    \`CREATE TABLE IF NOT EXISTS tournament_event_entries (
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_tournament_events_schedule ON tournament_events(tournament_type, scheduled_at)`,
+    `CREATE TABLE IF NOT EXISTS tournament_event_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       event_id TEXT NOT NULL,
       user_id INTEGER NOT NULL,
@@ -1080,9 +1080,9 @@ async function ensureRecurringTournamentTables(db) {
       full_wins INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       UNIQUE(event_id, user_id)
-    )\`,
-    \`CREATE INDEX IF NOT EXISTS idx_tournament_event_entries_event ON tournament_event_entries(event_id, status)\`,
-    \`CREATE TABLE IF NOT EXISTS tournament_prize_payouts (
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_tournament_event_entries_event ON tournament_event_entries(event_id, status)`,
+    `CREATE TABLE IF NOT EXISTS tournament_prize_payouts (
       event_id TEXT NOT NULL,
       user_id INTEGER NOT NULL,
       rank INTEGER NOT NULL,
@@ -1090,7 +1090,7 @@ async function ensureRecurringTournamentTables(db) {
       created_at TEXT NOT NULL,
       PRIMARY KEY(event_id, user_id),
       UNIQUE(event_id, rank)
-    )\`
+    )`
   ];
   for (const sql of sqls) await db.prepare(sql).run();
 }
@@ -1106,12 +1106,12 @@ async function ensureRecurringTournamentSchedule(db, nowMs = Date.now()) {
     const scheduledAt = new Date(startMs).toISOString();
     const opensAt = new Date(startMs - 7 * 86400000).toISOString();
     const nowText = new Date(nowMs).toISOString();
-    await db.prepare(\`INSERT OR IGNORE INTO tournament_events
+    await db.prepare(`INSERT OR IGNORE INTO tournament_events
       (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,prize_pool,min_players,stage,stages_json,created_at,updated_at)
-      VALUES (?,?,?,?, 'scheduled',0,0,5,'registration','[]',?,?)\`)
+      VALUES (?,?,?,?, 'scheduled',0,0,5,'registration','[]',?,?)`)
       .bind(tournamentId(type,startMs),type,scheduledAt,opensAt,nowText,nowText).run();
-    await db.prepare(\`UPDATE tournament_events SET status='registration', stage='registration', updated_at=?
-      WHERE tournament_type=? AND status='scheduled' AND registration_opens_at<=? AND scheduled_at>?\`)
+    await db.prepare(`UPDATE tournament_events SET status='registration', stage='registration', updated_at=?
+      WHERE tournament_type=? AND status='scheduled' AND registration_opens_at<=? AND scheduled_at>?`)
       .bind(nowText,type,nowText,nowText).run();
   }
 }
@@ -1119,32 +1119,32 @@ async function ensureRecurringTournamentSchedule(db, nowMs = Date.now()) {
 async function settleDueRecurringTournaments(db, nowMs = Date.now()) {
   await ensureRecurringTournamentSchedule(db, nowMs);
   const nowText = new Date(nowMs).toISOString();
-  const due = await db.prepare(\`SELECT * FROM tournament_events
-    WHERE status IN ('scheduled','registration') AND scheduled_at<=? ORDER BY scheduled_at ASC LIMIT 10\`).bind(nowText).all();
+  const due = await db.prepare(`SELECT * FROM tournament_events
+    WHERE status IN ('scheduled','registration') AND scheduled_at<=? ORDER BY scheduled_at ASC LIMIT 10`).bind(nowText).all();
   for (const event of due.results || []) {
-    const count = await db.prepare(\`SELECT COUNT(*) AS c, COALESCE(SUM(entry_cost),0) AS pool
-      FROM tournament_event_entries WHERE event_id=? AND status='registered'\`).bind(event.id).first();
+    const count = await db.prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(entry_cost),0) AS pool
+      FROM tournament_event_entries WHERE event_id=? AND status='registered'`).bind(event.id).first();
     const players = Number(count?.c || 0);
     const pool = Number(count?.pool || 0);
     if (players < Number(event.min_players || 5)) {
-      const entries = await db.prepare(\`SELECT user_id,entry_cost FROM tournament_event_entries
-        WHERE event_id=? AND status='registered'\`).bind(event.id).all();
+      const entries = await db.prepare(`SELECT user_id,entry_cost FROM tournament_event_entries
+        WHERE event_id=? AND status='registered'`).bind(event.id).all();
       for (const entry of entries.results || []) {
-        const changed = await db.prepare(\`UPDATE tournament_event_entries SET status='refunded'
-          WHERE event_id=? AND user_id=? AND status='registered'\`).bind(event.id,entry.user_id).run();
+        const changed = await db.prepare(`UPDATE tournament_event_entries SET status='refunded'
+          WHERE event_id=? AND user_id=? AND status='registered'`).bind(event.id,entry.user_id).run();
         if (Number(changed.meta?.changes || 0)) {
           await db.prepare('UPDATE users SET bingo_coins=bingo_coins+? WHERE id=?').bind(entry.entry_cost,entry.user_id).run();
-          await db.prepare(\`INSERT INTO transactions (user_id,type,amount,description,created_at)
-            VALUES (?,'bingo_coin',?,?,?)\`).bind(entry.user_id,entry.entry_cost,'بازگشت ورودی '+tournamentTitle(event.tournament_type),nowText).run();
+          await db.prepare(`INSERT INTO transactions (user_id,type,amount,description,created_at)
+            VALUES (?,'bingo_coin',?,?,?)`).bind(entry.user_id,entry.entry_cost,'بازگشت ورودی '+tournamentTitle(event.tournament_type),nowText).run();
         }
       }
-      await db.prepare(\`UPDATE tournament_events SET status='cancelled',stage='cancelled',registered_count=?,prize_pool=?,finished_at=?,updated_at=?
-        WHERE id=? AND status IN ('scheduled','registration')\`).bind(players,pool,nowText,nowText,event.id).run();
+      await db.prepare(`UPDATE tournament_events SET status='cancelled',stage='cancelled',registered_count=?,prize_pool=?,finished_at=?,updated_at=?
+        WHERE id=? AND status IN ('scheduled','registration')`).bind(players,pool,nowText,nowText,event.id).run();
       continue;
     }
     const stages = buildTournamentStages(event.tournament_type,players);
-    await db.prepare(\`UPDATE tournament_events SET status='running',stage=?,registered_count=?,prize_pool=?,stages_json=?,updated_at=?
-      WHERE id=? AND status IN ('scheduled','registration')\`)
+    await db.prepare(`UPDATE tournament_events SET status='running',stage=?,registered_count=?,prize_pool=?,stages_json=?,updated_at=?
+      WHERE id=? AND status IN ('scheduled','registration')`)
       .bind(stages[0]?.key || 'final',players,pool,JSON.stringify(stages),nowText,event.id).run();
   }
   await ensureRecurringTournamentSchedule(db, nowMs + 1000);
@@ -1152,8 +1152,8 @@ async function settleDueRecurringTournaments(db, nowMs = Date.now()) {
 
 async function recurringTournamentSnapshots(db) {
   await settleDueRecurringTournaments(db);
-  const rows = await db.prepare(\`SELECT * FROM tournament_events
-    ORDER BY CASE WHEN status IN ('scheduled','registration','running') THEN 0 ELSE 1 END, scheduled_at ASC LIMIT 12\`).all();
+  const rows = await db.prepare(`SELECT * FROM tournament_events
+    ORDER BY CASE WHEN status IN ('scheduled','registration','running') THEN 0 ELSE 1 END, scheduled_at ASC LIMIT 12`).all();
   return (rows.results || []).map(event => ({
     id:event.id, tournament_type:event.tournament_type, scheduled_at:event.scheduled_at,
     registration_opens_at:event.registration_opens_at,status:event.status,stage:event.stage,
@@ -1171,21 +1171,21 @@ async function registerRecurringTournament(db,user,request) {
   if (!cost) throw new HttpError(400,'نوع تورنومنت معتبر نیست.');
   await settleDueRecurringTournaments(db);
   const nowText = new Date().toISOString();
-  const event = await db.prepare(\`SELECT * FROM tournament_events
-    WHERE tournament_type=? AND status='registration' AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1\`).bind(type,nowText).first();
+  const event = await db.prepare(`SELECT * FROM tournament_events
+    WHERE tournament_type=? AND status='registration' AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1`).bind(type,nowText).first();
   if (!event) throw new HttpError(409,'ثبت‌نام این دوره در حال حاضر باز نیست.');
   const existing = await db.prepare('SELECT id FROM tournament_event_entries WHERE event_id=? AND user_id=?').bind(event.id,user.id).first();
   if (existing) throw new HttpError(409,'برای این دوره قبلاً ثبت‌نام کرده‌ای.');
-  const debit = await db.prepare(\`UPDATE users SET bingo_coins=bingo_coins-?
-    WHERE id=? AND bingo_coins>=?\`).bind(cost,user.id,cost).run();
+  const debit = await db.prepare(`UPDATE users SET bingo_coins=bingo_coins-?
+    WHERE id=? AND bingo_coins>=?`).bind(cost,user.id,cost).run();
   if (!Number(debit.meta?.changes || 0)) throw new HttpError(409,'بینگوکوین کافی برای ثبت‌نام نداری.');
   try {
-    await db.prepare(\`INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,created_at)
-      VALUES (?,?,?,'registered',?)\`).bind(event.id,user.id,cost,nowText).run();
+    await db.prepare(`INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,created_at)
+      VALUES (?,?,?,'registered',?)`).bind(event.id,user.id,cost,nowText).run();
     await db.batch([
       db.prepare('UPDATE tournament_events SET registered_count=registered_count+1,prize_pool=prize_pool+?,updated_at=? WHERE id=? AND status=\\'registration\\'').bind(cost,nowText,event.id),
-      db.prepare(\`INSERT INTO transactions (user_id,type,amount,description,created_at)
-        VALUES (?,'bingo_coin',?,?,?)\`).bind(user.id,-cost,'ورود به '+tournamentTitle(type),nowText)
+      db.prepare(`INSERT INTO transactions (user_id,type,amount,description,created_at)
+        VALUES (?,'bingo_coin',?,?,?)`).bind(user.id,-cost,'ورود به '+tournamentTitle(type),nowText)
     ]);
   } catch (error) {
     await db.prepare('UPDATE users SET bingo_coins=bingo_coins+? WHERE id=?').bind(cost,user.id).run();
@@ -1199,10 +1199,10 @@ async function registerRecurringTournament(db,user,request) {
 async function myRecurringTournamentData(db,userId) {
   const [events,entries] = await Promise.all([
     recurringTournamentSnapshots(db),
-    db.prepare(\`SELECT e.event_id,e.entry_cost,e.status,e.total_points,e.line_wins,e.full_wins,e.created_at,
+    db.prepare(`SELECT e.event_id,e.entry_cost,e.status,e.total_points,e.line_wins,e.full_wins,e.created_at,
       t.tournament_type,t.scheduled_at,t.status AS event_status,t.stage,t.prize_pool
       FROM tournament_event_entries e JOIN tournament_events t ON t.id=e.event_id
-      WHERE e.user_id=? ORDER BY t.scheduled_at DESC LIMIT 30\`).bind(userId).all()
+      WHERE e.user_id=? ORDER BY t.scheduled_at DESC LIMIT 30`).bind(userId).all()
   ]);
   return {events,entries:entries.results || [],rooms:events};
 }
