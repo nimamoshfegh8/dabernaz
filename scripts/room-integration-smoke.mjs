@@ -67,7 +67,7 @@ async function roomFor(account, roomId) {
 }
 async function join(account, roomId, cardsCount = 1) {
   const result = await request('/api/rooms/' + roomId + '/join', {
-    account, method: 'POST', body: { cardsCount },
+    account, method: 'POST', body: { cardsCount, purchaseConfirmed: true },
   });
   assert.equal(result.ok, true);
   return result.room;
@@ -139,6 +139,20 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const balancesBeforeBuy = new Map();
   for (const account of accounts) balancesBeforeBuy.set(account.memberId, Number((await accountMe(account)).balance));
 
+  // A join request without an explicit purchase confirmation must not charge or enqueue a card.
+  const beforeUnconfirmed = Number((await accountMe(accounts[0])).balance);
+  const unconfirmedResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
+    method: 'POST',
+    headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ cardsCount: 1 }),
+  });
+  assert.equal(unconfirmedResponse.status, 400, roomId + ': purchase must require explicit confirmation');
+  assert.equal(Number((await accountMe(accounts[0])).balance), beforeUnconfirmed,
+    roomId + ': unconfirmed purchase must not debit the wallet');
+  const untouched = await roomFor(accounts[0], roomId);
+  assert.equal(untouched.playerCount, 0);
+  assert.equal(untouched.cardCount, 0);
+
   // The first successful card purchase opens a fixed 150-second registration window.
   const firstPurchase = await join(accounts[0], roomId, 1);
   const firstDeadline = Number(firstPurchase.registrationDeadline);
@@ -167,7 +181,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const sixthCardResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
     method: 'POST',
     headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
-    body: JSON.stringify({ cardsCount: 1 }),
+    body: JSON.stringify({ cardsCount: 1, purchaseConfirmed: true }),
   });
   assert.equal(sixthCardResponse.status, 409, roomId + ': sixth card must be rejected');
   assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeSixthCard,
@@ -252,7 +266,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const latePurchase = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
     method: 'POST',
     headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
-    body: JSON.stringify({ cardsCount: 1 }),
+    body: JSON.stringify({ cardsCount: 1, purchaseConfirmed: true }),
   });
   assert.equal(latePurchase.status, 409, roomId + ': purchases after the timer must be rejected');
 
@@ -371,6 +385,43 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     assert.equal(Object.hasOwn(winner, 'userId'), false,
       roomId + ': public history must hide internal database user IDs');
   }
+
+  // A stale client must not buy into a finished round. Opening a new round is free;
+  // the subsequent explicit card purchase is the only action that debits the wallet.
+  const balanceBeforeNextSession = Number((await accountMe(accounts[0])).balance);
+  const staleJoinResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/join', {
+    method: 'POST',
+    headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ cardsCount: 1, purchaseConfirmed: true }),
+  });
+  assert.equal(staleJoinResponse.status, 409,
+    roomId + ': a finished room must not be silently reset by a purchase request');
+  assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeNextSession,
+    roomId + ': stale join after finished round must not charge the wallet');
+  const nextSessionResponse = await fetch(baseUrl + '/api/rooms/' + roomId + '/next', {
+    method: 'POST',
+    headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(nextSessionResponse.status, 200, roomId + ': next-session navigation must succeed without a purchase');
+  const nextSessionPayload = await nextSessionResponse.json();
+  assert.equal(nextSessionPayload.room.status, 'waiting');
+  assert.equal(nextSessionPayload.room.playerCount, 0);
+  assert.equal(nextSessionPayload.room.cardCount, 0);
+  assert.equal(nextSessionPayload.room.myCards.length, 0);
+  assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeNextSession,
+    roomId + ': next-session navigation must not debit the wallet');
+  const firstNextSessionPurchase = await join(accounts[0], roomId, 1);
+  assert.equal(firstNextSessionPurchase.playerCount, 1);
+  assert.equal(firstNextSessionPurchase.cardCount, 1);
+  assert.equal(Number((await accountMe(accounts[0])).balance), balanceBeforeNextSession - economics.price,
+    roomId + ': card must be charged only after the separate purchase action');
+  const repeatedNextSession = await request('/api/rooms/' + roomId + '/next', {
+    account: accounts[0], method: 'POST', body: {},
+  });
+  assert.equal(repeatedNextSession.room.playerCount, 1);
+  assert.equal(repeatedNextSession.room.cardCount, 1,
+    roomId + ': next-session endpoint must preserve an already waiting queue');
 }
 
 // An expired single-player room must be cancelled, fully refunded and reset.
@@ -387,8 +438,8 @@ assert.equal(refundedRoom.status, 'waiting');
 assert.equal(refundedRoom.joined, false);
 assert.equal(refundedRoom.playerCount, 0);
 assert.equal(refundedRoom.cardCount, 0);
-assert.equal(Number((await accountMe(accounts[0])).balance), beforeSoloRefund,
-  'an expired room below the two-player minimum must return the exact card payment');
+assert.equal(Number((await accountMe(accounts[0])).balance), beforeSoloRefund + roomEconomics.room5000.price,
+  'an expired room below the two-player minimum must return every card payment, including the earlier next-session card');
 
 // Referral reward: five distinct newly registered accounts grant exactly one milestone.
 const inviterBefore = await accountMe(accounts[0]);

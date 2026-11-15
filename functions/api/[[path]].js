@@ -845,7 +845,7 @@ async function publicRoom(db, room, userId) {
 }
 
 async function handleRoom(db, request, user, path) {
-  const match = path.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave))?$/);
+  const match = path.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave|next))?$/);
   if (!match) return null;
   const [, roomId, action = ''] = match;
   const userId = Number(user.id);
@@ -873,9 +873,30 @@ async function handleRoom(db, request, user, path) {
     return json({ok:true,room:await publicRoom(db,room,userId)});
   }
 
+  if (request.method === 'POST' && action === 'next') {
+    validateWriteOrigin(request);
+    const result = await withRoomLock(db,roomId,async()=>{
+      let room = await loadRoom(db,roomId);
+      if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
+        const started = await startRoom(db,room);
+        if (started) await saveRoom(db,room);
+        else room = await cancelExpiredWaitingRoom(db,room);
+      }
+      if (room.status === 'playing') return {conflict:true,room:await publicRoom(db,room,userId)};
+      if (room.status === 'finished') {
+        room = newRoom(roomId);
+        await saveRoom(db,room);
+      }
+      return {room:await publicRoom(db,room,userId)};
+    });
+    if (result.conflict) return json({error:'این سانس هنوز در حال اجراست و امکان باز کردن سانس بعدی وجود ندارد.',room:result.room},409);
+    return json({ok:true,room:result.room});
+  }
+
   if (request.method === 'POST' && action === 'join') {
     validateWriteOrigin(request);
     const body = await readJson(request);
+    if (body.purchaseConfirmed !== true) throw new HttpError(400,'برای خرید کارت باید خرید را جداگانه تأیید کنی.');
     const requested = Math.max(1,Math.min(MAX_CARDS_PER_PLAYER,Math.floor(Number(body.cardsCount)||1)));
     const result = await withRoomLock(db,roomId,async()=>{
       let room = await loadRoom(db,roomId);
@@ -886,8 +907,7 @@ async function handleRoom(db, request, user, path) {
         if (started) await saveRoom(db,room);
         else room = await cancelExpiredWaitingRoom(db, room);
       }
-      if (room.status === 'playing') return {conflict:true,room:await publicRoom(db,room,userId)};
-      if (room.status === 'finished') room = newRoom(roomId);
+      if (room.status === 'playing' || room.status === 'finished') return {conflict:true,room:await publicRoom(db,room,userId)};
       const key = String(userId);
       const alreadyQueued = room.queue.some(id=>Number(id)===userId);
       const owned = alreadyQueued ? Math.max(0,Number(room.cardCounts?.[key])||room.queuedCards?.[key]?.length||0) : 0;
