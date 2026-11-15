@@ -1536,6 +1536,108 @@ async function myRecurringTournamentData(db, userId) {
   return { events, entries: ownedEntries, rooms: events };
 }
 
+
+let githubActionsJwksCache = null;
+let githubActionsJwksLoadedAt = 0;
+
+function decodeBase64UrlBytes(segment) {
+  const normalized = String(segment || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function decodeBase64UrlJson(segment) {
+  return JSON.parse(new TextDecoder().decode(decodeBase64UrlBytes(segment)));
+}
+
+async function githubActionsSigningKey(kid) {
+  const now = Date.now();
+  if (!githubActionsJwksCache || now - githubActionsJwksLoadedAt > 15 * 60 * 1000) {
+    const response = await fetch("https://token.actions.githubusercontent.com/.well-known/jwks", {
+      headers: { accept: "application/json" },
+      cf: { cacheTtl: 900, cacheEverything: true }
+    });
+    if (!response.ok) throw new Error("GitHub Actions OIDC signing keys are temporarily unavailable.");
+    const jwks = await response.json();
+    if (!Array.isArray(jwks.keys)) throw new Error("GitHub Actions OIDC signing keys response is invalid.");
+    githubActionsJwksCache = jwks.keys;
+    githubActionsJwksLoadedAt = now;
+  }
+  const jwk = githubActionsJwksCache.find((item) => item.kid === kid && item.kty === "RSA" && item.use === "sig");
+  if (!jwk) {
+    githubActionsJwksCache = null;
+    githubActionsJwksLoadedAt = 0;
+    throw new Error("GitHub Actions OIDC signing key was not found.");
+  }
+  return crypto.subtle.importKey(
+    "jwk",
+    jwk,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+}
+
+async function verifyTournamentSchedulerRequest(request) {
+  const authorization = request.headers.get("authorization") || "";
+  if (!/^Bearer\s+/i.test(authorization)) return false;
+  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  if (!token || token.length > 8192) return false;
+  const segments = token.split(".");
+  if (segments.length !== 3) return false;
+
+  let header;
+  let claims;
+  let signature;
+  try {
+    header = decodeBase64UrlJson(segments[0]);
+    claims = decodeBase64UrlJson(segments[1]);
+    signature = decodeBase64UrlBytes(segments[2]);
+  } catch (_) {
+    return false;
+  }
+  if (header.alg !== "RS256" || typeof header.kid !== "string" || !signature.length) return false;
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  const expectedWorkflow = "nimamoshfegh8/dabernaz/.github/workflows/tournament-scheduler.yml@refs/heads/main";
+  if (
+    claims.iss !== "https://token.actions.githubusercontent.com" ||
+    !audience.includes("dabernaz-tournament-scheduler") ||
+    claims.repository !== "nimamoshfegh8/dabernaz" ||
+    String(claims.repository_id) !== "1445832866" ||
+    claims.ref !== "refs/heads/main" ||
+    claims.sub !== "repo:nimamoshfegh8/dabernaz:ref:refs/heads/main" ||
+    claims.workflow_ref !== expectedWorkflow ||
+    !["schedule", "workflow_dispatch"].includes(claims.event_name) ||
+    !Number.isFinite(Number(claims.exp)) ||
+    Number(claims.exp) <= nowSeconds ||
+    !Number.isFinite(Number(claims.nbf)) ||
+    Number(claims.nbf) > nowSeconds + 60 ||
+    !Number.isFinite(Number(claims.iat)) ||
+    Number(claims.iat) > nowSeconds + 60
+  ) {
+    return false;
+  }
+
+  try {
+    const key = await githubActionsSigningKey(header.kid);
+    const message = encoder.encode(segments[0] + "." + segments[1]);
+    return await crypto.subtle.verify(
+      { name: "RSASSA-PKCS1-v1_5" },
+      key,
+      signature,
+      message
+    );
+  } catch (error) {
+    console.error("[dabernaz-tournament-oidc]", String(error && error.message || error));
+    return false;
+  }
+}
+
 async function routeRequest(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -1581,6 +1683,15 @@ async function routeRequest(request, env) {
 
   if (request.method === 'GET' && path === '/api/rooms/history') {
     return json({ ok: true, rounds: await recentWinners(env.DB) });
+  }
+
+  if (request.method === 'POST' && path === '/api/tournaments/advance') {
+    if (!await verifyTournamentSchedulerRequest(request)) {
+      throw new HttpError(401, 'درخواست زمان‌بندی مسابقه معتبر نیست.');
+    }
+    await advanceTournamentSystem(env.DB, Date.now(), true);
+    const rooms = await publicTournamentSnapshots(env.DB);
+    return json({ ok: true, advanced: true, rooms });
   }
 
   if (request.method === 'GET' && path === '/api/tournaments') {

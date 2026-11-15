@@ -381,6 +381,15 @@ assert.ok(ticketCreated.ticketId > 0);
 const ticketList = await request('/api/tickets', { account: accounts[0] });
 assert.ok(ticketList.tickets.some(ticket => ticket.id === ticketCreated.ticketId && ticket.subject === ticketSubject));
 
+// Public callers and browser clients must not be able to trigger server-owned draws.
+const publicSchedulerAttempt = await fetch(baseUrl + '/api/tournaments/advance', {
+  method: 'POST',
+  headers: { origin, 'content-type': 'application/json' },
+  body: '{}',
+});
+assert.equal(publicSchedulerAttempt.status, 401,
+  'tournament advancement must reject requests without a verified GitHub Actions OIDC token');
+
 // Tournament balances are atomic, registrations are unique, and the VIP window
 // follows its real monthly schedule instead of being incorrectly assumed open every day.
 const beforeTournament = await accountMe(accounts[0]);
