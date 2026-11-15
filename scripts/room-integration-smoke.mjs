@@ -452,7 +452,33 @@ assert.ok(privateSimple.my_card.every(row => row.length === 9), 'private card mu
 const privateNumbers = privateSimple.my_card.flat().filter(Number.isInteger);
 assert.equal(privateNumbers.length, 15, 'private card must contain exactly 15 numbers');
 assert.equal(new Set(privateNumbers).size, 15, 'private card numbers must be unique');
-assert.equal(privateSimple.my_matched_count, 0, 'newly created card starts with no matched numbers');
+const firstRoundCalled = privateSimple.current_round.called_numbers || [];
+assert.ok(firstRoundCalled.length <= 1, 'a new tournament round must advance by at most one number per authenticated poll');
+assert.equal(privateSimple.my_matched_count,
+  privateNumbers.filter(number => firstRoundCalled.includes(number)).length,
+  'private card match count must reflect the called numbers');
+
+// Public lobby polling must never advance the live draw. When an authenticated player
+// returns after a long delay, exactly one number is drawn, not the entire backlog.
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', "UPDATE tournament_rounds SET next_draw_at = CAST(strftime('%s','now') AS INTEGER)*1000-60000 WHERE id = (SELECT current_round_id FROM tournament_events WHERE id='" + publicLiveSimple.id + "')",
+], { stdio: 'inherit' });
+const dueBeforePublicPoll = await request('/api/tournaments/me', { account: accounts[0] });
+const dueEventBefore = dueBeforePublicPoll.rooms.find(room => room.id === publicLiveSimple.id);
+const calledBefore = (dueEventBefore.current_round.called_numbers || []).length;
+await request('/api/tournaments');
+await request('/api/tournaments');
+const dueAfterPublicPoll = await request('/api/tournaments/me', { account: accounts[0] });
+const dueEventAfter = dueAfterPublicPoll.rooms.find(room => room.id === publicLiveSimple.id);
+const calledAfter = (dueEventAfter.current_round.called_numbers || []).length;
+assert.equal(calledAfter, calledBefore + 1,
+  'an overdue authenticated draw must advance exactly one number');
+const immediateRepeat = await request('/api/tournaments/me', { account: accounts[0] });
+const repeatedEvent = immediateRepeat.rooms.find(room => room.id === publicLiveSimple.id);
+assert.equal((repeatedEvent.current_round.called_numbers || []).length, calledAfter,
+  'a second poll before the three-second interval must not draw another number');
 
 
 // Client-supplied outcomes are rejected; only server-computed game sessions count.
