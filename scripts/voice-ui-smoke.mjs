@@ -46,7 +46,7 @@ assert.match(android, /nativeTtsReady = true/);
 assert.match(android, /setOnUtteranceProgressListener/);
 
 assert.match(index, /app\.js\?v=4\.20\.0/);
-assert.match(sw, /dabernaz-shell-v22/);
+assert.match(sw, /dabernaz-shell-v23/);
 assert.match(sw, /app\.js\?v=4\.20\.0/);
 assert.match(swRegister, /sw\.js\?v=13/);
 assert.match(app, /4\.20\.0/);
