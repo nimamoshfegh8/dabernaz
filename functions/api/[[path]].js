@@ -1012,8 +1012,8 @@ async function advanceServerGame(db,user,request,path) {
     validateWriteOrigin(request);
     const body=await readJson(request), gameType=String(body.gameType||'');
     if(!['rps','tic'].includes(gameType)) throw new HttpError(400,'نوع بازی معتبر نیست.');
-    const active=await db.prepare("SELECT id FROM game_sessions WHERE user_id=? AND game_type=? AND status='playing' ORDER BY created_at DESC LIMIT 1").bind(user.id,gameType).first();
-    if(active) throw new HttpError(409,'یک مسابقه فعال از این نوع داری؛ آن را ادامه بده.',{matchId:active.id});
+    const active=await db.prepare("SELECT id,game_type,state_json FROM game_sessions WHERE user_id=? AND game_type=? AND status='playing' ORDER BY created_at DESC LIMIT 1").bind(user.id,gameType).first();
+    if(active) return json({ok:true,match:publicGameSession(active,JSON.parse(active.state_json))});
     const id=randomToken(16), now=new Date().toISOString();
     const state=gameType==='rps'?{round:1,player:0,bot:0,draws:0,history:[],rounds:[],finished:false,result:null}:{board:Array(9).fill(''),moves:0,finished:false,result:null};
     try {
