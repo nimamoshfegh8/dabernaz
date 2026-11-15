@@ -62,6 +62,8 @@ assert.match(app, /numberToPersianSpeechText\(number\)/);
 assert.match(app, /tour-my-card-grid/);
 assert.match(app, /room\.my_card/);
 assert.match(app, /tour-my-card-stats/);
+assert.match(app, /function tournamentCountdownText/);
+assert.match(app, /tour-prize-shares/);
 assert.match(validator, /process\.exitCode = 1/);
 
 const currentManifest = JSON.parse(manifest);

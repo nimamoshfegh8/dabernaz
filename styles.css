@@ -769,3 +769,48 @@
   color: #f2d38d;
   font-variant-numeric: tabular-nums;
 }
+
+
+/* Schedule countdown and transparent tournament prize split */
+.tour-card-countdown {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(214, 180, 109, .2);
+  border-radius: 10px;
+  background: rgba(214, 180, 109, .07);
+  color: #e8c77f;
+  font-size: 10px;
+  line-height: 1.8;
+  font-variant-numeric: tabular-nums;
+}
+.tour-detail-countdown {
+  margin-top: 10px;
+  text-align: center;
+}
+.tour-prize-shares {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(214, 180, 109, .22);
+  border-radius: 12px;
+  background: rgba(0,0,0,.14);
+}
+.tour-prize-shares > b {
+  margin-bottom: 2px;
+  color: #edcf8e;
+  font-size: 11px;
+}
+.tour-prize-shares > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  color: #ddd3c2;
+  font-size: 11px;
+}
+.tour-prize-shares strong {
+  color: #f4d58c;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
