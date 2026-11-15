@@ -627,6 +627,7 @@ async function loadAuthenticatedUser() {
     apiReady = false;
     apiErrorMessage = error?.message || 'ارتباط با API برقرار نشد.';
     currentUser = null;
+    supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;
     state = { ...cloneData(defaultState), settings:state.settings };
     authReady = true;
     saveState();
@@ -651,6 +652,7 @@ async function loadAuthenticatedUser() {
     state = { ...cloneData(defaultState), settings:state.settings };
     showToast(apiErrorMessage);
   }
+  if(!currentUser){supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;}
   authReady = true;
 
   // Completed room history is public; load it even for visitors who are not signed in.
