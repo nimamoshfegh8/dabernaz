@@ -1604,13 +1604,21 @@ async function verifyTournamentSchedulerRequest(request) {
   const nowSeconds = Math.floor(Date.now() / 1000);
   const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
   const expectedWorkflow = "nimamoshfegh8/dabernaz/.github/workflows/tournament-scheduler.yml@refs/heads/main";
+  // GitHub now issues immutable subject claims for repositories created after
+  // 2026-07-15. Accept that format and the legacy format, while independently
+  // pinning both repository and owner IDs so this trust remains repo-specific.
+  const expectedSubjects = new Set([
+    "repo:nimamoshfegh8/dabernaz:ref:refs/heads/main",
+    "repo:nimamoshfegh8@352508767/dabernaz@1445832866:ref:refs/heads/main"
+  ]);
   if (
     claims.iss !== "https://token.actions.githubusercontent.com" ||
     !audience.includes("dabernaz-tournament-scheduler") ||
     claims.repository !== "nimamoshfegh8/dabernaz" ||
     String(claims.repository_id) !== "1445832866" ||
+    String(claims.repository_owner_id) !== "352508767" ||
     claims.ref !== "refs/heads/main" ||
-    claims.sub !== "repo:nimamoshfegh8/dabernaz:ref:refs/heads/main" ||
+    !expectedSubjects.has(claims.sub) ||
     claims.workflow_ref !== expectedWorkflow ||
     !["schedule", "workflow_dispatch"].includes(claims.event_name) ||
     !Number.isFinite(Number(claims.exp)) ||
