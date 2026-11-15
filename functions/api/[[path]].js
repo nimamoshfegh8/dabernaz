@@ -1864,7 +1864,9 @@ async function routeRequest(request, env) {
   const isSupportAdmin=supportAdmins.includes(String(user.email||'').trim().toLowerCase());
   if(path.startsWith('/api/admin/support')){
     if(!isSupportAdmin) throw new HttpError(403,'دسترسی مدیر پشتیبانی برای این حساب فعال نیست.');
-    const adminParts=path.split('/').filter(Boolean);\n    const match=adminParts.length>=4&&/^\\d+$/.test(adminParts[3])?[null,adminParts[3],adminParts[4]||'']:null;
+    const adminParts=path.split('/').filter(Boolean);
+    const adminId=adminParts[3]||'';
+    const match=adminParts.length>=4&&Number.isSafeInteger(Number(adminId))&&String(Number(adminId))===adminId?[null,adminId,adminParts[4]||'']:null;
     if(request.method==='GET'&&path==='/api/admin/support'){
       const status=String(new URL(request.url).searchParams.get('status')||'all');
       if(!['all','open','answered','closed'].includes(status)) throw new HttpError(400,'فیلتر وضعیت معتبر نیست.');
@@ -1952,7 +1954,9 @@ async function routeRequest(request, env) {
       FROM support_tickets t WHERE t.user_id=? ORDER BY t.id DESC LIMIT 30`).bind(user.id).all();
     return json({ok:true,tickets:rows.results||[]});
   }
-  const ticketParts=path.split('/').filter(Boolean);\n  const userTicket=ticketParts.length===3&&ticketParts[0]==='api'&&ticketParts[1]==='tickets'&&/^\\d+$/.test(ticketParts[2])?[null,ticketParts[2]]:null;
+  const ticketParts=path.split('/').filter(Boolean);
+  const ticketIdPart=ticketParts[2]||'';
+  const userTicket=ticketParts.length===3&&ticketParts[0]==='api'&&ticketParts[1]==='tickets'&&Number.isSafeInteger(Number(ticketIdPart))&&String(Number(ticketIdPart))===ticketIdPart?[null,ticketIdPart]:null;
   if(userTicket&&request.method==='GET'){
     const id=Number(userTicket[1]);
     const ticket=await env.DB.prepare('SELECT id,subject,status,created_at,message FROM support_tickets WHERE id=? AND user_id=?').bind(id,user.id).first();
