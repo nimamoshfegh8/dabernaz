@@ -92,7 +92,11 @@ jobs:
           fi
 
           cat /tmp/dabernaz-health.json
-          BASE_URL=http://127.0.0.1:8788 node scripts/room-integration-smoke.mjs
+          if ! BASE_URL=http://127.0.0.1:8788 node scripts/room-integration-smoke.mjs; then
+            echo '--- Cloudflare Pages local runtime logs ---'
+            cat /tmp/dabernaz-pages.log
+            exit 1
+          fi
 
       # This is intentionally strict: a green test run must not call a release complete
       # until the selected Sage Woman MP3 and all 90 indexed clips have been supplied.
