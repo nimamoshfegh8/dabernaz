@@ -146,8 +146,11 @@ function lineComplete(card, called) {
   });
 }
 
-export function scoreTournamentPlayers(players, calledNumbers, tournamentType = 'simple') {
+export function scoreTournamentPlayers(players, calledNumbers, tournamentType = 'simple', officialLineWinnerIds = null) {
   const called = new Set(calledNumbers);
+  const officialLineWinners = officialLineWinnerIds === null
+    ? null
+    : new Set(officialLineWinnerIds.map((id) => String(id)));
   const evaluated = players.map((player) => {
     const card = typeof player.card_json === 'string' ? JSON.parse(player.card_json) : player.card_json;
     const numbers = cardNumbers(card);
@@ -155,7 +158,9 @@ export function scoreTournamentPlayers(players, calledNumbers, tournamentType = 
     return {
       userId: Number(player.user_id),
       matchedCount,
-      lineHit: lineComplete(card, calledNumbers),
+      lineHit: officialLineWinners === null
+        ? lineComplete(card, calledNumbers)
+        : officialLineWinners.has(String(player.user_id)),
       fullHit: numbers.length === 15 && matchedCount === 15,
       progressBonus: 0,
     };

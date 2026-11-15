@@ -97,4 +97,16 @@ assert.equal(vipScore.fullHit, true);
 assert.equal(vipScore.lineHit, true);
 assert.equal(vipScore.score, 57, 'VIP tournament must use 15/30 plus 10 progress and 2 attendance points');
 
+// A line is awarded to the first player (or simultaneous group) recorded by
+// the server. A later player who completes a line before the full-card winner
+// must not receive the official line-win bonus.
+const sameCards = [
+  { user_id: 1, card_json: JSON.stringify(lastCard) },
+  { user_id: 2, card_json: JSON.stringify(lastCard) },
+];
+const officialLineScores = scoreTournamentPlayers(sameCards, called, 'simple', [1]);
+assert.equal(officialLineScores.find(item => item.userId === 1).lineHit, true);
+assert.equal(officialLineScores.find(item => item.userId === 2).lineHit, false,
+  'non-winning line completion must not be counted as an official line win');
+
 console.log('Tournament schedule, card generation and separate simple/VIP scoring tests passed.');
