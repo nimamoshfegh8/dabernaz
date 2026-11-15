@@ -31,7 +31,7 @@ async function request(path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(method + ' ' + path + ' returned ' + response.status + ': ' + (data.error || 'no API error message'));
+    throw new Error(method + ' ' + path + ' returned ' + response.status + ': ' + (data.error || 'no API error message') + (data.requestId ? ' [request ' + data.requestId + ']' : '') + (data.debug ? '\\n' + JSON.stringify(data.debug, null, 2) : ''));
   }
   return data;
 }

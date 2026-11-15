@@ -1670,6 +1670,9 @@ export async function onRequest({ request, env }) {
       }));
     }
     const message = status >= 500 ? 'خطای داخلی سرور رخ داد. تنظیم D1 و گزارش‌های Worker را بررسی کن.' : error.message;
-    return json({ error: message, ...(status >= 500 ? { requestId } : {}), ...(error?.extra || {}) }, status);
+    const testDiagnostics = env.DABERNAZ_TEST_DIAGNOSTICS === '1' && status >= 500
+      ? { debug: { name: error?.name || 'Error', message: String(error?.message || error), stack: typeof error?.stack === 'string' ? error.stack : undefined } }
+      : {};
+    return json({ error: message, ...(status >= 500 ? { requestId } : {}), ...(error?.extra || {}), ...testDiagnostics }, status);
   }
 }
