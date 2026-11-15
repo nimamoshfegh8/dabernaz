@@ -573,7 +573,7 @@ const vipBalancesBefore = await Promise.all(accounts.slice(0, 5).map(async accou
 ));
 const vipFixtureSql = [
   "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,current_round_id,started_at,created_at,updated_at) VALUES ('" +
-    vipFixtureId + "','bingo',datetime('now','-1 second'),datetime('now','-8 days'),'running',5,30,500,5,'final','[{\\"key\\":\\"final\\",\\"rounds\\":1}]',1,1,'" +
+    vipFixtureId + "','bingo',datetime('now','-1 second'),datetime('now','-8 days'),'running',5,30,500,5,'final',json_array(json_object('key','final','rounds',1)),1,1,'" +
     vipRoundId + "',datetime('now'),datetime('now'),datetime('now'))",
   ...accounts.slice(0, 5).map(account =>
     "UPDATE users SET bingo_coins=bingo_coins-100 WHERE id=" + Number(account.id) + " AND bingo_coins>=100"
