@@ -708,3 +708,64 @@
   color: #f6d889;
   font-size: 11px;
 }
+
+
+/* Per-account Bingo card shown only on the authenticated tournament view */
+.tour-my-card {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(214, 180, 109, .26);
+  border-radius: 14px;
+  background: rgba(0,0,0,.18);
+}
+.tour-my-card-heading,
+.tour-my-card-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #e9dfcd;
+  font-size: 10px;
+}
+.tour-my-card-heading span {
+  color: #d6b46d;
+  white-space: nowrap;
+}
+.tour-my-card-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 10px;
+  direction: ltr;
+}
+.tour-my-card-cell {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 6px;
+  background: rgba(255,255,255,.07);
+  color: #f3eee4;
+  font-size: clamp(9px, 2.6vw, 12px);
+  font-variant-numeric: tabular-nums;
+}
+.tour-my-card-cell.is-empty {
+  border-color: transparent;
+  background: rgba(255,255,255,.025);
+}
+.tour-my-card-cell.is-called {
+  border-color: rgba(113, 214, 170, .85);
+  background: linear-gradient(145deg, rgba(43, 147, 105, .95), rgba(23, 95, 75, .95));
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 0 10px rgba(84, 202, 155, .18);
+}
+.tour-my-card-stats {
+  margin-top: 10px;
+  color: #bdb5a7;
+}
+.tour-my-card-stats b {
+  color: #f2d38d;
+  font-variant-numeric: tabular-nums;
+}

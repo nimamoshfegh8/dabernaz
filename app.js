@@ -1045,9 +1045,21 @@ function tournamentLivePanel(room, type) {
   const winners = Array.isArray(current?.full_winner_ids) ? current.full_winner_ids : [];
   const top = Array.isArray(room.top_players) ? room.top_players : [];
   const recent = called.slice(-12).reverse().map(number => '<span>' + faDigits(number) + '</span>').join('');
+  const card = Array.isArray(room.my_card) ? room.my_card : [];
+  const calledSet = new Set(called);
+  const cardMarkup = card.length === 3
+    ? '<div class="tour-my-card"><div class="tour-my-card-heading"><b>کارت اختصاصی تو</b><span>' + faDigits(Number(room.my_matched_count)||0) + ' / ۱۵ عدد</span></div><div class="tour-my-card-grid">' +
+      card.map(row => row.map(value => Number.isInteger(value)
+        ? '<span class="tour-my-card-cell' + (calledSet.has(value) ? ' is-called' : '') + '">' + faDigits(value) + '</span>'
+        : '<span class="tour-my-card-cell is-empty" aria-hidden="true"></span>').join('')).join('') +
+      '</div><div class="tour-my-card-stats"><span>امتیاز این دور: <b>' + faDigits(Number(room.my_round_score)||0) + '</b></span><span>مجموع امتیاز: <b>' + faDigits(Number(room.my_total_points)||0) + '</b></span></div>' +
+      (room.my_line_hit ? '<p class="tour-winner-notice">✓ یک خط روی کارت تو ثبت شده است</p>' : '') +
+      (room.my_full_hit ? '<p class="tour-winner-notice">🏆 کارت کامل تو برنده شده است</p>' : '') + '</div>'
+    : '';
   const leaderboard = top.length ? top.map((player,index) => '<li><b>' + faDigits(index+1) + '. ' + escapeHTML(player.name || 'بازیکن') + '</b><span>' + faDigits(Number(player.points)||0) + ' امتیاز</span></li>').join('') : '<li class="muted-note">هنوز امتیازی ثبت نشده است.</li>';
   return `<section class="tour-live-panel"><div class="tour-live-heading"><div><small>LIVE TOURNAMENT</small><h3>${escapeHTML(stage)}</h3></div><span class="tour-live-state">${room.status === 'running' ? '● زنده' : '● برنامه‌ریزی‌شده'}</span></div>
     ${current ? `<div class="tour-live-number"><small>آخرین شماره اعلام‌شده</small><b>${latest ? faDigits(latest) : '—'}</b><span>${faDigits(called.length)} / ۹۰ شماره</span></div><div class="tour-called-list">${recent || '<span>هنوز شماره‌ای اعلام نشده</span>'}</div>` : '<p class="muted-note">پس از شروع مسابقه، شماره‌های اعلام‌شده و جدول زنده در این بخش نمایش داده می‌شوند.</p>'}
+    ${cardMarkup}
     ${winners.length ? '<p class="tour-winner-notice">🏆 برنده کامل این دور: ' + winners.map(faDigits).join('، ') + '</p>' : ''}
     <div class="tour-live-leaders"><b>رتبه‌بندی برترها</b><ol>${leaderboard}</ol></div></section>`;
 }
