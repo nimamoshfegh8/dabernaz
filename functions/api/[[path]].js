@@ -1479,24 +1479,30 @@ async function registerRecurringTournament(db, user, request) {
   if (!cost) throw new HttpError(400, "نوع تورنومنت معتبر نیست.");
   await advanceTournamentSystem(db);
   const nowText = new Date().toISOString();
-  const event = await db.prepare("SELECT * FROM tournament_events WHERE tournament_type=? AND status='registration' AND registered_count<capacity AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1")
+  const event = await db.prepare("SELECT * FROM tournament_events WHERE tournament_type=? AND status='registration' AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1")
     .bind(type, nowText).first();
   if (!event) throw new HttpError(409, "ثبت‌نام این دوره در حال حاضر باز نیست.");
+
   const result = await db.batch([
-    db.prepare("UPDATE users SET bingo_coins=bingo_coins-? WHERE id=? AND bingo_coins>=? AND EXISTS (SELECT 1 FROM tournament_events WHERE id=? AND status='registration' AND scheduled_at>?) AND NOT EXISTS (SELECT 1 FROM tournament_event_entries WHERE event_id=? AND user_id=?)")
-      .bind(cost, user.id, cost, event.id, nowText, event.id, user.id),
+    db.prepare("UPDATE tournament_events SET registered_count=registered_count+1,prize_pool=prize_pool+?,updated_at=? WHERE id=? AND status='registration' AND registered_count<capacity AND scheduled_at>? AND EXISTS (SELECT 1 FROM users WHERE id=? AND bingo_coins>=?) AND NOT EXISTS (SELECT 1 FROM tournament_event_entries WHERE event_id=? AND user_id=?)")
+      .bind(cost, nowText, event.id, nowText, user.id, cost, event.id, user.id),
+    db.prepare("UPDATE users SET bingo_coins=bingo_coins-? WHERE id=? AND changes()=1")
+      .bind(cost, user.id),
     db.prepare("INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,created_at) SELECT ?,?,?,'registered',? WHERE changes()=1")
       .bind(event.id, user.id, cost, nowText),
-    db.prepare("UPDATE tournament_events SET registered_count=registered_count+1,prize_pool=prize_pool+?,updated_at=? WHERE id=? AND status='registration' AND changes()=1")
-      .bind(cost, nowText, event.id),
     db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
       .bind(user.id, -cost, "ورود به " + tournamentTitle(type), nowText)
   ]);
-  if (!Number(result[1] && result[1].meta && result[1].meta.changes || 0)) {
+
+  if (!Number(result[0] && result[0].meta && result[0].meta.changes || 0)) {
     const existing = await db.prepare("SELECT id FROM tournament_event_entries WHERE event_id=? AND user_id=?").bind(event.id, user.id).first();
     if (existing) throw new HttpError(409, "برای این دوره قبلاً ثبت‌نام کرده‌ای.");
-    const fresh = await db.prepare("SELECT bingo_coins FROM users WHERE id=?").bind(user.id).first();
-    if (Number(fresh && fresh.bingo_coins || 0) < cost) throw new HttpError(409, "بینگوکوین کافی برای ثبت‌نام نداری.");
+    const freshEvent = await db.prepare("SELECT registered_count,capacity FROM tournament_events WHERE id=?").bind(event.id).first();
+    if (freshEvent && Number(freshEvent.registered_count) >= Number(freshEvent.capacity || 30)) {
+      throw new HttpError(409, "ظرفیت ۳۰ نفرهٔ این دوره تکمیل شده است.");
+    }
+    const freshUser = await db.prepare("SELECT bingo_coins FROM users WHERE id=?").bind(user.id).first();
+    if (Number(freshUser && freshUser.bingo_coins || 0) < cost) throw new HttpError(409, "بینگوکوین کافی برای ثبت‌نام نداری.");
     throw new HttpError(409, "مهلت ثبت‌نام این دوره به پایان رسیده است.");
   }
   const updated = await db.prepare("SELECT * FROM users WHERE id=?").bind(user.id).first();
