@@ -1513,7 +1513,24 @@ async function myRecurringTournamentData(db, userId) {
   const events = await recurringTournamentSnapshots(db);
   const entries = await db.prepare("SELECT e.event_id,e.entry_cost,e.status,e.total_points,e.line_wins,e.full_wins,e.rounds_played,e.created_at,t.tournament_type,t.scheduled_at,t.status AS event_status,t.stage,t.prize_pool FROM tournament_event_entries e JOIN tournament_events t ON t.id=e.event_id WHERE e.user_id=? ORDER BY t.scheduled_at DESC LIMIT 30")
     .bind(userId).all();
-  return { events, entries: entries.results || [], rooms: events };
+  const ownedEntries = entries.results || [];
+  for (const event of events) {
+    const ownEntry = ownedEntries.find((entry) => entry.event_id === event.id &&
+      ["registered", "qualified", "winner_1", "winner_2", "winner_3"].includes(entry.status));
+    const roundId = event.current_round && event.current_round.id;
+    if (!ownEntry || !roundId) continue;
+    const player = await db.prepare("SELECT card_json,matched_count,line_hit,full_hit,score FROM tournament_round_players WHERE round_id=? AND user_id=?")
+      .bind(roundId, userId).first();
+    if (!player) continue;
+    event.my_card = parseTournamentArray(player.card_json);
+    event.my_matched_count = Number(player.matched_count) || 0;
+    event.my_round_score = Number(player.score) || 0;
+    event.my_line_hit = Number(player.line_hit) === 1;
+    event.my_full_hit = Number(player.full_hit) === 1;
+    event.my_entry_status = ownEntry.status;
+    event.my_total_points = Number(ownEntry.total_points) || 0;
+  }
+  return { events, entries: ownedEntries, rooms: events };
 }
 
 async function routeRequest(request, env) {
