@@ -2057,6 +2057,16 @@ async function routeRequest(request, env) {
     const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
     const size = Math.floor(encoded.length * 3 / 4) - padding;
     if (size < 100 || size > 512 * 1024) throw new HttpError(413, 'حجم تصویر رسید باید حداکثر ۵۱۲ کیلوبایت باشد.');
+    let headerBytes;
+    try { headerBytes = atob(encoded.slice(0, 32)); } catch (_) { throw new HttpError(400, 'محتوای تصویر رسید معتبر نیست.'); }
+    const byte = (index) => headerBytes.charCodeAt(index);
+    const isPng = match[1] === 'image/png' && headerBytes.length >= 8 &&
+      [137,80,78,71,13,10,26,10].every((value,index)=>byte(index)===value);
+    const isJpeg = match[1] === 'image/jpeg' && headerBytes.length >= 3 &&
+      byte(0)===255 && byte(1)===216 && byte(2)===255;
+    const isWebp = match[1] === 'image/webp' && headerBytes.length >= 12 &&
+      headerBytes.slice(0,4)==='RIFF' && headerBytes.slice(8,12)==='WEBP';
+    if (!isPng && !isJpeg && !isWebp) throw new HttpError(400, 'محتوای فایل با فرمت تصویر اعلام‌شده مطابقت ندارد.');
     const item = await env.DB.prepare("SELECT id,status FROM manual_wallet_requests WHERE id=? AND user_id=? AND request_type='deposit'").bind(id,user.id).first();
     if (!item) throw new HttpError(404, 'درخواست واریز پیدا نشد.');
     if (item.status !== 'awaiting_receipt') throw new HttpError(409, 'این درخواست در وضعیت دریافت رسید نیست.');
