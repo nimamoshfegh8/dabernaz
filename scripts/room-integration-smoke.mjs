@@ -456,6 +456,10 @@ assert.equal(Object.hasOwn(publicLiveSimple, 'top_players'), false,
 const privateTournament = await request('/api/tournaments/me', { account: accounts[0] });
 const privateSimple = privateTournament.rooms.find(room => room.tournament_type === 'simple');
 assert.ok(privateSimple && privateSimple.current_round, 'registered players must receive the active round snapshot');
+assert.equal(Object.hasOwn(privateSimple.current_round, 'line_winner_ids'), false,
+  'authenticated tournament snapshots must not expose internal line-winner database IDs');
+assert.equal(Object.hasOwn(privateSimple.current_round, 'full_winner_ids'), false,
+  'authenticated tournament snapshots must not expose internal full-winner database IDs');
 assert.equal(privateSimple.my_card.length, 3, 'each player must receive a private 3-row card');
 assert.ok(privateSimple.my_card.every(row => row.length === 9), 'private card must have 9 columns');
 const privateNumbers = privateSimple.my_card.flat().filter(Number.isInteger);
