@@ -33,8 +33,11 @@ jobs:
       - name: Build Cloudflare Pages assets
         run: npm run build:pages
 
-      - name: Test Node fallback room rules
+      - name: Test Node fallback room and mini-game rules
         run: node scripts/node-fallback-room-smoke.mjs
+
+      - name: Test room and mini-game UI interactions
+        run: node scripts/game-ui-smoke.mjs
 
       - name: Test Persian voice UI and Android playback path
         run: node scripts/voice-ui-smoke.mjs
