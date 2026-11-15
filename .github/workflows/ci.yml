@@ -53,7 +53,8 @@ jobs:
           {
             "name": "dabernaz-ci",
             "compatibility_date": "2026-11-06",
-            "pages_build_output_dir": "./dist",\n            "vars": { "DABERNAZ_TEST_DIAGNOSTICS": "1" },
+            "pages_build_output_dir": "./dist",
+            "vars": { "DABERNAZ_TEST_DIAGNOSTICS": "1" },
             "d1_databases": [
               {
                 "binding": "DB",
