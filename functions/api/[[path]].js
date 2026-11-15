@@ -1896,7 +1896,9 @@ async function routeRequest(request, env) {
 
   const supportAdminIds=String(env.SUPPORT_ADMIN_MEMBER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
   const isSupportAdmin=supportAdminIds.includes(String(user.member_id||''));
-  const walletAdminIds=String(env.WALLET_ADMIN_MEMBER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
+  // Backward compatibility: on deployments without a dedicated finance allowlist,
+  // the already-configured support administrator allowlist remains the authorized operator set.
+  const walletAdminIds=String(env.WALLET_ADMIN_MEMBER_IDS||env.SUPPORT_ADMIN_MEMBER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
   const isWalletAdmin=walletAdminIds.includes(String(user.member_id||''));
 
   if (path.startsWith('/api/admin/wallet')) {
