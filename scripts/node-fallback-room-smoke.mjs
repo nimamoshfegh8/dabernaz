@@ -52,11 +52,20 @@ async function request(route, { method = 'GET', cookie, body } = {}) {
     headers['content-type'] = 'application/json';
     headers.origin = baseUrl;
   }
-  const response = await fetch(baseUrl + route, {
-    method,
-    headers,
-    ...(body === undefined ? {} : { body: JSON.stringify(body) })
-  });
+  let response;
+  try {
+    response = await fetch(baseUrl + route, {
+      method,
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    });
+  } catch (error) {
+    throw new Error(
+      method + ' ' + route + ' failed before a response; server exit=' +
+      String(child.exitCode) + '; stderr=' + (serverError || '(empty)'),
+      { cause: error }
+    );
+  }
   const data = await response.json().catch(() => ({}));
   return { response, data };
 }
