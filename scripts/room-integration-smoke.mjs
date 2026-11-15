@@ -488,6 +488,80 @@ assert.equal((repeatedEvent.current_round.called_numbers || []).length, calledAf
   'a second poll before the three-second interval must not draw another number');
 
 
+// Final settlement must pay the three published shares once, then remain idempotent.
+const balancesBeforeSettlement = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+const allBingoNumbers = JSON.stringify(Array.from({ length: 90 }, (_, index) => index + 1));
+const finalFixtureSql = [
+  "UPDATE tournament_events SET status='running',stage='final',stage_round=1,stage_rounds=1,stages_json='[{\"key\":\"final\",\"rounds\":1}]' WHERE id='" + publicLiveSimple.id + "'",
+  "UPDATE tournament_rounds SET stage='final',round_number=1,status='finished',called_numbers_json='" + allBingoNumbers + "',line_winner_ids_json='[]',full_winner_ids_json='[]',next_draw_at=NULL,finished_at=datetime('now') WHERE id='" + privateSimple.current_round.id + "'"
+].join('; ');
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', finalFixtureSql,
+], { stdio: 'inherit' });
+
+const settledTournament = await request('/api/tournaments/me', { account: accounts[0] });
+const settledSimple = settledTournament.events.find(event => event.id === publicLiveSimple.id);
+assert.equal(settledSimple.status, 'completed', 'final tournament round must settle and complete the event');
+const expectedShares = [60, 25, 15, 0, 0];
+const balancesAfterSettlement = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+for (let index = 0; index < expectedShares.length; index++) {
+  assert.equal(
+    balancesAfterSettlement[index] - balancesBeforeSettlement[index],
+    expectedShares[index],
+    'simple tournament must pay the 60/25/15 prize split once to the top three ranked players'
+  );
+}
+const finalStandings = await Promise.all(accounts.slice(0, 5).map(async account => {
+  const personal = await request('/api/tournaments/me', { account });
+  return personal.entries.find(entry => entry.event_id === publicLiveSimple.id)?.status || null;
+}));
+assert.deepEqual(
+  finalStandings,
+  ['winner_1','winner_2','winner_3','registered','registered'],
+  'each player account must store its own final tournament status and winner rank'
+);
+
+// Repeated refreshes or scheduler invocations must never pay the same final prize twice.
+await request('/api/tournaments/me', { account: accounts[0] });
+const balancesAfterRepeatedSettlement = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+assert.deepEqual(balancesAfterRepeatedSettlement, balancesAfterSettlement,
+  'a completed tournament must not issue duplicate prize credits');
+
+// A due event below the five-player minimum must cancel and refund its single entry.
+const refundFixtureId = 'refund-' + runId;
+const refundAccount = accounts[5];
+const refundBalanceBefore = Number((await accountMe(refundAccount)).bingoCoins);
+const refundFixtureSql = [
+  "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,created_at,updated_at) VALUES ('" +
+    refundFixtureId + "','bingo',datetime('now','-1 second'),datetime('now','-2 days'),'registration',1,30,100,5,'registration','[]',1,1,datetime('now'),datetime('now'))",
+  "UPDATE users SET bingo_coins=bingo_coins-100 WHERE id=" + Number(refundAccount.id) + " AND bingo_coins>=100",
+  "INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,created_at) VALUES ('" +
+    refundFixtureId + "'," + Number(refundAccount.id) + ",100,'registered',datetime('now'))",
+  "INSERT INTO transactions (user_id,type,amount,description,created_at) VALUES (" +
+    Number(refundAccount.id) + ",'bingo_coin',-100,'QA refund fixture entry',datetime('now'))"
+].join('; ');
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', refundFixtureSql,
+], { stdio: 'inherit' });
+await request('/api/tournaments');
+const refundedTournament = await request('/api/tournaments/me', { account: refundAccount });
+assert.equal(Number((await accountMe(refundAccount)).bingoCoins), refundBalanceBefore,
+  'a tournament cancelled below five participants must refund the exact entry amount');
+assert.equal(refundedTournament.entries.find(entry => entry.event_id === refundFixtureId)?.status, 'refunded',
+  'cancelled tournament entries must be marked refunded');
+assert.equal(refundedTournament.events.find(event => event.id === refundFixtureId)?.status, 'cancelled',
+  'the underfilled tournament must be marked cancelled');
+
 // Client-supplied outcomes are rejected; only server-computed game sessions count.
 const statsBefore = await accountMe(accounts[0]);
 const forgedResult = await fetch(baseUrl + '/api/games/result', {
