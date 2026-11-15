@@ -1022,10 +1022,10 @@ function hasTournamentEntry(type) {
 }
 function tournamentStatus(room) {
   if (room.status === 'scheduled') return 'ثبت‌نام هنوز باز نشده';
-  if (room.registration_full) return 'ظرفیت ۳۰ نفره تکمیل شده';
   if (room.status === 'cancelled') return 'این دوره لغو شد';
   if (room.status === 'running') return room.stage_label || 'در حال برگزاری';
   if (room.status === 'completed') return 'پایان‌یافته';
+  if (room.registration_full) return 'ظرفیت ۳۰ نفره تکمیل شده';
   return 'ثبت‌نام باز است';
 }
 function tournamentLivePanel(room, type) {
@@ -1038,7 +1038,7 @@ function tournamentLivePanel(room, type) {
     const key = String(room.id) + ':' + String(current.id) + ':' + String(latest);
     if (settingEnabled('voiceNumbers') && !spokenTournamentAnnouncementKeys.has(key)) {
       spokenTournamentAnnouncementKeys.add(key);
-      PersianAudioManager.speak(latest);
+      PersianAudioManager.speak(latest).then(ok => { if (!ok) spokenTournamentAnnouncementKeys.delete(key); });
       if (spokenTournamentAnnouncementKeys.size > 250) spokenTournamentAnnouncementKeys.delete(spokenTournamentAnnouncementKeys.values().next().value);
     }
   }
