@@ -901,6 +901,22 @@ assert.equal(Number(statsAfter.stats.gamesPlayed), Number(statsBefore.stats.game
 assert.equal(Number(statsAfter.stats.wins), Number(statsBefore.stats.wins) + (rpsMatch.result === 'win' ? 1 : 0) + (ticMatch.result === 'win' ? 1 : 0));
 assert.equal(Number(statsAfter.stats.points), Number(statsBefore.stats.points) + ((rpsMatch.result === 'win' ? 1 : 0) + (ticMatch.result === 'win' ? 1 : 0)) * 10);
 
+// Support ticket lifecycle and per-account privacy.
+const supportCreated=await request('/api/support',{account:accounts[0],method:'POST',body:{subject:'آزمایش پشتیبانی',message:'پیام اولیه برای بررسی سامانه تیکت'}});
+assert.ok(Number(supportCreated.ticketId)>0,'support ticket must return a tracking ID');
+const supportList=await request('/api/tickets',{account:accounts[0]});
+assert.ok(supportList.tickets.some(ticket=>Number(ticket.id)===Number(supportCreated.ticketId)),'ticket owner must see their ticket');
+const supportThread=await request('/api/tickets/'+supportCreated.ticketId,{account:accounts[0]});
+assert.equal(supportThread.messages.length,1,'initial message must be stored in the conversation');
+assert.equal(supportThread.messages[0].sender_role,'user');
+const crossAccountTicket=await fetch(baseUrl+'/api/tickets/'+supportCreated.ticketId,{headers:{cookie:accounts[1].cookie}});
+assert.equal(crossAccountTicket.status,404,'another account must not read a private ticket');
+await request('/api/tickets/'+supportCreated.ticketId,{account:accounts[0],method:'POST',body:{message:'پیگیری دوم از طرف کاربر'}});
+const updatedSupportThread=await request('/api/tickets/'+supportCreated.ticketId,{account:accounts[0]});
+assert.equal(updatedSupportThread.messages.length,2,'customer replies must append to the same thread');
+const deniedAdmin=await fetch(baseUrl+'/api/admin/support',{headers:{cookie:accounts[1].cookie}});
+assert.equal(deniedAdmin.status,403,'non-allowlisted accounts must not access admin support');
+
 for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }

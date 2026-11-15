@@ -234,6 +234,17 @@ async function ensureSchema(db) {
       FOREIGN KEY (user_id) REFERENCES users(id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id, id DESC)`,
+    `CREATE TABLE IF NOT EXISTS support_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticket_id INTEGER NOT NULL,
+      sender_user_id INTEGER,
+      sender_role TEXT NOT NULL CHECK(sender_role IN ('user','admin')),
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_user_id) REFERENCES users(id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_support_messages_ticket ON support_messages(ticket_id, id ASC)`,
     `CREATE TABLE IF NOT EXISTS tournament_entries (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       tournament_type TEXT NOT NULL,
@@ -254,6 +265,11 @@ async function ensureSchema(db) {
     )`,
   ];
   for (const sql of statements) await db.prepare(sql).run();
+  // One-time, idempotent migration: preserve the original customer message
+  // for tickets created before threaded support was introduced.
+  await db.prepare(`INSERT INTO support_messages (ticket_id,sender_user_id,sender_role,message,created_at)
+    SELECT t.id,t.user_id,'user',t.message,t.created_at FROM support_tickets t
+    WHERE NOT EXISTS (SELECT 1 FROM support_messages m WHERE m.ticket_id=t.id)`).run();
   const financeInfoAfterCreate = await db.prepare('PRAGMA table_info(room_finances)').all();
   const financeColumnsAfterCreate = new Set((financeInfoAfterCreate.results || []).map((item) => item.name));
   for (const [name, definition] of [['line_winners_json', "TEXT NOT NULL DEFAULT '[]'"], ['full_winners_json', "TEXT NOT NULL DEFAULT '[]'"]]) {
@@ -1839,10 +1855,64 @@ async function routeRequest(request, env) {
   const authResponse = await handleAuth(env.DB, request, path);
   if (authResponse) return authResponse;
 
-  const isProtected = path === '/api/profile' || path.startsWith('/api/games/') || /^\/api\/rooms\//.test(path) || path === '/api/referrals' || path === '/api/support' || path === '/api/tickets' || path === '/api/tournaments/me' || path === '/api/tournaments/register';
+  const isProtected = path === '/api/profile' || path.startsWith('/api/games/') || path.startsWith('/api/rooms/') || path === '/api/referrals' || path === '/api/support' || path.startsWith('/api/tickets') || path.startsWith('/api/admin/support') || path === '/api/tournaments/me' || path === '/api/tournaments/register';
   if (!isProtected) return json({ error: 'مسیر API پیدا نشد.' }, 404);
   const user = await authenticatedUser(env.DB, request);
   if (!user) throw new HttpError(401, 'برای ادامه ابتدا وارد حساب کاربری شو.');
+
+  const supportAdminIds=String(env.SUPPORT_ADMIN_MEMBER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
+  const isSupportAdmin=supportAdminIds.includes(String(user.member_id||''));
+  if(path.startsWith('/api/admin/support')){
+    if(!isSupportAdmin) throw new HttpError(403,'دسترسی مدیر پشتیبانی برای این حساب فعال نیست.');
+    const adminParts=path.split('/').filter(Boolean);
+    const adminId=adminParts[3]||'';
+    const match=adminParts.length>=4&&Number.isSafeInteger(Number(adminId))&&String(Number(adminId))===adminId?[null,adminId,adminParts[4]||'']:null;
+    if(request.method==='GET'&&path==='/api/admin/support'){
+      const status=String(new URL(request.url).searchParams.get('status')||'all');
+      if(!['all','open','answered','closed'].includes(status)) throw new HttpError(400,'فیلتر وضعیت معتبر نیست.');
+      const where=status==='all'?'':'WHERE t.status=?';
+      const sql=`SELECT t.id,t.user_id,t.subject,t.status,t.created_at,u.username,u.member_id,u.email,
+        COALESCE((SELECT message FROM support_messages m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1),t.message) AS last_message,
+        (SELECT created_at FROM support_messages m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_message_at
+        FROM support_tickets t JOIN users u ON u.id=t.user_id ${where}
+        ORDER BY COALESCE(last_message_at,t.created_at) DESC LIMIT 200`;
+      const rows=status==='all'?await env.DB.prepare(sql).all():await env.DB.prepare(sql).bind(status).all();
+      const counts=await env.DB.prepare('SELECT status,COUNT(*) AS total FROM support_tickets GROUP BY status').all();
+      return json({ok:true,isAdmin:true,tickets:rows.results||[],counts:counts.results||[]});
+    }
+    if(match&&request.method==='GET'&&!match[2]){
+      const id=Number(match[1]);
+      const ticket=await env.DB.prepare(`SELECT t.id,t.user_id,t.subject,t.message,t.status,t.created_at,u.username,u.member_id,u.email
+        FROM support_tickets t JOIN users u ON u.id=t.user_id WHERE t.id=?`).bind(id).first();
+      if(!ticket) throw new HttpError(404,'تیکت پیدا نشد.');
+      const rows=await env.DB.prepare('SELECT id,sender_user_id,sender_role,message,created_at FROM support_messages WHERE ticket_id=? ORDER BY id ASC').bind(id).all();
+      const messages=rows.results?.length?rows.results:[{id:0,sender_user_id:ticket.user_id,sender_role:'user',message:ticket.message,created_at:ticket.created_at}];
+      return json({ok:true,ticket,messages});
+    }
+    if(match&&match[2]==='reply'&&request.method==='POST'){
+      validateWriteOrigin(request);
+      const id=Number(match[1]),body=await readJson(request),message=String(body.message||'').trim();
+      if(message.length<1||message.length>2000) throw new HttpError(400,'متن پاسخ باید بین ۱ تا ۲۰۰۰ نویسه باشد.');
+      const ticket=await env.DB.prepare('SELECT id,status FROM support_tickets WHERE id=?').bind(id).first();
+      if(!ticket) throw new HttpError(404,'تیکت پیدا نشد.');
+      if(ticket.status==='closed') throw new HttpError(409,'این تیکت بسته شده است؛ ابتدا وضعیت آن را باز کن.');
+      const now=new Date().toISOString();
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO support_messages(ticket_id,sender_user_id,sender_role,message,created_at) VALUES(?,?,'admin',?,?)").bind(id,user.id,message,now),
+        env.DB.prepare("UPDATE support_tickets SET status='answered' WHERE id=?").bind(id)
+      ]);
+      return json({ok:true});
+    }
+    if(match&&match[2]==='status'&&request.method==='PATCH'){
+      validateWriteOrigin(request);
+      const id=Number(match[1]),body=await readJson(request),status=String(body.status||'');
+      if(!['open','answered','closed'].includes(status)) throw new HttpError(400,'وضعیت تیکت معتبر نیست.');
+      const result=await env.DB.prepare('UPDATE support_tickets SET status=? WHERE id=?').bind(status,id).run();
+      if(!result.meta?.changes) throw new HttpError(404,'تیکت پیدا نشد.');
+      return json({ok:true,status});
+    }
+    throw new HttpError(404,'مسیر مدیریت پشتیبانی پیدا نشد.');
+  }
 
   if (request.method === 'PATCH' && path === '/api/profile') {
     validateWriteOrigin(request);
@@ -1872,12 +1942,41 @@ async function routeRequest(request, env) {
     const nowText = new Date().toISOString();
     const inserted = await env.DB.prepare('INSERT INTO support_tickets (user_id, subject, message, status, created_at) VALUES (?, ?, ?, \'open\', ?)')
       .bind(user.id, subject, message, nowText).run();
-    return json({ ok: true, ticketId: Number(inserted.meta?.last_row_id || 0) });
+    const ticketId=Number(inserted.meta?.last_row_id||0);
+    if(!ticketId) throw new HttpError(500,'ثبت تیکت انجام نشد.');
+    await env.DB.prepare("INSERT INTO support_messages(ticket_id,sender_user_id,sender_role,message,created_at) VALUES(?,?,'user',?,?)").bind(ticketId,user.id,message,nowText).run();
+    return json({ok:true,ticketId});
   }
 
-  if (request.method === 'GET' && path === '/api/tickets') {
-    const result = await env.DB.prepare('SELECT id, subject, status, created_at FROM support_tickets WHERE user_id = ? ORDER BY id DESC LIMIT 20').bind(user.id).all();
-    return json({ ok: true, tickets: result.results || [] });
+  if(request.method==='GET'&&path==='/api/tickets'){
+    const rows=await env.DB.prepare(`SELECT t.id,t.subject,t.status,t.created_at,
+      COALESCE((SELECT message FROM support_messages m WHERE m.ticket_id=t.id ORDER BY m.id DESC LIMIT 1),t.message) AS last_message
+      FROM support_tickets t WHERE t.user_id=? ORDER BY t.id DESC LIMIT 30`).bind(user.id).all();
+    return json({ok:true,tickets:rows.results||[]});
+  }
+  const ticketParts=path.split('/').filter(Boolean);
+  const ticketIdPart=ticketParts[2]||'';
+  const userTicket=ticketParts.length===3&&ticketParts[0]==='api'&&ticketParts[1]==='tickets'&&Number.isSafeInteger(Number(ticketIdPart))&&String(Number(ticketIdPart))===ticketIdPart?[null,ticketIdPart]:null;
+  if(userTicket&&request.method==='GET'){
+    const id=Number(userTicket[1]);
+    const ticket=await env.DB.prepare('SELECT id,subject,status,created_at,message FROM support_tickets WHERE id=? AND user_id=?').bind(id,user.id).first();
+    if(!ticket) throw new HttpError(404,'تیکت پیدا نشد.');
+    const rows=await env.DB.prepare('SELECT id,sender_role,message,created_at FROM support_messages WHERE ticket_id=? ORDER BY id ASC').bind(id).all();
+    return json({ok:true,ticket,messages:rows.results?.length?rows.results:[{id:0,sender_role:'user',message:ticket.message,created_at:ticket.created_at}]});
+  }
+  if(userTicket&&request.method==='POST'){
+    validateWriteOrigin(request);
+    const id=Number(userTicket[1]),body=await readJson(request),message=String(body.message||'').trim();
+    if(message.length<1||message.length>2000) throw new HttpError(400,'متن پیام باید بین ۱ تا ۲۰۰۰ نویسه باشد.');
+    const ticket=await env.DB.prepare('SELECT id,status FROM support_tickets WHERE id=? AND user_id=?').bind(id,user.id).first();
+    if(!ticket) throw new HttpError(404,'تیکت پیدا نشد.');
+    if(ticket.status==='closed') throw new HttpError(409,'این تیکت بسته شده است و امکان ارسال پیام ندارد.');
+    const now=new Date().toISOString();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO support_messages(ticket_id,sender_user_id,sender_role,message,created_at) VALUES(?,?,'user',?,?)").bind(id,user.id,message,now),
+      env.DB.prepare("UPDATE support_tickets SET status='open' WHERE id=?").bind(id)
+    ]);
+    return json({ok:true});
   }
 
   if (request.method === 'GET' && path === '/api/tournaments/me') {

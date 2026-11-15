@@ -43,6 +43,7 @@ state.username=''; state.memberId=''; state.balance=0; state.bingoCoins=0;
 state.gamesPlayed=0; state.wins=0; state.points=0; state.joined=[];
 state.transactions=[]; state.coinTransactions=[]; state.referralCode='';
 let currentUser = null;
+let supportAdminEnabled=false, supportAdminTickets=[], supportSelectedTicketId=null, supportThread=null, supportAdminFilter='all', supportAdminKnownTicketIds=new Set();
 let authReady = false;
 let apiReady = false;
 let apiErrorMessage = '';
@@ -626,6 +627,7 @@ async function loadAuthenticatedUser() {
     apiReady = false;
     apiErrorMessage = error?.message || 'ارتباط با API برقرار نشد.';
     currentUser = null;
+    supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;supportAdminKnownTicketIds=new Set();
     state = { ...cloneData(defaultState), settings:state.settings };
     authReady = true;
     saveState();
@@ -650,6 +652,7 @@ async function loadAuthenticatedUser() {
     state = { ...cloneData(defaultState), settings:state.settings };
     showToast(apiErrorMessage);
   }
+  if(!currentUser){supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;}
   authReady = true;
 
   // Completed room history is public; load it even for visitors who are not signed in.
@@ -682,10 +685,11 @@ async function loadAuthenticatedUser() {
       state.joined = state.tournamentEntries.filter(entry => entry.status !== 'refunded').map(entry => entry.tournament_type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
       state.tournamentRooms = Array.isArray(data.rooms) ? data.rooms : [];
     }
-    if (ticketResult.status === 'fulfilled') {
-      state.supportTickets = Array.isArray(ticketResult.value.tickets) ? ticketResult.value.tickets : [];
-    }
-  }
+    if (ticketResult.status === 'fulfilled') state.supportTickets = Array.isArray(ticketResult.value.tickets) ? ticketResult.value.tickets : [];
+    try { const adminResult=await apiRequest('/api/admin/support',{method:'GET',headers:{}}); supportAdminEnabled=adminResult.isAdmin===true; supportAdminTickets=Array.isArray(adminResult.tickets)?adminResult.tickets:[]; supportAdminKnownTicketIds=new Set(supportAdminTickets.map(t=>Number(t.id))); }
+    catch (_) { supportAdminEnabled=false; supportAdminTickets=[]; }
+  } else { supportAdminEnabled=false; supportAdminTickets=[]; }
+  if(currentPage==='supportAdmin'&&!supportAdminEnabled) currentPage='support';
   saveState();
   render();
 }
@@ -701,7 +705,7 @@ function updateHeader() {
   $('#headerBalance').textContent = money(state.balance);
   if ($('#headerBingoCoins')) $('#headerBingoCoins').textContent = `${state.bingoCoins.toLocaleString('fa-IR')} BGC`;
 }
-const APP_PAGES = ['home','games','room5000','room10000','room20000','room50000','roomGame','tournaments','tournamentRoom','bingoTournament','invite','wallet','account','settings','support'];
+const APP_PAGES = ['home','games','room5000','room10000','room20000','room50000','roomGame','tournaments','tournamentRoom','bingoTournament','invite','wallet','account','settings','support','supportAdmin'];
 function pageFromLocation() {
   const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
   const page = hash.get('page');
@@ -1338,14 +1342,38 @@ const faqs = [
   ['اطلاعات حساب من کجا ذخیره می‌شود؟','در نسخه فعلی Cloudflare، اطلاعات حساب و آمار در دیتابیس D1 نگهداری می‌شوند و رمز عبور فقط به‌شکل هش‌شده ذخیره می‌شود. تنظیمات ظاهری غیرحساس در مرورگر می‌مانند.'],
   ['چطور با پشتیبانی ارتباط بگیرم؟','فرم پایین صفحه را تکمیل کن. پیام روی سرور ذخیره می‌شود و شماره پیگیری دریافت می‌کنی.']
 ];
-function renderSupportTickets() {
-  const tickets = Array.isArray(state.supportTickets) ? state.supportTickets : [];
-  if (!tickets.length) return '<div class="empty"><span>🎧</span>هنوز تیکتی ثبت نکرده‌ای.</div>';
-  return `<div class="panel support-ticket-list">${tickets.map(ticket => {
-    const date = ticket.created_at ? new Date(ticket.created_at).toLocaleString('fa-IR') : '';
-    const status = ticket.status === 'open' ? 'در انتظار بررسی' : ticket.status === 'answered' ? 'پاسخ داده شد' : ticket.status === 'closed' ? 'بسته' : escapeHTML(ticket.status || 'ثبت‌شده');
-    return `<article class="setting-row"><div class="setting-copy"><b>#${faDigits(ticket.id)} · ${escapeHTML(ticket.subject)}</b><small>${escapeHTML(date)}</small></div><span class="tag">${status}</span></article>`;
-  }).join('')}</div>`;
+function supportStatusLabel(status){return status==='open'?'در انتظار بررسی':status==='answered'?'پاسخ داده شد':status==='closed'?'بسته':'ثبت‌شده';}
+function supportMessagesMarkup(messages,adminView){
+  return (messages||[]).map(item=>'<article class="support-message '+(item.sender_role==='admin'?'from-admin':'from-user')+'"><div class="support-message-meta"><b>'+(item.sender_role==='admin'?'پشتیبانی دابرناز':(adminView?'کاربر':'شما'))+'</b><time>'+escapeHTML(item.created_at?new Date(item.created_at).toLocaleString('fa-IR'):'')+'</time></div><p>'+escapeHTML(item.message||'')+'</p></article>').join('')||'<div class="empty">هنوز پیامی در این تیکت وجود ندارد.</div>';
+}
+function renderSupportTickets(){
+ const tickets=Array.isArray(state.supportTickets)?state.supportTickets:[];
+ if(!tickets.length)return '<div class="empty"><span>🎧</span>هنوز تیکتی ثبت نکرده‌ای.</div>';
+ return '<div class="panel support-ticket-list">'+tickets.map(t=>'<button class="support-ticket-row" data-action="support-open-ticket" data-ticket-id="'+Number(t.id)+'"><span><b>#'+faDigits(t.id)+' · '+escapeHTML(t.subject)+'</b><small>'+escapeHTML(t.last_message||'مشاهده گفتگو')+'</small></span><span class="tag">'+supportStatusLabel(t.status)+'</span></button>').join('')+'</div>';
+}
+function renderSupportThread(){
+ if(!supportThread||!supportThread.ticket)return '';
+ const t=supportThread.ticket;
+ return '<section class="setting-group support-thread"><div class="support-thread-heading"><div><h3>گفتگوی تیکت #'+faDigits(t.id)+'</h3><small>'+escapeHTML(t.subject)+' · '+supportStatusLabel(t.status)+'</small></div><button class="btn btn-outline" data-action="support-close-thread">بازگشت</button></div><div class="support-messages">'+supportMessagesMarkup(supportThread.messages,false)+'</div>'+(t.status==='closed'?'<p class="muted-note">این تیکت بسته شده است و امکان ارسال پیام جدید ندارد.</p>':'<form id="supportReplyForm" class="form-stack"><textarea class="form-control" name="message" rows="3" maxlength="2000" placeholder="پیام خودت را بنویس..." required></textarea><button class="btn btn-primary btn-block" type="submit">ارسال پیام</button></form>')+'</section>';
+}
+function renderSupportAdminThread(){
+ if(!supportThread||!supportThread.ticket)return '';
+ const t=supportThread.ticket;
+ return '<section class="setting-group support-thread"><div class="support-thread-heading"><div><h3>تیکت #'+faDigits(t.id)+' · '+escapeHTML(t.subject)+'</h3><small>'+escapeHTML(t.username)+' · شناسه '+escapeHTML(t.member_id||'')+' · '+escapeHTML(t.email||'')+'</small></div><span class="tag">'+supportStatusLabel(t.status)+'</span></div><div class="support-messages">'+supportMessagesMarkup(supportThread.messages,true)+'</div><div class="support-admin-controls"><button class="btn btn-outline" data-action="support-admin-status" data-status="open">باز</button><button class="btn btn-outline" data-action="support-admin-status" data-status="answered">پاسخ داده‌شده</button><button class="btn btn-outline" data-action="support-admin-status" data-status="closed">بستن تیکت</button></div>'+(t.status==='closed'?'<p class="muted-note">برای پاسخ ابتدا تیکت را باز کن.</p>':'<form id="supportAdminReplyForm" class="form-stack"><textarea class="form-control" name="message" rows="3" maxlength="2000" placeholder="پاسخ شما به کاربر..." required></textarea><button class="btn btn-primary btn-block" type="submit">ارسال پاسخ به کاربر</button></form>')+'</section>';
+}
+function renderSupportAdmin(){
+ if(!supportAdminEnabled)return heading('مدیریت پشتیبانی','دسترسی مدیر برای این حساب فعال نیست.','ADMIN SUPPORT');
+ const counts={all:supportAdminTickets.length,open:supportAdminTickets.filter(t=>t.status==='open').length,answered:supportAdminTickets.filter(t=>t.status==='answered').length,closed:supportAdminTickets.filter(t=>t.status==='closed').length};
+ const list=supportAdminTickets.filter(t=>supportAdminFilter==='all'||t.status===supportAdminFilter);
+ return heading('مدیریت پشتیبانی','صندوق ورودی تیکت‌ها و پاسخ مستقیم به کاربران','ADMIN SUPPORT')+
+ '<div class="support-admin-stats"><div><b>'+faDigits(counts.all)+'</b><small>همه</small></div><div><b>'+faDigits(counts.open)+'</b><small>باز</small></div><div><b>'+faDigits(counts.answered)+'</b><small>پاسخ‌داده‌شده</small></div><div><b>'+faDigits(counts.closed)+'</b><small>بسته</small></div></div>'+
+ '<div class="support-admin-filters">'+[['all','همه'],['open','باز'],['answered','پاسخ‌داده‌شده'],['closed','بسته']].map(x=>'<button class="btn '+(supportAdminFilter===x[0]?'btn-primary':'btn-outline')+'" data-action="support-admin-filter" data-filter="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>'+
+ renderSupportAdminThread()+'<div class="panel support-ticket-list">'+(list.length?list.map(t=>'<button class="support-ticket-row" data-action="support-admin-open-ticket" data-ticket-id="'+Number(t.id)+'"><span><b>#'+faDigits(t.id)+' · '+escapeHTML(t.subject)+'</b><small>'+escapeHTML(t.username)+' · ID '+escapeHTML(t.member_id||'')+' · '+escapeHTML(t.last_message||'')+'</small></span><span class="tag">'+supportStatusLabel(t.status)+'</span></button>').join(''):'<div class="empty">در این فیلتر تیکتی وجود ندارد.</div>')+'</div>';
+}
+async function refreshSupportAdmin(){
+ const result=await apiRequest('/api/admin/support',{method:'GET',headers:{}});
+ supportAdminEnabled=result.isAdmin===true; supportAdminTickets=Array.isArray(result.tickets)?result.tickets:[];
+ if(supportSelectedTicketId)supportThread=await apiRequest('/api/admin/support/'+supportSelectedTicketId,{method:'GET',headers:{}});
 }
 function renderSupport() {
   return `${heading('پشتیبانی دابرناز', 'درخواستت را ثبت کن و شماره پیگیری دریافت کن.', 'WE ARE HERE FOR YOU')}
@@ -1355,7 +1383,9 @@ function renderSupport() {
   ${section('ارسال پیام به پشتیبانی')}
   ${currentUser ? `<form id="supportForm" class="panel form-stack" style="padding:13px"><input class="form-control" name="subject" maxlength="70" minlength="3" placeholder="موضوع پیام" required><textarea class="form-control" name="message" rows="4" minlength="3" maxlength="1000" placeholder="پیام خودت رو بنویس..." required></textarea><button class="btn btn-primary btn-block" type="submit">ارسال پیام</button><small class="muted-note">پیام روی سرور ذخیره می‌شود.</small></form>` : '<div class="empty">برای ثبت و مشاهده تیکت‌ها ابتدا وارد حساب کاربری شو.</div>'}
   ${section('تیکت‌های من')}
-  ${renderSupportTickets()}`;
+  ${renderSupportTickets()}
+  ${renderSupportThread()}
+  ${supportAdminEnabled?'<button class="btn btn-outline btn-block" data-page="supportAdmin">ورود به پنل مدیریت پشتیبانی</button>':''}`;
 }
 function render() {
   const pages = {
@@ -1363,7 +1393,7 @@ function render() {
     room5000:renderRoomPurchasePage, room10000:renderRoomPurchasePage, room20000:renderRoomPurchasePage, room50000:renderRoomPurchasePage,
     roomGame:renderRoomGame, tournaments:renderTournaments,
     tournamentRoom:() => renderTournamentDetail(false), bingoTournament:() => renderTournamentDetail(true),
-    invite:renderInvite, wallet:renderWallet, account:renderAccount, settings:renderSettings, support:renderSupport
+    invite:renderInvite, wallet:renderWallet, account:renderAccount, settings:renderSettings, support:renderSupport, supportAdmin:renderSupportAdmin
   };
   $('#appView').innerHTML = pages[currentPage]();
   const roomPages = ['room5000','room10000','room20000','room50000','roomGame'];
@@ -1724,6 +1754,18 @@ document.addEventListener('click', async event => {
   const actionEl = event.target.closest('[data-action]');
   if (!actionEl) return;
   const action = actionEl.dataset.action;
+  if(action==='support-open-ticket'||action==='support-admin-open-ticket'){
+    if(!requireLogin())return;
+    supportSelectedTicketId=Number(actionEl.dataset.ticketId);
+    try{supportThread=await apiRequest((action==='support-admin-open-ticket'?'/api/admin/support/':'/api/tickets/')+supportSelectedTicketId,{method:'GET',headers:{}});if(action==='support-admin-open-ticket')setPage('supportAdmin');else render();}
+    catch(error){showToast(error.message);}return;
+  }
+  if(action==='support-close-thread'){supportThread=null;supportSelectedTicketId=null;render();return;}
+  if(action==='support-admin-filter'){supportAdminFilter=actionEl.dataset.filter||'all';render();return;}
+  if(action==='support-admin-status'){
+    try{await apiRequest('/api/admin/support/'+supportSelectedTicketId+'/status',{method:'PATCH',body:JSON.stringify({status:actionEl.dataset.status})});await refreshSupportAdmin();render();showToast('وضعیت تیکت به‌روزرسانی شد.');}
+    catch(error){showToast(error.message);}return;
+  }
   if (action === 'close-modal' || (action === 'backdrop-close' && event.target === actionEl)) { closeModal(); return; }
   if (action === 'room-next-session') {
     if (!requireLogin() || roomJoinBusy || actionEl.disabled) return;
@@ -1953,6 +1995,15 @@ document.addEventListener('submit', async event => {
     if (name.length < 2) { showToast('نام باید حداقل ۲ حرف داشته باشد'); return; }
     try { const result=await apiRequest('/api/profile',{method:'PATCH',body:JSON.stringify({name})}); applyAuthenticatedUser(result.user); closeModal(); render(); showToast('نام نمایشی در حساب ذخیره شد'); } catch(error){showToast(error.message);}
   }
+  if(event.target.id==='supportReplyForm'||event.target.id==='supportAdminReplyForm'){
+    event.preventDefault();const admin=event.target.id==='supportAdminReplyForm',message=String(new FormData(event.target).get('message')||'').trim();
+    if(!message||!supportSelectedTicketId)return;
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{await apiRequest(admin?'/api/admin/support/'+supportSelectedTicketId+'/reply':'/api/tickets/'+supportSelectedTicketId,{method:'POST',body:JSON.stringify({message})});
+      if(admin)await refreshSupportAdmin();else{supportThread=await apiRequest('/api/tickets/'+supportSelectedTicketId,{method:'GET',headers:{}});const rows=await apiRequest('/api/tickets',{method:'GET',headers:{}});state.supportTickets=rows.tickets||[];}
+      render();showToast('پیام با موفقیت ارسال شد.');
+    }catch(error){showToast(error.message);}finally{if(button?.isConnected)button.disabled=false;}
+  }
   if (event.target.id === 'supportForm') {
     event.preventDefault(); const data = new FormData(event.target);
     if (!data.get('subject').toString().trim() || !data.get('message').toString().trim()) return;
@@ -1987,6 +2038,19 @@ window.addEventListener('online', () => {
   });
 });
 setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom(); }, 2200);
+setInterval(async()=>{
+  if(!currentUser)return;
+  if(currentPage==='supportAdmin'&&supportAdminEnabled){
+    try{await refreshSupportAdmin();const composing=document.activeElement?.closest('#supportAdminReplyForm');if(!composing)render();}catch(_){}
+  }else if(currentPage==='support'){
+    try{
+      const list=await apiRequest('/api/tickets',{method:'GET',headers:{}});
+      state.supportTickets=Array.isArray(list.tickets)?list.tickets:[];
+      if(supportSelectedTicketId)supportThread=await apiRequest('/api/tickets/'+supportSelectedTicketId,{method:'GET',headers:{}});
+      const composing=document.activeElement?.closest('#supportForm,#supportReplyForm');if(!composing)render();
+    }catch(_){}
+  }
+},15000);
 
 window.addEventListener('hashchange', () => {
   const page = pageFromLocation();

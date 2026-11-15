@@ -38,4 +38,10 @@ const explicitPurchaseHandler = app.match(/if \(action === 'room-join-auto'\) \{
 assert.match(explicitPurchaseHandler, /purchaseConfirmed\s*:\s*true/,
   'a new room card may be purchased only through the explicit purchase action');
 
-console.log('Game-room and mini-game UI smoke tests passed.');
+assert.match(app,/supportAdmin:renderSupportAdmin/,'the administrator support inbox must be a registered app page');
+assert.match(app,/data-page="supportAdmin"/,'authorized administrators must have an in-app path to the support inbox');
+assert.match(app,/supportAdminReplyForm/,'administrators must be able to reply from the ticket thread');
+assert.match(app,/supportReplyForm/,'customers must be able to continue an open ticket');
+assert.match(app,/support-admin-status/,'administrators must be able to change ticket status');
+assert.match(app,/\/api\/admin\/support/,'admin inbox must use protected server API routes');
+console.log('Game-room, mini-game and support UI smoke tests passed.');
