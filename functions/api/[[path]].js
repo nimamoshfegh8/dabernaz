@@ -1203,51 +1203,49 @@ async function scoreTournamentRound(db, eventId, round, tournamentType) {
 }
 
 async function advanceTournamentRound(db, round, nowMs) {
-  let current = round;
+  const current = round;
   const now = Number(nowMs || Date.now());
-  for (let guard = 0; guard < 90 && current && current.status === "playing" && Number(current.next_draw_at) <= now; guard++) {
-    const called = parseTournamentArray(current.called_numbers_json);
-    const calledSet = new Set(called);
-    const remaining = Array.from({ length: 90 }, (_, index) => index + 1).filter((number) => !calledSet.has(number));
-    const playerResult = await db.prepare("SELECT user_id,card_json FROM tournament_round_players WHERE round_id=? ORDER BY user_id")
-      .bind(current.id).all();
-    const playerRows = playerResult.results || [];
-    const number = remaining.length ? remaining[randomInt(remaining.length)] : null;
-    const nextCalled = number === null ? called : [...called, number];
-    const nextSet = new Set(nextCalled);
-    const lineWinners = parseTournamentArray(current.line_winner_ids_json);
-    const fullWinners = parseTournamentArray(current.full_winner_ids_json);
+  if (!current || current.status !== "playing" || Number(current.next_draw_at) > now) return current;
 
-    if (!lineWinners.length) {
-      for (const player of playerRows) {
-        const card = JSON.parse(player.card_json);
-        const hasLine = card.some((row) => {
-          const values = row.filter(Number.isInteger);
-          return values.length === 5 && values.every((value) => nextSet.has(value));
-        });
-        if (hasLine) lineWinners.push(Number(player.user_id));
-      }
-    }
-    if (!fullWinners.length) {
-      for (const player of playerRows) {
-        const card = JSON.parse(player.card_json);
-        const values = card.flat().filter(Number.isInteger);
-        if (values.length === 15 && values.every((value) => nextSet.has(value))) fullWinners.push(Number(player.user_id));
-      }
-    }
+  const called = parseTournamentArray(current.called_numbers_json);
+  const calledSet = new Set(called);
+  const remaining = Array.from({ length: 90 }, (_, index) => index + 1).filter((number) => !calledSet.has(number));
+  const playerResult = await db.prepare("SELECT user_id,card_json FROM tournament_round_players WHERE round_id=? ORDER BY user_id")
+    .bind(current.id).all();
+  const playerRows = playerResult.results || [];
+  const number = remaining.length ? remaining[randomInt(remaining.length)] : null;
+  const nextCalled = number === null ? called : [...called, number];
+  const nextSet = new Set(nextCalled);
+  const lineWinners = parseTournamentArray(current.line_winner_ids_json);
+  const fullWinners = parseTournamentArray(current.full_winner_ids_json);
 
-    const finished = fullWinners.length > 0 || nextCalled.length >= 90;
-    const nextDrawAt = finished ? null : Number(current.next_draw_at) + 3000;
-    const update = await db.prepare("UPDATE tournament_rounds SET called_numbers_json=?,line_winner_ids_json=?,full_winner_ids_json=?,next_draw_at=?,status=?,finished_at=? WHERE id=? AND status='playing' AND next_draw_at=? AND next_draw_at<=?")
-      .bind(JSON.stringify(nextCalled), JSON.stringify(lineWinners), JSON.stringify(fullWinners), nextDrawAt,
-        finished ? "finished" : "playing", finished ? new Date(now).toISOString() : null, current.id, current.next_draw_at, now).run();
-    if (!Number(update.meta && update.meta.changes || 0)) {
-      current = await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(current.id).first();
-      continue;
+  if (!lineWinners.length) {
+    for (const player of playerRows) {
+      const card = JSON.parse(player.card_json);
+      const hasLine = card.some((row) => {
+        const values = row.filter(Number.isInteger);
+        return values.length === 5 && values.every((value) => nextSet.has(value));
+      });
+      if (hasLine) lineWinners.push(Number(player.user_id));
     }
-    current = await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(current.id).first();
   }
-  return current;
+  if (!fullWinners.length) {
+    for (const player of playerRows) {
+      const card = JSON.parse(player.card_json);
+      const values = card.flat().filter(Number.isInteger);
+      if (values.length === 15 && values.every((value) => nextSet.has(value))) fullWinners.push(Number(player.user_id));
+    }
+  }
+
+  const finished = fullWinners.length > 0 || nextCalled.length >= 90;
+  const nextDrawAt = finished ? null : now + 3000;
+  const update = await db.prepare("UPDATE tournament_rounds SET called_numbers_json=?,line_winner_ids_json=?,full_winner_ids_json=?,next_draw_at=?,status=?,finished_at=? WHERE id=? AND status='playing' AND next_draw_at=? AND next_draw_at<=?")
+    .bind(JSON.stringify(nextCalled), JSON.stringify(lineWinners), JSON.stringify(fullWinners), nextDrawAt,
+      finished ? "finished" : "playing", finished ? new Date(now).toISOString() : null, current.id, current.next_draw_at, now).run();
+  if (!Number(update.meta && update.meta.changes || 0)) {
+    return await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(current.id).first();
+  }
+  return await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(current.id).first();
 }
 
 async function tournamentRankings(db, eventId) {
@@ -1353,7 +1351,7 @@ async function startOrCancelDueTournament(db, event, nowMs) {
   }
 }
 
-async function advanceTournamentEvent(db, event, nowMs) {
+async function advanceTournamentEvent(db, event, nowMs, advanceDraws = true) {
   if (event.status === "cancelled") {
     await refundTournamentEvent(db, event, nowMs);
     return;
@@ -1363,7 +1361,7 @@ async function advanceTournamentEvent(db, event, nowMs) {
     await startOrCancelDueTournament(db, event, nowMs);
     event = await db.prepare("SELECT * FROM tournament_events WHERE id=?").bind(event.id).first();
   }
-  if (!event || event.status !== "running") return;
+  if (!event || event.status !== "running" || !advanceDraws) return;
   let round = event.current_round_id
     ? await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(event.current_round_id).first()
     : null;
@@ -1381,19 +1379,19 @@ async function advanceTournamentEvent(db, event, nowMs) {
   }
 }
 
-async function advanceTournamentSystem(db, nowMs) {
+async function advanceTournamentSystem(db, nowMs, advanceDraws = true) {
   const current = Number(nowMs || Date.now());
   await ensureRecurringTournamentSchedule(db, current);
   const active = await db.prepare("SELECT * FROM tournament_events WHERE status IN ('scheduled','registration','running','cancelled') ORDER BY scheduled_at ASC LIMIT 12")
     .all();
   for (const event of active.results || []) {
-    await advanceTournamentEvent(db, event, current);
+    await advanceTournamentEvent(db, event, current, advanceDraws);
   }
   await ensureRecurringTournamentSchedule(db, current + 1000);
 }
 
-async function recurringTournamentSnapshots(db) {
-  await advanceTournamentSystem(db);
+async function recurringTournamentSnapshots(db, advanceDraws = true) {
+  await advanceTournamentSystem(db, Date.now(), advanceDraws);
   const rows = await db.prepare("SELECT * FROM tournament_events ORDER BY CASE WHEN status IN ('scheduled','registration','running') THEN 0 ELSE 1 END,scheduled_at ASC LIMIT 12").all();
   const output = [];
   for (const event of rows.results || []) {
@@ -1443,7 +1441,7 @@ async function recurringTournamentSnapshots(db) {
 }
 
 async function publicTournamentSnapshots(db) {
-  const detailed = await recurringTournamentSnapshots(db);
+  const detailed = await recurringTournamentSnapshots(db, false);
   const rooms = [];
   for (const type of ["simple", "bingo"]) {
     const selected = detailed.find((event) => event.tournament_type === type &&
@@ -1477,7 +1475,7 @@ async function registerRecurringTournament(db, user, request) {
   const type = String(body.type || "");
   const cost = tournamentCost(type);
   if (!cost) throw new HttpError(400, "نوع تورنومنت معتبر نیست.");
-  await advanceTournamentSystem(db);
+  await advanceTournamentSystem(db, Date.now(), false);
   const nowText = new Date().toISOString();
   const event = await db.prepare("SELECT * FROM tournament_events WHERE tournament_type=? AND status='registration' AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1")
     .bind(type, nowText).first();
