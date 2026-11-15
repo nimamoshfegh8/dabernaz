@@ -265,6 +265,11 @@ async function ensureSchema(db) {
     )`,
   ];
   for (const sql of statements) await db.prepare(sql).run();
+  // One-time, idempotent migration: preserve the original customer message
+  // for tickets created before threaded support was introduced.
+  await db.prepare(`INSERT INTO support_messages (ticket_id,sender_user_id,sender_role,message,created_at)
+    SELECT t.id,t.user_id,'user',t.message,t.created_at FROM support_tickets t
+    WHERE NOT EXISTS (SELECT 1 FROM support_messages m WHERE m.ticket_id=t.id)`).run();
   const financeInfoAfterCreate = await db.prepare('PRAGMA table_info(room_finances)').all();
   const financeColumnsAfterCreate = new Set((financeInfoAfterCreate.results || []).map((item) => item.name));
   for (const [name, definition] of [['line_winners_json', "TEXT NOT NULL DEFAULT '[]'"], ['full_winners_json', "TEXT NOT NULL DEFAULT '[]'"]]) {
