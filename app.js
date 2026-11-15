@@ -1021,12 +1021,28 @@ function hasTournamentEntry(type) {
   return (state.tournamentEntries || []).some(entry => entry.tournament_type === type && entry.event_id === room.id && entry.status !== 'refunded');
 }
 function tournamentStatus(room) {
+  if (!room?.id) return 'در حال دریافت وضعیت مسابقه';
   if (room.status === 'scheduled') return 'ثبت‌نام هنوز باز نشده';
   if (room.status === 'cancelled') return 'این دوره لغو شد';
   if (room.status === 'running') return room.stage_label || 'در حال برگزاری';
   if (room.status === 'completed') return 'پایان‌یافته';
   if (room.registration_full) return 'ظرفیت ۳۰ نفره تکمیل شده';
   return 'ثبت‌نام باز است';
+}
+function tournamentEntryState(type) {
+  const room = getTournamentRoom(type);
+  const entry = (state.tournamentEntries || []).find(item =>
+    item.event_id === room.id && item.tournament_type === type && item.status !== 'refunded'
+  );
+  if (!entry) return '';
+  if (entry.status === 'winner_1') return 'رتبه اول · برنده جام';
+  if (entry.status === 'winner_2') return 'رتبه دوم جام';
+  if (entry.status === 'winner_3') return 'رتبه سوم جام';
+  if (entry.status === 'eliminated') return 'پایان مرحله · صعود نکردی';
+  if (entry.status === 'qualified') return 'صعود کردی · مرحله بعد';
+  if (room.status === 'completed') return 'مسابقه به پایان رسیده';
+  if (room.status === 'running') return 'در حال رقابت';
+  return 'ثبت‌نام تو تکمیل شده';
 }
 function tournamentLivePanel(room, type) {
   if (!room) return '';
@@ -1132,7 +1148,7 @@ function tournamentCard(type, index) {
   const subtitle = bingo ? 'تورنومنت VIP ماهانه · آخرین پنجشنبه هر ماه ساعت ۲۲' : 'تورنومنت ساده هفتگی · پنجشنبه‌ها ساعت ۲۱';
   const typeLabel = bingo ? 'BINGO CUP' : 'CLASSIC CUP';
   return `<article class="tour-card ${bingo ? 'tour-card-gold' : 'tour-card-red'}">
-    <div class="tour-card-top"><span class="tour-card-icon">${bingo ? '🎱' : '🏆'}</span><span class="tour-card-type">${typeLabel}</span><span class="tour-card-state ${full ? 'is-full' : entered ? 'is-entered' : 'is-open'}">${entered ? 'ثبت‌نام تو' : full ? 'تکمیل' : 'آزاد'}</span></div>
+    <div class="tour-card-top"><span class="tour-card-icon">${bingo ? '🎱' : '🏆'}</span><span class="tour-card-type">${typeLabel}</span><span class="tour-card-state ${full ? 'is-full' : entered ? 'is-entered' : 'is-open'}">${entered ? escapeHTML(tournamentEntryState(type)) : room.status === 'scheduled' ? 'به‌زودی' : !room.id ? 'در حال بررسی' : full ? 'بسته' : 'آزاد'}</span></div>
     <div class="tour-card-title"><h3>${title}</h3><p>${subtitle}</p></div>
     <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>ثبت‌نام فعلی</small><b>${faDigits(registered)} <em>از ${faDigits(capacity)}</em></b></div></div>
     <div class="tour-progress"><span style="width:${progress}%"></span></div>
@@ -1175,7 +1191,7 @@ function renderTournaments() {
     <div class="tour-format-grid">
       <div><b>۹۰</b><small>گوی شماره‌دار</small></div><div><b>۳ × ۹</b><small>ساختار هر کارت</small></div><div><b>۱۵</b><small>عدد در هر کارت</small></div><div><b>۲</b><small>مرحله برد: خط و کامل</small></div>
     </div>
-    <p>شماره‌ها به‌صورت تصادفی و بدون تکرار اعلام می‌شوند. اگر چند نفر در یک شماره برنده شوند، نتیجه هم‌زمان ثبت و جایزه طبق قوانین همان مسابقه تقسیم خواهد شد.</p>
+    <p>شماره‌ها به‌صورت تصادفی و بدون تکرار اعلام می‌شوند. بردهای خطی و کاملِ هم‌زمان برای همهٔ برندگان ثبت و در امتیاز نهایی لحاظ می‌شوند؛ صندوق جایزه پس از پایان فینال، بر اساس رتبه‌بندی کلی و درصدهای اعلام‌شده میان سه رتبهٔ اول تقسیم می‌شود.</p>
   </section>
   <section class="tour-how-section">
     <div class="tour-section-heading"><div><span class="tour-eyebrow">HOW IT WORKS</span><h2>مسیر ورود به رقابت</h2></div></div>
@@ -1193,10 +1209,13 @@ function renderTournamentDetail(bingo=false) {
   const registered = Math.max(0, Number(room.registered_count) || 0);
   const full = !!room.registration_full || room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
   const entered = hasTournamentEntry(type);
+  const entryState = tournamentEntryState(type);
   const left = Math.max(0, capacity - registered);
   const progress = Math.min(100, Math.round(registered / capacity * 100));
-  const statusText = entered ? 'ثبت‌نام تو تکمیل شده' : tournamentStatus(room);
-  const entryId = bingo ? 'bingoTournamentEntry' : 'simpleTournamentEntry';
+  const statusText = entered ? entryState : tournamentStatus(room);
+  const stageFormat = bingo
+    ? '۵ تا ۸ نفر: فینال ۵ دور؛ ۹ تا ۱۶ نفر: مقدماتی ۲ دور و فینال ۵ دور؛ ۱۷ تا ۳۰ نفر: مقدماتی ۲ دور، نیمه‌نهایی ۳ دور و فینال ۵ دور.'
+    : '۵ تا ۸ نفر: فینال ۳ دور؛ ۹ تا ۱۶ نفر: مقدماتی ۲ دور و فینال ۳ دور؛ ۱۷ تا ۳۰ نفر: مقدماتی ۲ دور، نیمه‌نهایی ۲ دور و فینال ۳ دور.';
   const otherPage = bingo ? 'tournamentRoom' : 'bingoTournament';
   const otherTitle = bingo ? 'مشاهده جام کلاسیک دبرنا' : 'مشاهده جام ویژه بینگو';
   const otherCost = bingo ? '۲۰ BGC' : '۱۰۰ BGC';
@@ -1212,19 +1231,19 @@ function renderTournamentDetail(bingo=false) {
     <div class="tour-progress tour-progress-large"><span style="width:${progress}%"></span></div>
     <div class="tour-registration-foot"><span>زمان برگزاری: ${tournamentScheduleText(room,type)}</span><span>${tournamentStatus(room)}</span></div>
     <div class="tour-card-countdown tour-detail-countdown">${tournamentCountdownText(room)}</div>
-    <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full || room.status === 'scheduled' ? 'disabled' : ''}>${entered ? '✓ ثبت‌نام تو قبلاً انجام شده' : room.status === 'scheduled' ? 'ثبت‌نام هنوز باز نشده' : full ? 'ثبت‌نام بسته است' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
+    <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full || room.status === 'scheduled' || !room.id ? 'disabled' : ''}>${entered ? '✓ ' + escapeHTML(entryState) : !room.id ? 'در حال دریافت برنامه مسابقه' : room.status === 'scheduled' ? 'ثبت‌نام هنوز باز نشده' : full ? 'ثبت‌نام بسته است' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
     <p class="tour-balance-note">موجودی فعلی تو: <b>${state.bingoCoins.toLocaleString('fa-IR')} BGC</b> · هزینه فقط یک‌بار و پس از تأیید سرور کسر می‌شود.</p>
     ${tournamentLivePanel(room,type)}
   </section>
   <section class="tour-detail-grid">
     <div class="tour-rules-card"><div class="tour-panel-heading"><span>📜</span><div><small>GAME RULES</small><h3>قوانین مسابقه</h3></div></div>
-      <ul><li>هر کارت شامل ۳ ردیف و ۹ ستون و مجموعاً ۱۵ عدد است.</li><li>گوی‌ها از ۱ تا ۹۰، تصادفی و بدون تکرار اعلام می‌شوند و همهٔ بازیکنان هر دور شماره‌های یکسان می‌گیرند.</li><li>برد خطی با تکمیل یک ردیف پنج‌عددی و برد کامل با تکمیل هر ۱۵ عدد ثبت می‌شود.</li><li>در برد هم‌زمان، همهٔ برندگان همان مرحله ثبت می‌شوند.</li><li>ثبت‌نام از ۷ روز پیش از زمان مسابقه باز می‌شود و حداکثر ۳۰ جایگاه دارد.</li><li>${bingo ? 'فینال VIP پنج دور دارد؛ مقدماتی دو دور و نیمه‌نهایی سه دور دارند.' : 'فینال ساده سه دور دارد؛ مقدماتی و نیمه‌نهایی هرکدام دو دور دارند.'}</li><li>${bingo ? 'امتیاز VIP: حضور ۲، خط ۱۵، کامل ۳۰ و پیشرفت ۱۰/۷/۵.' : 'امتیاز ساده: حضور ۱، خط ۱۰، کامل ۲۵ و پیشرفت ۸/۶/۴.'}</li></ul>
+      <ul><li>هر کارت شامل ۳ ردیف و ۹ ستون و مجموعاً ۱۵ عدد است.</li><li>گوی‌ها از ۱ تا ۹۰، تصادفی و بدون تکرار اعلام می‌شوند و همهٔ بازیکنان هر دور شماره‌های یکسان می‌گیرند.</li><li>برد خطی با تکمیل یک ردیف پنج‌عددی و برد کامل با تکمیل هر ۱۵ عدد ثبت می‌شود.</li><li>در برد هم‌زمان، همهٔ برندگان همان مرحله ثبت می‌شوند.</li><li>ثبت‌نام از ۷ روز پیش از زمان مسابقه باز می‌شود و حداکثر ۳۰ جایگاه دارد.</li><li>${stageFormat}</li><li>${bingo ? 'امتیاز VIP: حضور ۲، خط ۱۵، کامل ۳۰ و پیشرفت ۱۰/۷/۵.' : 'امتیاز ساده: حضور ۱، خط ۱۰، کامل ۲۵ و پیشرفت ۸/۶/۴.'}</li></ul>
     </div>
     <div class="tour-prize-card"><div class="tour-panel-heading"><span>👑</span><div><small>WINNING FORMAT</small><h3>مراحل برد</h3></div></div>
       <div class="tour-winning-stage"><b>Ⅰ</b><div><strong>برنده یک خط</strong><small>تکمیل یک ردیف افقی</small></div></div>
       <div class="tour-winning-stage"><b>♛</b><div><strong>برنده دبرنای کامل</strong><small>تکمیل تمام خانه‌های کارت</small></div></div>
       <div class="tour-prize-shares"><b>تقسیم صندوق جایزه</b><div><span>🥇 نفر اول</span><strong>${bingo ? '۵۰٪' : '۶۰٪'}</strong></div><div><span>🥈 نفر دوم</span><strong>${bingo ? '۳۰٪' : '۲۵٪'}</strong></div><div><span>🥉 نفر سوم</span><strong>${bingo ? '۲۰٪' : '۱۵٪'}</strong></div></div>
-      <p class="tour-prize-disclaimer">ساده پنجشنبه‌ها ساعت ۲۱ و VIP آخرین پنجشنبهٔ هر ماه ساعت ۲۲ به وقت تهران برگزار می‌شود. ثبت‌نام ۷ روز قبل باز می‌شود؛ حداقل ۵ و حداکثر ۳۰ شرکت‌کننده لازم است. در صورت لغو، ورودی به‌صورت سروری بازگردانده می‌شود.</p>
+      <p class="tour-prize-disclaimer">ساده پنجشنبه‌ها ساعت ۲۱ و VIP آخرین پنجشنبهٔ هر ماه ساعت ۲۲ به وقت تهران برگزار می‌شود. ثبت‌نام ۷ روز قبل باز می‌شود؛ حداقل ۵ و حداکثر ۳۰ شرکت‌کننده لازم است. در صورت لغو، ورودی به‌صورت سروری بازگردانده می‌شود. در تساوی امتیاز، ابتدا برد کامل، سپس برد خطی، تعداد دورهای انجام‌شده، زمان ثبت‌نام و در نهایت شناسه بازیکن معیار رتبه‌بندی است.</p>
     </div>
   </section>
   <section class="tour-next-cup"><div><small>مسیر جایگزین</small><b>${otherTitle}</b><span>هزینه ورود: ${otherCost}</span></div><button class="btn btn-outline" data-page="${otherPage}">مشاهده جام دیگر ←</button></section>
