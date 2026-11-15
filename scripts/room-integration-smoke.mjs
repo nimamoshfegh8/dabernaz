@@ -381,22 +381,37 @@ assert.ok(ticketCreated.ticketId > 0);
 const ticketList = await request('/api/tickets', { account: accounts[0] });
 assert.ok(ticketList.tickets.some(ticket => ticket.id === ticketCreated.ticketId && ticket.subject === ticketSubject));
 
-// Tournament balances are atomic, registrations are unique, and both entry types appear in the queue.
+// Tournament balances are atomic, registrations are unique, and the VIP window
+// follows its real monthly schedule instead of being incorrectly assumed open every day.
 const beforeTournament = await accountMe(accounts[0]);
 const simpleEntry = await request('/api/tournaments/register', {
   account: accounts[0], method: 'POST', body: { type: 'simple' },
 });
 assert.equal(simpleEntry.tournament, 'simple');
-const bingoEntry = await request('/api/tournaments/register', {
-  account: accounts[0], method: 'POST', body: { type: 'bingo' },
-});
-assert.equal(bingoEntry.tournament, 'bingo');
+const lobbyBeforeVip = await request('/api/tournaments');
+const vipQueue = (lobbyBeforeVip.rooms || []).find(room => room.tournament_type === 'bingo');
+assert.ok(vipQueue, 'monthly VIP queue must always be announced');
+const vipRegistrationOpen = vipQueue.status === 'registration' && !vipQueue.registration_full;
+let bingoEntry = null;
+if (vipRegistrationOpen) {
+  bingoEntry = await request('/api/tournaments/register', {
+    account: accounts[0], method: 'POST', body: { type: 'bingo' },
+  });
+  assert.equal(bingoEntry.tournament, 'bingo');
+} else {
+  const closedVip = await fetch(baseUrl + '/api/tournaments/register', {
+    method: 'POST',
+    headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'bingo' }),
+  });
+  assert.equal(closedVip.status, 409, 'VIP registration must remain closed outside its seven-day window');
+}
 const tournamentBalance = await accountMe(accounts[0]);
-assert.equal(Number(tournamentBalance.bingoCoins), Number(beforeTournament.bingoCoins) - 120);
+assert.equal(Number(tournamentBalance.bingoCoins), Number(beforeTournament.bingoCoins) - 20 - (vipRegistrationOpen ? 100 : 0));
 const tournamentState = await request('/api/tournaments/me', { account: accounts[0] });
-assert.equal(tournamentState.entries.length, 2);
+assert.equal(tournamentState.entries.length, vipRegistrationOpen ? 2 : 1);
 assert.equal(tournamentState.rooms.find(room => room.tournament_type === 'simple').registered_count, 1);
-assert.equal(tournamentState.rooms.find(room => room.tournament_type === 'bingo').registered_count, 1);
+assert.equal(tournamentState.rooms.find(room => room.tournament_type === 'bingo').registered_count, vipRegistrationOpen ? 1 : 0);
 const duplicateTournament = await fetch(baseUrl + '/api/tournaments/register', {
   method: 'POST',
   headers: { cookie: accounts[0].cookie, origin, 'content-type': 'application/json' },
