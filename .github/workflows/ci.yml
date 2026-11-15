@@ -57,7 +57,7 @@ jobs:
             "name": "dabernaz-ci",
             "compatibility_date": "2026-11-06",
             "pages_build_output_dir": "./dist",
-            "vars": { "DABERNAZ_TEST_DIAGNOSTICS": "1", "SUPPORT_ADMIN_MEMBER_IDS": "999999" },
+            "vars": { "DABERNAZ_TEST_DIAGNOSTICS": "1", "SUPPORT_ADMIN_MEMBER_IDS": "999999", "WALLET_ADMIN_MEMBER_IDS": "999999" },
             "d1_databases": [
               {
                 "binding": "DB",
