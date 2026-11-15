@@ -172,7 +172,79 @@ try {
   assert.equal(startedWithTwo.data.room.status, 'playing');
   assert.equal(startedWithTwo.data.room.playerCount, 2);
 
-  console.log('Node fallback room parity smoke test passed.');
+  // The Node fallback must expose the same server-authoritative RPS and tic APIs as Pages.
+  const statsBeforeMiniGames=(await request('/api/auth/me',{cookie:accounts[1].cookie})).data.user.stats;
+  let rps=(await request('/api/games/start',{
+    method:'POST',cookie:accounts[1].cookie,body:{gameType:'rps'}
+  }));
+  assert.equal(rps.response.status,200,rps.data.error||'RPS start failed');
+  const rpsId=rps.data.match.id;
+  assert.match(rpsId,/^[0-9a-f]{32}$/i);
+  const duplicateStart=await request('/api/games/start',{
+    method:'POST',cookie:accounts[1].cookie,body:{gameType:'rps'}
+  });
+  assert.equal(duplicateStart.response.status,200);
+  assert.equal(duplicateStart.data.match.id,rpsId,'starting an active game must resume the same match');
+  const activeRps=await request('/api/games/active?gameType=rps',{cookie:accounts[1].cookie});
+  assert.equal(activeRps.data.match.id,rpsId,'RPS match must survive a reload');
+  let rpsMatch=activeRps.data.match;
+  for(let attempt=0;attempt<40&&!rpsMatch.finished;attempt++){
+    const moved=await request('/api/games/move',{
+      method:'POST',cookie:accounts[1].cookie,body:{matchId:rpsId,choice:'rock'}
+    });
+    assert.equal(moved.response.status,200,moved.data.error||'RPS move failed');
+    assert.equal(moved.data.lastRound.player,'rock');
+    assert.ok(['rock','paper','scissors'].includes(moved.data.lastRound.bot));
+    rpsMatch=moved.data.match;
+  }
+  assert.equal(rpsMatch.finished,true,'RPS must finish when either side reaches three wins');
+  assert.ok(['win','lose'].includes(rpsMatch.result));
+  assert.equal((await request('/api/games/active?gameType=rps',{cookie:accounts[1].cookie})).data.match,null);
+
+  const ticStart=await request('/api/games/start',{
+    method:'POST',cookie:accounts[1].cookie,body:{gameType:'tic'}
+  });
+  assert.equal(ticStart.response.status,200,ticStart.data.error||'Tic start failed');
+  const abandonedId=ticStart.data.match.id;
+  const firstTicMove=await request('/api/games/move',{
+    method:'POST',cookie:accounts[1].cookie,body:{matchId:abandonedId,index:0}
+  });
+  assert.equal(firstTicMove.response.status,200);
+  const occupiedMove=await request('/api/games/move',{
+    method:'POST',cookie:accounts[1].cookie,body:{matchId:abandonedId,index:0}
+  });
+  assert.equal(occupiedMove.response.status,400,'occupied tic cells must be rejected');
+  const abandoned=await request('/api/games/abandon',{
+    method:'POST',cookie:accounts[1].cookie,body:{matchId:abandonedId}
+  });
+  assert.equal(abandoned.response.status,200);
+  assert.equal((await request('/api/games/active?gameType=tic',{cookie:accounts[1].cookie})).data.match,null);
+  const freshTic=await request('/api/games/start',{
+    method:'POST',cookie:accounts[1].cookie,body:{gameType:'tic'}
+  });
+  assert.equal(freshTic.response.status,200);
+  assert.notEqual(freshTic.data.match.id,abandonedId,'resetting tic must create a fresh session');
+  let ticMatch=freshTic.data.match;
+  for(let attempt=0;attempt<9&&!ticMatch.finished;attempt++){
+    const index=ticMatch.board.findIndex(value=>!value);
+    assert.ok(index>=0);
+    const moved=await request('/api/games/move',{
+      method:'POST',cookie:accounts[1].cookie,body:{matchId:ticMatch.id,index}
+    });
+    assert.equal(moved.response.status,200,moved.data.error||'Tic move failed');
+    ticMatch=moved.data.match;
+  }
+  assert.equal(ticMatch.finished,true,'tic must finish on a win or a full board');
+  assert.ok(['win','lose','draw'].includes(ticMatch.result));
+  const statsAfterMiniGames=(await request('/api/auth/me',{cookie:accounts[1].cookie})).data.user.stats;
+  assert.equal(statsAfterMiniGames.gamesPlayed,statsBeforeMiniGames.gamesPlayed+2,
+    'abandoned games must not count; finished RPS and tic matches must each count once');
+  assert.equal(statsAfterMiniGames.wins,statsBeforeMiniGames.wins+
+    (rpsMatch.result==='win'?1:0)+(ticMatch.result==='win'?1:0));
+  assert.equal(statsAfterMiniGames.points,statsBeforeMiniGames.points+
+    ((rpsMatch.result==='win'?1:0)+(ticMatch.result==='win'?1:0))*10);
+
+  console.log('Node fallback room and server-authoritative mini-game smoke tests passed.');
 } finally {
   child.kill('SIGTERM');
   await delay(100);
