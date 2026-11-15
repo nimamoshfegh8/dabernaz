@@ -67,7 +67,7 @@ const customerRequests=await request('/api/wallet/requests',{account:customer});
 assert.equal(customerRequests.requests[0].status,'awaiting_receipt');
 assert.equal((await request('/api/wallet/requests',{account:other})).requests.length,0);
 await expectStatus('/api/wallet/requests/'+deposit.requestId+'/receipt',404,{account:other,method:'POST',body:{dataUrl:'data:image/png;base64,'+Buffer.from('receipt-proof-payload-'.repeat(10)).toString('base64')}});
-const fakePng='data:image/png;base64,'+Buffer.from('receipt-proof-payload-'.repeat(10)).toString('base64');
+const fakePng='data:image/png;base64,'+Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from('X'.repeat(220))]).toString('base64');
 const uploaded=await request('/api/wallet/requests/'+deposit.requestId+'/receipt',{account:customer,method:'POST',body:{dataUrl:fakePng}});
 assert.equal(uploaded.status,'pending_review');
 const pending=await request('/api/admin/wallet?status=pending_review',{account:admin});
