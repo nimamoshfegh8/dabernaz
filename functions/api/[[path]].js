@@ -1935,9 +1935,8 @@ async function routeRequest(request, env) {
     if (request.method === 'GET' && path === '/api/admin/wallet/users') {
       const q = String(new URL(request.url).searchParams.get('q') || '').trim().slice(0,80);
       if (q.length < 2) return json({ok:true,users:[]});
-      const like = '%' + q.replace(/[%_]/g, '\\  const isSupportAdmin=supportAdminIds.includes(String(user.member_id||''));
-  if(path.startsWith('/api/admin/support')){') + '%';
-      const rows = await env.DB.prepare("SELECT id,member_id,username,email,balance FROM users WHERE member_id=? OR username LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT 25")
+      const like = '%' + q + '%';
+      const rows = await env.DB.prepare("SELECT id,member_id,username,email,balance FROM users WHERE member_id=? OR username LIKE ? OR email LIKE ? ORDER BY id DESC LIMIT 25")
         .bind(q,like,like).all();
       return json({ok:true,users:rows.results || []});
     }
@@ -1985,7 +1984,7 @@ async function routeRequest(request, env) {
       if (current.request_type === 'deposit') {
         if (!['approve','reject'].includes(decision)) throw new HttpError(400, 'برای واریز فقط تأیید یا رد مجاز است.');
         batch = await env.DB.batch([
-          env.DB.prepare('UPDATE manual_wallet_requests SET status=?,admin_note=?,handled_by=?,handled_at=?,updated_at=? WHERE id=? AND request_type=\\'deposit\\' AND status=\\'pending_review\\'')
+          env.DB.prepare("UPDATE manual_wallet_requests SET status=?,admin_note=?,handled_by=?,handled_at=?,updated_at=? WHERE id=? AND request_type='deposit' AND status='pending_review'")
             .bind(decision === 'approve' ? 'approved' : 'rejected',note,user.id,now,now,id),
           env.DB.prepare("UPDATE users SET balance=balance+? WHERE id=? AND changes()=1 AND ?='approve'").bind(Number(current.amount),Number(current.user_id),decision),
           env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'manual_deposit',?,?,? WHERE changes()=1").bind(Number(current.user_id),Number(current.amount),'شارژ دستی کیف پول · درخواست '+id,now),
@@ -1993,7 +1992,7 @@ async function routeRequest(request, env) {
       } else {
         if (!['paid','reject'].includes(decision)) throw new HttpError(400, 'برای برداشت فقط ثبت واریز یا رد درخواست مجاز است.');
         batch = await env.DB.batch([
-          env.DB.prepare('UPDATE manual_wallet_requests SET status=?,admin_note=?,handled_by=?,handled_at=?,updated_at=? WHERE id=? AND request_type=\\'withdraw\\' AND status=\\'pending_transfer\\'')
+          env.DB.prepare("UPDATE manual_wallet_requests SET status=?,admin_note=?,handled_by=?,handled_at=?,updated_at=? WHERE id=? AND request_type='withdraw' AND status='pending_transfer'")
             .bind(decision === 'paid' ? 'paid' : 'rejected',note,user.id,now,now,id),
           env.DB.prepare("UPDATE users SET balance=balance+? WHERE id=? AND changes()=1 AND ?='reject'").bind(Number(current.amount),Number(current.user_id),decision),
           env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_refund',?,?,? WHERE changes()=1").bind(Number(current.user_id),Number(current.amount),'بازگشت وجه برداشت ردشده · درخواست '+id,now),
@@ -2058,7 +2057,7 @@ async function routeRequest(request, env) {
     const padding = encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0;
     const size = Math.floor(encoded.length * 3 / 4) - padding;
     if (size < 100 || size > 512 * 1024) throw new HttpError(413, 'حجم تصویر رسید باید حداکثر ۵۱۲ کیلوبایت باشد.');
-    const item = await env.DB.prepare('SELECT id,status FROM manual_wallet_requests WHERE id=? AND user_id=? AND request_type=\\'deposit\\'').bind(id,user.id).first();
+    const item = await env.DB.prepare("SELECT id,status FROM manual_wallet_requests WHERE id=? AND user_id=? AND request_type='deposit'").bind(id,user.id).first();
     if (!item) throw new HttpError(404, 'درخواست واریز پیدا نشد.');
     if (item.status !== 'awaiting_receipt') throw new HttpError(409, 'این درخواست در وضعیت دریافت رسید نیست.');
     const now = new Date().toISOString();
