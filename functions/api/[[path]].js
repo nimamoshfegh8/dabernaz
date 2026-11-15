@@ -1523,10 +1523,15 @@ async function myRecurringTournamentData(db, userId) {
       .bind(roundId, userId).first();
     if (!player) continue;
     event.my_card = parseTournamentArray(player.card_json);
-    event.my_matched_count = Number(player.matched_count) || 0;
+    const calledSet = new Set(event.current_round.called_numbers || []);
+    const myNumbers = event.my_card.flat().filter(Number.isInteger);
+    event.my_matched_count = myNumbers.filter((number) => calledSet.has(number)).length;
     event.my_round_score = Number(player.score) || 0;
-    event.my_line_hit = Number(player.line_hit) === 1;
-    event.my_full_hit = Number(player.full_hit) === 1;
+    event.my_line_hit = event.my_card.some((row) => {
+      const rowNumbers = row.filter(Number.isInteger);
+      return rowNumbers.length === 5 && rowNumbers.every((number) => calledSet.has(number));
+    });
+    event.my_full_hit = myNumbers.length === 15 && myNumbers.every((number) => calledSet.has(number));
     event.my_entry_status = ownEntry.status;
     event.my_total_points = Number(ownEntry.total_points) || 0;
   }
