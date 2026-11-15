@@ -1177,12 +1177,12 @@ async function createTournamentRound(db, event, stage, roundNumber, nowMs) {
   return await db.prepare("SELECT * FROM tournament_rounds WHERE id=?").bind(roundId).first();
 }
 
-async function scoreTournamentRound(db, eventId, round) {
+async function scoreTournamentRound(db, eventId, round, tournamentType) {
   if (!round || round.status !== "finished") return;
   const result = await db.prepare("SELECT id,user_id,card_json FROM tournament_round_players WHERE round_id=? ORDER BY user_id")
     .bind(round.id).all();
   const players = result.results || [];
-  const scores = scoreTournamentPlayers(players, parseTournamentArray(round.called_numbers_json));
+  const scores = scoreTournamentPlayers(players, parseTournamentArray(round.called_numbers_json), tournamentType);
   const byUser = new Map(scores.map((item) => [String(item.userId), item]));
   const nowText = new Date().toISOString();
 
@@ -1373,7 +1373,7 @@ async function advanceTournamentEvent(db, event, nowMs) {
   if (!round) return;
   if (round.status === "playing") round = await advanceTournamentRound(db, round, nowMs);
   if (round && round.status === "finished") {
-    await scoreTournamentRound(db, event.id, round);
+    await scoreTournamentRound(db, event.id, round, event.tournament_type);
     const fresh = await db.prepare("SELECT * FROM tournament_events WHERE id=?").bind(event.id).first();
     if (fresh && fresh.status === "running" && fresh.current_round_id === round.id) {
       await advanceTournamentStage(db, fresh, round);
