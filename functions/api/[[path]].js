@@ -1855,7 +1855,7 @@ async function routeRequest(request, env) {
   const authResponse = await handleAuth(env.DB, request, path);
   if (authResponse) return authResponse;
 
-  const isProtected = path === '/api/profile' || path.startsWith('/api/games/') || /^\\/api\\/rooms\\//.test(path) || path === '/api/referrals' || path === '/api/support' || path.startsWith('/api/tickets') || path.startsWith('/api/admin/support') || path === '/api/tournaments/me' || path === '/api/tournaments/register';
+  const isProtected = path === '/api/profile' || path.startsWith('/api/games/') || path.startsWith('/api/rooms/') || path === '/api/referrals' || path === '/api/support' || path.startsWith('/api/tickets') || path.startsWith('/api/admin/support') || path === '/api/tournaments/me' || path === '/api/tournaments/register';
   if (!isProtected) return json({ error: 'مسیر API پیدا نشد.' }, 404);
   const user = await authenticatedUser(env.DB, request);
   if (!user) throw new HttpError(401, 'برای ادامه ابتدا وارد حساب کاربری شو.');
@@ -1864,7 +1864,7 @@ async function routeRequest(request, env) {
   const isSupportAdmin=supportAdmins.includes(String(user.email||'').trim().toLowerCase());
   if(path.startsWith('/api/admin/support')){
     if(!isSupportAdmin) throw new HttpError(403,'دسترسی مدیر پشتیبانی برای این حساب فعال نیست.');
-    const match=path.match(/^\\/api\\/admin\\/support\\/(\\d+)(?:\\/(reply|status))?$/);
+    const adminParts=path.split('/').filter(Boolean);\n    const match=adminParts.length>=4&&/^\\d+$/.test(adminParts[3])?[null,adminParts[3],adminParts[4]||'']:null;
     if(request.method==='GET'&&path==='/api/admin/support'){
       const status=String(new URL(request.url).searchParams.get('status')||'all');
       if(!['all','open','answered','closed'].includes(status)) throw new HttpError(400,'فیلتر وضعیت معتبر نیست.');
@@ -1952,7 +1952,7 @@ async function routeRequest(request, env) {
       FROM support_tickets t WHERE t.user_id=? ORDER BY t.id DESC LIMIT 30`).bind(user.id).all();
     return json({ok:true,tickets:rows.results||[]});
   }
-  const userTicket=path.match(/^\\/api\\/tickets\\/(\\d+)$/);
+  const ticketParts=path.split('/').filter(Boolean);\n  const userTicket=ticketParts.length===3&&ticketParts[0]==='api'&&ticketParts[1]==='tickets'&&/^\\d+$/.test(ticketParts[2])?[null,ticketParts[2]]:null;
   if(userTicket&&request.method==='GET'){
     const id=Number(userTicket[1]);
     const ticket=await env.DB.prepare('SELECT id,subject,status,created_at,message FROM support_tickets WHERE id=? AND user_id=?').bind(id,user.id).first();
