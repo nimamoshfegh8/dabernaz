@@ -31,7 +31,7 @@ const MIME = {
   '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.ico':'image/x-icon'
 };
 
-let db = { users: [], sessions: [], rooms: {}, roomHistory: [] };
+let db = { users: [], sessions: [], rooms: {}, roomHistory: [], gameSessions: [], gameResults: [] };
 let writeChain = Promise.resolve();
 const drawTimers = new Map();
 const authAttempts = new Map();
@@ -90,7 +90,7 @@ async function persist() {
 async function loadDb() {
   try {
     const saved = JSON.parse(await fs.promises.readFile(DB_FILE, 'utf8'));
-    db = { users:Array.isArray(saved.users)?saved.users:[], sessions:Array.isArray(saved.sessions)?saved.sessions:[], rooms:saved.rooms && typeof saved.rooms==='object'?saved.rooms:{}, roomHistory:Array.isArray(saved.roomHistory)?saved.roomHistory:[] };
+    db = { users:Array.isArray(saved.users)?saved.users:[], sessions:Array.isArray(saved.sessions)?saved.sessions:[], rooms:saved.rooms && typeof saved.rooms==='object'?saved.rooms:{}, roomHistory:Array.isArray(saved.roomHistory)?saved.roomHistory:[], gameSessions:Array.isArray(saved.gameSessions)?saved.gameSessions:[], gameResults:Array.isArray(saved.gameResults)?saved.gameResults:[] };
   } catch (error) {
     if (error.code === 'ENOENT') {
       await persist();
@@ -305,6 +305,135 @@ function rateLimited(req) {
   if (now>state.until) { state.count=0; state.until=now+10*60*1000; }
   state.count++; authAttempts.set(ip,state); return state.count>60;
 }
+const SERVER_GAME_RPS_CHOICES = ['rock','paper','scissors'];
+const SERVER_GAME_RPS_BEATS = { rock:'scissors', paper:'rock', scissors:'paper' };
+const SERVER_GAME_TIC_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+function serverGameTicWinner(board) {
+  for (const [a,b,c] of SERVER_GAME_TIC_LINES) if (board[a] && board[a]===board[b] && board[a]===board[c]) return board[a];
+  return null;
+}
+function serverGameTicBotMove(board) {
+  const winningMove = mark => {
+    for (let i=0;i<9;i++) if (!board[i]) {
+      board[i]=mark; const wins=serverGameTicWinner(board)===mark; board[i]='';
+      if (wins) return i;
+    }
+    return -1;
+  };
+  const win=winningMove('O'); if (win!==-1) return win;
+  const block=winningMove('X'); if (block!==-1 && crypto.randomInt(100)<82) return block;
+  const available=board.map((value,index)=>value?-1:index).filter(index=>index!==-1);
+  if (!available.length) return -1;
+  const preferred=available.filter(index=>[0,2,4,6,8].includes(index));
+  const pool=preferred.length && crypto.randomInt(100)<68 ? preferred : available;
+  return pool[crypto.randomInt(pool.length)];
+}
+function serverGameRpsBotChoice(history) {
+  if (!history.length) return SERVER_GAME_RPS_CHOICES[crypto.randomInt(3)];
+  const predicted={rock:1.25,paper:1.25,scissors:1.25};
+  history.forEach((choice,index)=>{predicted[choice]+=Math.pow(0.965,history.length-1-index);});
+  const last=history[history.length-1];
+  for(let i=0;i<history.length-1;i++) if(history[i]===last) predicted[history[i+1]]+=1.8*Math.pow(0.975,history.length-2-i);
+  if(history.length>=2) {
+    const previous=history[history.length-2];
+    for(let i=0;i<history.length-2;i++) if(history[i]===previous&&history[i+1]===last) predicted[history[i+2]]+=2.6*Math.pow(0.98,history.length-3-i);
+  }
+  if(crypto.randomInt(100)<32) return SERVER_GAME_RPS_CHOICES[crypto.randomInt(3)];
+  const total=SERVER_GAME_RPS_CHOICES.reduce((sum,choice)=>sum+predicted[choice],0), expected={};
+  for(const computer of SERVER_GAME_RPS_CHOICES) expected[computer]=SERVER_GAME_RPS_CHOICES.reduce((score,player)=>{
+    const probability=predicted[player]/total;
+    if(SERVER_GAME_RPS_BEATS[computer]===player) return score+probability;
+    if(SERVER_GAME_RPS_BEATS[player]===computer) return score-probability;
+    return score;
+  },0);
+  const best=Math.max(...Object.values(expected));
+  const replies=SERVER_GAME_RPS_CHOICES.filter(choice=>Math.abs(expected[choice]-best)<1e-9);
+  return replies[crypto.randomInt(replies.length)];
+}
+function publicServerGameSession(session) {
+  return {id:session.id,gameType:session.gameType,...session.state};
+}
+async function handleServerMiniGame(req,res,url,user) {
+  const route=url.pathname;
+  if(req.method==='POST'&&route==='/api/games/start') {
+    const body=await readBody(req), gameType=String(body.gameType||'');
+    if(!['rps','tic'].includes(gameType)) return json(res,400,{error:'نوع بازی معتبر نیست.'});
+    const active=db.gameSessions.find(session=>session.userId===user.id&&session.gameType===gameType&&session.status==='playing');
+    if(active) return json(res,200,{ok:true,match:publicServerGameSession(active)});
+    const now=new Date().toISOString();
+    const state=gameType==='rps'
+      ? {round:1,player:0,bot:0,draws:0,history:[],rounds:[],finished:false,result:null}
+      : {board:Array(9).fill(''),moves:0,finished:false,result:null};
+    const session={id:crypto.randomBytes(16).toString('hex'),userId:user.id,gameType,state,status:'playing',createdAt:now,updatedAt:now};
+    db.gameSessions.push(session);
+    await persist();
+    return json(res,200,{ok:true,match:publicServerGameSession(session)});
+  }
+  if(req.method==='GET'&&route==='/api/games/active') {
+    const gameType=url.searchParams.get('gameType');
+    if(!['rps','tic'].includes(gameType||'')) return json(res,400,{error:'نوع بازی معتبر نیست.'});
+    const session=db.gameSessions.find(item=>item.userId===user.id&&item.gameType===gameType&&item.status==='playing');
+    return json(res,200,{ok:true,match:session?publicServerGameSession(session):null});
+  }
+  if(req.method==='POST'&&route==='/api/games/abandon') {
+    const body=await readBody(req), matchId=String(body.matchId||'');
+    if(!/^[0-9a-f]{32}$/i.test(matchId)) return json(res,400,{error:'شناسه مسابقه معتبر نیست.'});
+    const session=db.gameSessions.find(item=>item.id===matchId&&item.userId===user.id);
+    if(!session) return json(res,404,{error:'مسابقه پیدا نشد.'});
+    if(session.status==='abandoned') return json(res,200,{ok:true,abandoned:true});
+    if(session.status!=='playing') return json(res,409,{error:'این مسابقه به پایان رسیده است.'});
+    session.status='abandoned'; session.updatedAt=new Date().toISOString();
+    await persist();
+    return json(res,200,{ok:true,abandoned:true});
+  }
+  if(req.method==='POST'&&route==='/api/games/move') {
+    const body=await readBody(req), matchId=String(body.matchId||'');
+    if(!/^[0-9a-f]{32}$/i.test(matchId)) return json(res,400,{error:'شناسه مسابقه معتبر نیست.'});
+    const session=db.gameSessions.find(item=>item.id===matchId&&item.userId===user.id);
+    if(!session) return json(res,404,{error:'مسابقه پیدا نشد.'});
+    if(session.status!=='playing') return json(res,409,{error:'این مسابقه قبلاً به پایان رسیده است.'});
+    let lastRound=null, finalResult=null;
+    if(session.gameType==='rps') {
+      const choice=String(body.choice||'');
+      if(!SERVER_GAME_RPS_CHOICES.includes(choice)) return json(res,400,{error:'انتخاب سنگ، کاغذ یا قیچی معتبر نیست.'});
+      const state=session.state, computer=serverGameRpsBotChoice(state.history||[]);
+      const outcome=choice===computer?'draw':SERVER_GAME_RPS_BEATS[choice]===computer?'win':'lose';
+      if(outcome==='win') state.player++; else if(outcome==='lose') state.bot++; else state.draws++;
+      const round=Number(state.round)||1;
+      lastRound={player:choice,bot:computer,outcome,round,text:outcome==='win'?'این دور را بردی؛ یک امتیاز گرفتی.':outcome==='lose'?'این دور را رایانه برد؛ یک امتیاز گرفت.':'مساوی؛ این دور امتیازی نداشت.'};
+      state.history=[...(state.history||[]),choice].slice(-120);
+      state.rounds=[...(state.rounds||[]),{player:choice,bot:computer,outcome}];
+      if(state.player>=3||state.bot>=3){state.finished=true;state.result=state.player===3?'win':'lose';finalResult=state.result;}
+      else state.round=round+1;
+    } else if(session.gameType==='tic') {
+      const index=Number(body.index), state=session.state;
+      if(!Number.isInteger(index)||index<0||index>8||state.board[index]) return json(res,400,{error:'خانه انتخاب‌شده معتبر یا خالی نیست.'});
+      state.board[index]='X'; state.moves++;
+      if(serverGameTicWinner(state.board)==='X'){state.finished=true;state.result='win';finalResult='win';}
+      else if(state.board.every(Boolean)){state.finished=true;state.result='draw';finalResult='draw';}
+      else{
+        const botIndex=serverGameTicBotMove(state.board);
+        if(botIndex>=0){state.board[botIndex]='O';state.moves++;}
+        if(serverGameTicWinner(state.board)==='O'){state.finished=true;state.result='lose';finalResult='lose';}
+        else if(state.board.every(Boolean)){state.finished=true;state.result='draw';finalResult='draw';}
+      }
+    } else return json(res,400,{error:'نوع مسابقه پشتیبانی نمی‌شود.'});
+    session.status=session.state.finished?'finished':'playing';
+    session.updatedAt=new Date().toISOString();
+    if(finalResult) {
+      db.gameResults=db.gameResults||[];
+      db.gameResults.push({userId:user.id,gameType:session.gameType,result:finalResult,createdAt:session.updatedAt});
+      user.stats=user.stats||{gamesPlayed:0,wins:0,points:0};
+      user.stats.gamesPlayed=Math.min(100000000,Number(user.stats.gamesPlayed)||0);
+      user.stats.gamesPlayed++;
+      if(finalResult==='win'){user.stats.wins=Math.min(100000000,(Number(user.stats.wins)||0)+1);user.stats.points=Math.min(1000000000,(Number(user.stats.points)||0)+10);}
+    }
+    await persist();
+    return json(res,200,{ok:true,match:publicServerGameSession(session),lastRound,user:finalResult?publicUser(user):null});
+  }
+  return null;
+}
+
 async function routeApi(req,res,url) {
   if (['POST','PATCH','PUT','DELETE'].includes(req.method)) validateWriteOrigin(req,url);
   if (req.method==='GET' && url.pathname==='/api/health') return json(res,200,{ok:true,service:'dabernaz',backend:'node',mode:'accounts-and-automatic-rooms-ready'});
@@ -348,6 +477,8 @@ async function routeApi(req,res,url) {
   }
   const user=authenticate(req);
   if (!user) return json(res,401,{error:'برای ادامه ابتدا وارد حساب کاربری شو.'});
+  const miniGameResponse=await handleServerMiniGame(req,res,url,user);
+  if(miniGameResponse) return miniGameResponse;
   if (req.method==='POST' && url.pathname==='/api/games/result') {
     const body=await readBody(req);
     if(typeof body.won!=='boolean') return json(res,400,{error:'نتیجه مسابقه معتبر نیست.'});
