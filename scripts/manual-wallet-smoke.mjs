@@ -98,7 +98,7 @@ const rejectedWithdraw=await request('/api/wallet/requests',{account:customer,me
 assert.equal(Number((await me(customer)).balance),200000);
 await request('/api/admin/wallet/'+rejectedWithdraw.requestId+'/decision',{account:admin,method:'POST',body:{decision:'reject',note:'مشخصات کارت نیاز به اصلاح دارد'}});
 assert.equal(Number((await me(customer)).balance),220000,'rejected withdrawal must refund the reserved amount exactly once');
-await expectStatus('/api/wallet/requests',{account:customer,method:'POST',body:{type:'withdraw',amount:500000,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
+await expectStatus('/api/wallet/requests',409,{account:customer,method:'POST',body:{type:'withdraw',amount:500000,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
 // Non-owner cannot attach proof to another customer's deposit.
 await expectStatus('/api/wallet/requests/'+deposit.requestId+'/receipt',404,{account:other,method:'POST',body:{dataUrl:fakePng}});
 
