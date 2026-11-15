@@ -1182,7 +1182,12 @@ async function scoreTournamentRound(db, eventId, round, tournamentType) {
   const result = await db.prepare("SELECT id,user_id,card_json FROM tournament_round_players WHERE round_id=? ORDER BY user_id")
     .bind(round.id).all();
   const players = result.results || [];
-  const scores = scoreTournamentPlayers(players, parseTournamentArray(round.called_numbers_json), tournamentType);
+  const scores = scoreTournamentPlayers(
+    players,
+    parseTournamentArray(round.called_numbers_json),
+    tournamentType,
+    parseTournamentArray(round.line_winner_ids_json)
+  );
   const byUser = new Map(scores.map((item) => [String(item.userId), item]));
   const nowText = new Date().toISOString();
 
@@ -1400,6 +1405,28 @@ async function recurringTournamentSnapshots(db, advanceDraws = true) {
       : null;
     const leaders = await db.prepare("SELECT u.username,u.member_id,e.total_points,e.line_wins,e.full_wins,e.status FROM tournament_event_entries e JOIN users u ON u.id=e.user_id WHERE e.event_id=? AND e.status!='refunded' ORDER BY e.total_points DESC,e.full_wins DESC,e.line_wins DESC,e.rounds_played DESC,e.created_at ASC LIMIT 5")
       .bind(event.id).all();
+    const lineWinnerIds = round ? parseTournamentArray(round.line_winner_ids_json).map(Number) : [];
+    const fullWinnerIds = round ? parseTournamentArray(round.full_winner_ids_json).map(Number) : [];
+    const winnerIds = [...new Set([...lineWinnerIds, ...fullWinnerIds])]
+      .filter((id) => Number.isSafeInteger(id) && id > 0);
+    const winnerProfiles = new Map();
+    if (winnerIds.length) {
+      const placeholders = winnerIds.map(() => '?').join(',');
+      const profiles = await db.prepare(
+        'SELECT id,username,member_id FROM users WHERE id IN (' + placeholders + ')'
+      ).bind(...winnerIds).all();
+      for (const profile of profiles.results || []) {
+        winnerProfiles.set(Number(profile.id), {
+          name: profile.username,
+          memberId: String(profile.member_id || '')
+        });
+      }
+    }
+    const publicWinners = (ids) => ids.map((id) => winnerProfiles.get(Number(id)) || {
+      name: 'بازیکن',
+      memberId: ''
+    });
+
     output.push({
       id: event.id,
       tournament_type: event.tournament_type,
@@ -1425,7 +1452,9 @@ async function recurringTournamentSnapshots(db, advanceDraws = true) {
         called_numbers: parseTournamentArray(round.called_numbers_json),
         latest_number: parseTournamentArray(round.called_numbers_json).slice(-1)[0] || null,
         line_winner_ids: parseTournamentArray(round.line_winner_ids_json),
-        full_winner_ids: parseTournamentArray(round.full_winner_ids_json)
+        full_winner_ids: parseTournamentArray(round.full_winner_ids_json),
+        line_winners: publicWinners(lineWinnerIds),
+        full_winners: publicWinners(fullWinnerIds)
       } : null,
       top_players: (leaders.results || []).map((player) => ({
         name: player.username,
@@ -1525,11 +1554,10 @@ async function myRecurringTournamentData(db, userId) {
     const myNumbers = event.my_card.flat().filter(Number.isInteger);
     event.my_matched_count = myNumbers.filter((number) => calledSet.has(number)).length;
     event.my_round_score = Number(player.score) || 0;
-    event.my_line_hit = event.my_card.some((row) => {
-      const rowNumbers = row.filter(Number.isInteger);
-      return rowNumbers.length === 5 && rowNumbers.every((number) => calledSet.has(number));
-    });
-    event.my_full_hit = myNumbers.length === 15 && myNumbers.every((number) => calledSet.has(number));
+    event.my_line_hit = parseTournamentArray(event.current_round.line_winner_ids)
+      .some((winnerId) => String(winnerId) === String(userId));
+    event.my_full_hit = parseTournamentArray(event.current_round.full_winner_ids)
+      .some((winnerId) => String(winnerId) === String(userId));
     event.my_entry_status = ownEntry.status;
     event.my_total_points = Number(ownEntry.total_points) || 0;
   }
