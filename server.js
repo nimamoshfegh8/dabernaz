@@ -381,7 +381,8 @@ async function handleServerMiniGame(req,res,url,user) {
     const session=db.gameSessions.find(item=>item.id===matchId&&item.userId===user.id);
     if(!session) return json(res,404,{error:'مسابقه پیدا نشد.'});
     if(session.status==='abandoned') return json(res,200,{ok:true,abandoned:true});
-    if(session.status!=='playing') return json(res,409,{error:'این مسابقه به پایان رسیده است.'});
+    if(session.status==='finished') return json(res,200,{ok:true,abandoned:false});
+    if(session.status!=='playing') return json(res,409,{error:'وضعیت این مسابقه تغییر کرده است.'});
     session.status='abandoned'; session.updatedAt=new Date().toISOString();
     await persist();
     return json(res,200,{ok:true,abandoned:true});
