@@ -2041,13 +2041,13 @@ setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===curren
 setInterval(async()=>{
   if(!currentUser)return;
   if(currentPage==='supportAdmin'&&supportAdminEnabled){
-    try{await refreshSupportAdmin();render();}catch(_){}
+    try{await refreshSupportAdmin();const composing=document.activeElement?.closest('#supportAdminReplyForm');if(!composing)render();}catch(_){}
   }else if(currentPage==='support'){
     try{
       const list=await apiRequest('/api/tickets',{method:'GET',headers:{}});
       state.supportTickets=Array.isArray(list.tickets)?list.tickets:[];
       if(supportSelectedTicketId)supportThread=await apiRequest('/api/tickets/'+supportSelectedTicketId,{method:'GET',headers:{}});
-      render();
+      const composing=document.activeElement?.closest('#supportForm,#supportReplyForm');if(!composing)render();
     }catch(_){}
   }
 },15000);
