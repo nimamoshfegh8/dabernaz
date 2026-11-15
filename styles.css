@@ -839,3 +839,49 @@
 .support-admin-filters,.support-admin-controls{display:flex;gap:7px;flex-wrap:wrap;margin:10px 0}
 .support-admin-filters .btn,.support-admin-controls .btn{font-size:9px;padding:8px 11px}
 @media(max-width:420px){.support-admin-stats{gap:5px}.support-admin-stats>div{padding:9px 3px}.support-thread{padding:10px}.support-message{max-width:96%}}
+
+
+/* Manual wallet transfers and finance administration */
+.wallet-bank-panel,.wallet-admin-settings,.wallet-admin-adjust,.wallet-admin-inbox{margin:16px 0;padding:15px}
+.wallet-bank-details{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:15px;border:1px solid var(--line2);border-radius:14px;background:linear-gradient(135deg,#1a1115,#101014)}
+.wallet-bank-details strong{font-size:clamp(19px,5vw,26px);letter-spacing:1px;color:var(--gold);font-variant-numeric:tabular-nums}
+.wallet-bank-details b{font-size:14px}
+.wallet-bank-details .btn{margin-top:5px}
+.wallet-request-list,.wallet-admin-request-list{display:flex;flex-direction:column;gap:9px;padding:10px}
+.wallet-request-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,auto);gap:12px;padding:12px;border:1px solid var(--line);border-radius:13px;background:var(--panel2)}
+.wallet-request-main,.wallet-request-extra{display:flex;flex-direction:column;align-items:flex-start;gap:7px;min-width:0}
+.wallet-request-main strong{color:var(--gold);font-variant-numeric:tabular-nums}
+.wallet-request-main small,.wallet-request-extra small{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.wallet-request-extra{justify-content:center}
+.wallet-request-extra .btn{font-size:11px;padding:8px 10px}
+.wallet-admin-request{width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;text-align:right;padding:13px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);color:var(--text);cursor:pointer}
+.wallet-admin-request>span:first-child{display:flex;flex-direction:column;gap:6px;min-width:0}
+.wallet-admin-request small{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.wallet-admin-settings label,.wallet-admin-adjust label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.wallet-admin-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.wallet-admin-user-results{display:flex;flex-direction:column;gap:7px;margin:10px 0}
+.wallet-admin-user-result{display:flex;flex-direction:column;gap:5px;text-align:right;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#0e0e12;color:var(--text);cursor:pointer}
+.wallet-admin-user-result small{color:var(--muted);font-size:11px}
+.wallet-admin-detail{margin:14px 0;padding:14px;border-color:var(--line2)}
+.wallet-admin-user-data{display:flex;flex-direction:column;gap:5px;padding:10px;background:var(--panel2);border-radius:10px}
+.wallet-admin-user-data small{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.wallet-admin-user-data strong{color:var(--gold);font-size:13px}
+.wallet-admin-data-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:12px 0}
+.wallet-admin-data-grid>div{display:flex;flex-direction:column;gap:5px;padding:10px;border:1px solid var(--line);border-radius:10px;min-width:0}
+.wallet-admin-data-grid small{font-size:10px;color:var(--muted)}
+.wallet-admin-data-grid b{font-size:12px;overflow-wrap:anywhere}
+.wallet-proof{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.wallet-proof-image{display:block;width:100%;max-height:420px;object-fit:contain;background:#09090c;border:1px solid var(--line);border-radius:12px}
+.wallet-admin-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.wallet-admin-actions .btn{flex:1 1 140px}
+.wallet-transfer-instructions{padding:12px;border:1px solid var(--line2);border-radius:12px;background:var(--panel2);display:flex;flex-direction:column;gap:9px;margin-bottom:12px}
+.wallet-transfer-instructions strong{font-size:20px;color:var(--gold);letter-spacing:1px}
+.wallet-transfer-instructions small{color:var(--muted)}
+.wallet-transfer-instructions p{font-size:12px;line-height:1.9;margin:0}
+@media(max-width:440px){
+ .wallet-request-row{grid-template-columns:1fr}
+ .wallet-request-extra{align-items:stretch}
+ .wallet-request-extra .btn{width:100%}
+ .wallet-admin-data-grid{grid-template-columns:1fr 1fr}
+ .wallet-admin-search{grid-template-columns:1fr}
+}
