@@ -24,7 +24,7 @@ const child = spawn(process.execPath, ['server.js'], {
     HOST: '127.0.0.1',
     NODE_ENV: 'test',
     DABERNAZ_DATA_DIR: dataDir,
-    DABERNAZ_DRAW_INTERVAL_MS: '60000',
+    DABERNAZ_DRAW_INTERVAL_MS: '20',
     DABERNAZ_TEST_REGISTRATION_WINDOW_MS: '500',
     COOKIE_SECURE: 'false'
   },
@@ -85,8 +85,17 @@ try {
     accounts.push({ email, cookie, id: data.user.id });
   }
 
+  const unconfirmedPurchase = await request('/api/rooms/room5000/join', {
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1 }
+  });
+  assert.equal(unconfirmedPurchase.response.status, 400,
+    'room purchase must require explicit client confirmation');
+  const untouchedRoom = await request('/api/rooms/room5000', { cookie: accounts[0].cookie });
+  assert.equal(untouchedRoom.data.room.playerCount, 0);
+  assert.equal(untouchedRoom.data.room.cardCount, 0);
+
   const first = await request('/api/rooms/room5000/join', {
-    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 3 }
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 3, purchaseConfirmed: true }
   });
   assert.equal(first.response.status, 200, first.data.error || '');
   const firstRoom = first.data.room;
@@ -100,21 +109,21 @@ try {
   assert.equal(fixedDeadline - firstRoom.registrationStartedAt, 500);
 
   const addTwo = await request('/api/rooms/room5000/join', {
-    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 2 }
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 2, purchaseConfirmed: true }
   });
   assert.equal(addTwo.response.status, 200);
   assert.equal(addTwo.data.room.myCards.length, 5);
   assert.equal(addTwo.data.room.registrationDeadline, fixedDeadline);
 
   const sixth = await request('/api/rooms/room5000/join', {
-    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1 }
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1, purchaseConfirmed: true }
   });
   assert.equal(sixth.response.status, 409, 'sixth card must be rejected');
   assert.equal((await request('/api/rooms/room5000', { cookie: accounts[0].cookie })).data.room.cardCount, 5);
 
   for (const account of accounts.slice(1)) {
     const joined = await request('/api/rooms/room5000/join', {
-      method: 'POST', cookie: account.cookie, body: { cardsCount: 1 }
+      method: 'POST', cookie: account.cookie, body: { cardsCount: 1, purchaseConfirmed: true }
     });
     assert.equal(joined.response.status, 200, joined.data.error || '');
     assert.equal(joined.data.room.registrationDeadline, fixedDeadline, 'later joins must not extend the timer');
@@ -146,6 +155,48 @@ try {
   assert.equal(started.data.room.cardCount, 9);
   assert.equal(started.data.room.myCards.length, 1);
 
+  const nextWhilePlaying = await request('/api/rooms/room5000/next', {
+    method: 'POST', cookie: accounts[1].cookie, body: {}
+  });
+  assert.equal(nextWhilePlaying.response.status, 409,
+    'a live session must not be replaced while the draw is in progress');
+
+  let finishedSnapshot = null;
+  for (let attempt = 0; attempt < 180; attempt++) {
+    await delay(30);
+    const current = await request('/api/rooms/room5000', { cookie: accounts[1].cookie });
+    if (current.data.room.status === 'finished') {
+      finishedSnapshot = current.data.room;
+      break;
+    }
+  }
+  assert.ok(finishedSnapshot, 'the Node room should finish its 90-number draw in the smoke test');
+  const nextSession = await request('/api/rooms/room5000/next', {
+    method: 'POST', cookie: accounts[1].cookie, body: {}
+  });
+  assert.equal(nextSession.response.status, 200, nextSession.data.error || '');
+  assert.equal(nextSession.data.room.status, 'waiting');
+  assert.equal(nextSession.data.room.playerCount, 0);
+  assert.equal(nextSession.data.room.cardCount, 0);
+  assert.equal(nextSession.data.room.myCards.length, 0);
+  const nextSessionRead = await request('/api/rooms/room5000', { cookie: accounts[1].cookie });
+  assert.equal(nextSessionRead.data.room.status, 'waiting');
+  assert.equal(nextSessionRead.data.room.cardCount, 0,
+    'opening the next session must not silently buy a card');
+  const firstNewCard = await request('/api/rooms/room5000/join', {
+    method: 'POST', cookie: accounts[1].cookie,
+    body: { cardsCount: 1, purchaseConfirmed: true }
+  });
+  assert.equal(firstNewCard.response.status, 200);
+  assert.equal(firstNewCard.data.room.cardCount, 1);
+  const idempotentNext = await request('/api/rooms/room5000/next', {
+    method: 'POST', cookie: accounts[1].cookie, body: {}
+  });
+  assert.equal(idempotentNext.response.status, 200);
+  assert.equal(idempotentNext.data.room.playerCount, 1);
+  assert.equal(idempotentNext.data.room.cardCount, 1,
+    'a repeated next-session request must never erase a waiting paid queue');
+
   // Re-authenticate the account used above after verifying that logout
   // did not remove its purchased entry from the other players' room view.
   const relogin = await request('/api/auth/login', {
@@ -157,7 +208,7 @@ try {
 
   // A single-player room must be cancelled when its fixed timer expires.
   const solo = await request('/api/rooms/room10000/join', {
-    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1 }
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1, purchaseConfirmed: true }
   });
   assert.equal(solo.response.status, 200);
   await delay(600);
@@ -169,11 +220,11 @@ try {
 
   // The next purchase starts a fresh timer and a second player is enough to start.
   const fresh = await request('/api/rooms/room10000/join', {
-    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1 }
+    method: 'POST', cookie: accounts[0].cookie, body: { cardsCount: 1, purchaseConfirmed: true }
   });
   assert.equal(fresh.response.status, 200);
   const second = await request('/api/rooms/room10000/join', {
-    method: 'POST', cookie: accounts[1].cookie, body: { cardsCount: 1 }
+    method: 'POST', cookie: accounts[1].cookie, body: { cardsCount: 1, purchaseConfirmed: true }
   });
   assert.equal(second.response.status, 200);
   await delay(600);
