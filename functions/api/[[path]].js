@@ -1860,8 +1860,8 @@ async function routeRequest(request, env) {
   const user = await authenticatedUser(env.DB, request);
   if (!user) throw new HttpError(401, 'برای ادامه ابتدا وارد حساب کاربری شو.');
 
-  const supportAdmins=String(env.SUPPORT_ADMIN_EMAILS||'').split(',').map(v=>v.trim().toLowerCase()).filter(Boolean);
-  const isSupportAdmin=supportAdmins.includes(String(user.email||'').trim().toLowerCase());
+  const supportAdminIds=String(env.SUPPORT_ADMIN_MEMBER_IDS||'').split(',').map(v=>v.trim()).filter(Boolean);
+  const isSupportAdmin=supportAdminIds.includes(String(user.member_id||''));
   if(path.startsWith('/api/admin/support')){
     if(!isSupportAdmin) throw new HttpError(403,'دسترسی مدیر پشتیبانی برای این حساب فعال نیست.');
     const adminParts=path.split('/').filter(Boolean);
