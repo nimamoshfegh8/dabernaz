@@ -465,16 +465,14 @@ execFileSync('wrangler', [
   '--persist-to', '.wrangler/test-state',
   '--command', "UPDATE tournament_rounds SET next_draw_at = CAST(strftime('%s','now') AS INTEGER)*1000-60000 WHERE id = (SELECT current_round_id FROM tournament_events WHERE id='" + publicLiveSimple.id + "')",
 ], { stdio: 'inherit' });
-const dueBeforePublicPoll = await request('/api/tournaments/me', { account: accounts[0] });
-const dueEventBefore = dueBeforePublicPoll.rooms.find(room => room.id === publicLiveSimple.id);
-const calledBefore = (dueEventBefore.current_round.called_numbers || []).length;
+const calledBeforeDelayedPoll = firstRoundCalled.length;
 await request('/api/tournaments');
 await request('/api/tournaments');
 const dueAfterPublicPoll = await request('/api/tournaments/me', { account: accounts[0] });
 const dueEventAfter = dueAfterPublicPoll.rooms.find(room => room.id === publicLiveSimple.id);
 const calledAfter = (dueEventAfter.current_round.called_numbers || []).length;
-assert.equal(calledAfter, calledBefore + 1,
-  'an overdue authenticated draw must advance exactly one number');
+assert.equal(calledAfter, calledBeforeDelayedPoll + 1,
+  'an overdue authenticated draw must advance exactly one number, not catch up the whole backlog');
 const immediateRepeat = await request('/api/tournaments/me', { account: accounts[0] });
 const repeatedEvent = immediateRepeat.rooms.find(room => room.id === publicLiveSimple.id);
 assert.equal((repeatedEvent.current_round.called_numbers || []).length, calledAfter,
