@@ -1387,7 +1387,7 @@ async function advanceTournamentEvent(db, event, nowMs, advanceDraws = true) {
 async function advanceTournamentSystem(db, nowMs, advanceDraws = true) {
   const current = Number(nowMs || Date.now());
   await ensureRecurringTournamentSchedule(db, current);
-  const active = await db.prepare("SELECT * FROM tournament_events WHERE status IN ('scheduled','registration','running','cancelled') ORDER BY scheduled_at ASC LIMIT 12")
+  const active = await db.prepare("SELECT * FROM tournament_events e WHERE e.status IN ('scheduled','registration','running') OR (e.status='cancelled' AND EXISTS (SELECT 1 FROM tournament_event_entries pending WHERE pending.event_id=e.id AND pending.status='registered')) ORDER BY e.scheduled_at ASC LIMIT 12")
     .all();
   for (const event of active.results || []) {
     await advanceTournamentEvent(db, event, current, advanceDraws);
