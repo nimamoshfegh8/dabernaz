@@ -463,7 +463,7 @@ assert.equal(privateSimple.my_matched_count,
 execFileSync('wrangler', [
   'd1', 'execute', 'dabernaz-ci', '--local',
   '--persist-to', '.wrangler/test-state',
-  '--command', "UPDATE tournament_rounds SET next_draw_at = CAST(strftime('%s','now') AS INTEGER)*1000-60000 WHERE id = (SELECT current_round_id FROM tournament_events WHERE id='" + publicLiveSimple.id + "')",
+  '--command', "UPDATE tournament_rounds SET next_draw_at = 0 WHERE id = '" + privateSimple.current_round.id + "'",
 ], { stdio: 'inherit' });
 const calledBeforeDelayedPoll = firstRoundCalled.length;
 await request('/api/tournaments');
