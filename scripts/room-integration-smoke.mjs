@@ -509,6 +509,8 @@ execFileSync('wrangler', [
 
 const settledTournament = await request('/api/tournaments/me', { account: accounts[0] });
 const settledSimple = settledTournament.events.find(event => event.id === publicLiveSimple.id);
+assert.equal(Number(settledTournament.bingo_coins), Number((await accountMe(accounts[0])).bingoCoins),
+  'tournament refresh must return the updated wallet balance after prize settlement');
 assert.equal(settledSimple.status, 'completed', 'final tournament round must settle and complete the event');
 const expectedShares = [60, 25, 15, 0, 0];
 const balancesAfterSettlement = await Promise.all(accounts.slice(0, 5).map(async account =>
@@ -663,6 +665,8 @@ execFileSync('wrangler', [
 ], { stdio: 'inherit' });
 await request('/api/tournaments');
 const refundedTournament = await request('/api/tournaments/me', { account: refundAccount });
+assert.equal(Number(refundedTournament.bingo_coins), Number((await accountMe(refundAccount)).bingoCoins),
+  'tournament refresh must return the updated wallet balance after an entry refund');
 assert.equal(Number((await accountMe(refundAccount)).bingoCoins), refundBalanceBefore,
   'a tournament cancelled below five participants must refund the exact entry amount');
 assert.equal(refundedTournament.entries.find(entry => entry.event_id === refundFixtureId)?.status, 'refunded',
