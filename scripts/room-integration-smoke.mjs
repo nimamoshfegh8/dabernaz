@@ -517,10 +517,14 @@ for (let index = 0; index < expectedShares.length; index++) {
     'simple tournament must pay the 60/25/15 prize split once to the top three ranked players'
   );
 }
+const finalStandings = await Promise.all(accounts.slice(0, 5).map(async account => {
+  const personal = await request('/api/tournaments/me', { account });
+  return personal.entries.find(entry => entry.event_id === publicLiveSimple.id)?.status || null;
+}));
 assert.deepEqual(
-  settledTournament.entries.filter(entry => entry.event_id === publicLiveSimple.id).map(entry => entry.status).sort(),
-  ['registered','registered','winner_1','winner_2','winner_3'].sort(),
-  'the final tournament standings must store the three winners'
+  finalStandings,
+  ['winner_1','winner_2','winner_3','registered','registered'],
+  'each player account must store its own final tournament status and winner rank'
 );
 
 // Repeated refreshes or scheduler invocations must never pay the same final prize twice.
