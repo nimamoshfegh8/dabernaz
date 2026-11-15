@@ -136,8 +136,18 @@ for (const account of accounts) {
 
 for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const economics = roomEconomics[roomId];
-  const balancesBeforeBuy = new Map();
-  for (const account of accounts) balancesBeforeBuy.set(account.memberId, Number((await accountMe(account)).balance));
+  const profileBeforeBuy = new Map();
+  for (const account of accounts) {
+    const profile = await accountMe(account);
+    profileBeforeBuy.set(account.memberId, {
+      balance:Number(profile.balance),
+      stats:{
+        gamesPlayed:Number(profile.stats?.gamesPlayed)||0,
+        wins:Number(profile.stats?.wins)||0,
+        points:Number(profile.stats?.points)||0,
+      },
+    });
+  }
 
   // A join request without an explicit purchase confirmation must not charge or enqueue a card.
   const beforeUnconfirmed = Number((await accountMe(accounts[0])).balance);
@@ -356,10 +366,20 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   for (let index = 0; index < accounts.length; index++) {
     const account = accounts[index];
     const cardCount = 5;
-    const expectedBalance = balancesBeforeBuy.get(account.memberId) -
-      economics.price * cardCount + expectedPrizes.get(String(account.memberId));
-    assert.equal(Number((await accountMe(account)).balance), expectedBalance,
+    const profileAfter = await accountMe(account);
+    const before = profileBeforeBuy.get(account.memberId);
+    const expectedBalance = before.balance - economics.price * cardCount +
+      expectedPrizes.get(String(account.memberId));
+    assert.equal(Number(profileAfter.balance), expectedBalance,
       roomId + ': split winner prizes and card charges must match the wallet');
+    const won = [...finishedRoom.winners.line, ...finishedRoom.winners.full]
+      .some(winner => String(winner.memberId) === String(account.memberId));
+    assert.equal(Number(profileAfter.stats?.gamesPlayed)||0, before.stats.gamesPlayed + 1,
+      roomId + ': each participant must receive exactly one completed-game count');
+    assert.equal(Number(profileAfter.stats?.wins)||0, before.stats.wins + (won ? 1 : 0),
+      roomId + ': a participant winning one or both stages must get at most one match win');
+    assert.equal(Number(profileAfter.stats?.points)||0, before.stats.points + (won ? 10 : 0),
+      roomId + ': points must be credited once per completed Daberna round winner');
   }
 
   const ledgerOutput = execFileSync('wrangler', [
@@ -368,8 +388,12 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     '--command', "SELECT COUNT(*) AS rounds, SUM(site_commission) AS total_commission FROM room_finances WHERE room_id = '" + roomId + "'",
   ], { encoding: 'utf8' });
   assert.match(ledgerOutput, new RegExp(String(expectedCommission)));
+  const statsAfterRoom = (await accountMe(accounts[0])).stats;
   const repeatedRead = await roomFor(accounts[0], roomId);
   assert.equal(repeatedRead.finance.siteCommission, expectedCommission);
+  const statsAfterRepeatedRead = (await accountMe(accounts[0])).stats;
+  assert.deepEqual(statsAfterRepeatedRead, statsAfterRoom,
+    roomId + ': reading an already finished room must not count the same game twice');
   const history = await request('/api/rooms/history');
   const storedRound = (history.rounds || []).find(round => round.room_id === roomId);
   assert.ok(storedRound, roomId + ': finished round must appear in public history');
