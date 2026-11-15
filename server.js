@@ -488,15 +488,24 @@ async function routeApi(req,res,url) {
     if(name.length<2 || name.length>32) return json(res,400,{error:'نام نمایشی باید بین ۲ تا ۳۲ نویسه باشد.'});
     user.name=name; await persist(); return json(res,200,{ok:true,user:publicUser(user)});
   }
-  const roomMatch=url.pathname.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave))?$/);
+  const roomMatch=url.pathname.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave|next))?$/);
   if (roomMatch) {
     const [,roomId,action]=roomMatch; const room=db.rooms[roomId];
     if (req.method==='GET' && !action) { const changed=advanceWaitingRoom(room); if(changed) await persist(); return json(res,200,{ok:true,room:publicRoom(room,user.id)}); }
+    if (req.method==='POST' && action==='next') {
+      if (room.status==='playing') return json(res,409,{error:'این سانس هنوز در حال اجراست و امکان باز کردن سانس بعدی وجود ندارد.',room:publicRoom(room,user.id)});
+      if (room.status==='finished') Object.assign(room,freshRoom(roomId));
+      else if (room.status==='waiting') advanceWaitingRoom(room);
+      await persist();
+      if (room.status==='playing') return json(res,409,{error:'این سانس هنوز در حال اجراست و امکان باز کردن سانس بعدی وجود ندارد.',room:publicRoom(room,user.id)});
+      return json(res,200,{ok:true,room:publicRoom(room,user.id)});
+    }
     if (req.method==='POST' && action==='join') {
       const joinBody=await readBody(req);
+      if (joinBody.purchaseConfirmed !== true) return json(res,400,{error:'برای خرید کارت باید خرید را جداگانه تأیید کنی.'});
       const requestedCards=Math.max(1,Math.min(MAX_CARDS_PER_PLAYER,Math.floor(Number(joinBody.cardsCount)||1)));
       if (room.status==='waiting') advanceWaitingRoom(room);
-      if (room.status==='finished') { Object.assign(room,freshRoom(roomId)); }
+      if (room.status==='finished') return json(res,409,{error:'ابتدا سانس بعدی را باز کن؛ خرید کارت در مرحله جداگانه انجام می‌شود.',room:publicRoom(room,user.id)});
       if (room.status==='playing') return json(res,409,{error:'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.',room:publicRoom(room,user.id)});
       room.cardCounts=room.cardCounts||{}; room.queuedCards=room.queuedCards||{};
       const currentCards=Math.max(0,Number(room.cardCounts[user.id])||0);
