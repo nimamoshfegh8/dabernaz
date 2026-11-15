@@ -760,7 +760,7 @@ function gameCard(id, symbol, name, desc, price, coverClass = '') {
   return `<article class="game-card"><div class="game-cover ${coverClass}">${symbol}</div><h3>${name}</h3><p>${desc}</p><button class="btn btn-primary" data-game="${id}">ورود به بازی</button><div class="price">${price}</div></article>`;
 }
 function roomGameCard() {
-  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>۴ سطح قیمت · حداقل ۵ شرکت‌کننده برای شروع</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
+  return `<article class="game-card"><div class="game-cover room-game-cover"><img class="game-cover-image" src="./assets/daberna-icon.jpg" alt="تصویر بازی دبرنا" loading="lazy"></div><h3>دبرنای ۹۰ توپی</h3><p>۴ سطح قیمت · حداقل ۲ شرکت‌کننده برای شروع</p><button class="btn btn-primary" data-page="games">انتخاب اتاق</button><div class="price">شروع خودکار مسابقه</div></article>`;
 }
 function renderGames() {
   const tiers = ['red','silver','gold','purple'];
@@ -772,12 +772,12 @@ function renderGames() {
     </header>
 
     <section class="games-lobby-hero">
-      <div class="games-lobby-callout"><small>اتاق با ظرفیت نامحدود</small><h2>شروع خودکار!</h2><p>از اولین خرید کارت، ۲ دقیقه و ۳۰ ثانیه برای خرید و ورود بازیکنان فرصت هست؛ بازی پس از پایان مهلت و با حداقل ۵ شرکت‌کننده آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
+      <div class="games-lobby-callout"><small>اتاق با ظرفیت نامحدود</small><h2>شروع خودکار!</h2><p>از اولین خرید کارت، ۲ دقیقه و ۳۰ ثانیه برای خرید و ورود بازیکنان فرصت هست؛ بازی پس از پایان مهلت و با حداقل ۲ شرکت‌کننده آغاز می‌شود.</p><button class="games-rules-button" data-action="room-show-rules">قوانین بازی <span>ⓘ</span></button></div>
       <div class="games-lobby-art"><img src="./assets/room-lobby-art.png" alt="کارت‌های دبرنا و گوی‌های شماره‌دار" loading="eager"></div>
       <div class="games-lobby-features">
         <div><span>▤</span><p>ظرفیت اتاق<strong>نامحدود</strong></p></div>
         <div><span>◷</span><p>مهلت خرید<strong>۲ دقیقه و ۳۰ ثانیه</strong></p></div>
-        <div><span>♟</span><p>حداقل شروع<strong>۵ شرکت‌کننده</strong></p></div>
+        <div><span>♟</span><p>حداقل شروع<strong>۲ شرکت‌کننده</strong></p></div>
         <div><span>🎲</span><p>مهره‌ها<strong>شماره‌های ۱ تا ۹۰</strong></p></div>
         <div><span>♛</span><p>شرط برنده شدن<strong>یک خط و دبرنای کامل</strong></p></div>
       </div>
@@ -880,7 +880,7 @@ function renderRoomPurchasePage() {
   const collected = Math.max(0, Number(queue.grossRevenue) || 0);
   const lineEstimate = Math.max(0, Number(queue.estimatedPrizes?.line ?? Math.floor(collected * 0.10)) || 0);
   const fullEstimate = Math.max(0, Number(queue.estimatedPrizes?.full ?? Math.floor(collected * 0.75)) || 0);
-  const minPlayersToStart = Math.max(5, Number(queue.minPlayersToStart) || 5);
+  const minPlayersToStart = Math.max(2, Number(queue.minPlayersToStart) || 2);
   const purchaseControls = joined && waiting
     ? `<small>کارت‌های خریداری‌شده</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(ownedCardCount)} از ۵ کارت</b></div>`
     : `<small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${selectedCount <= 1 ? 'disabled' : ''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${selectedCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>+</button></div>`;
@@ -901,7 +901,7 @@ function renderRoomPurchasePage() {
     : registrationStarted && playerCount < minPlayersToStart && timerExpired ? `مهلت اولیه تمام شده؛ بازی پس از رسیدن تعداد شرکت‌کنندگان به حداقل ${faDigits(minPlayersToStart)} نفر شروع می‌شود.`
     : registrationStarted ? (timerExpired ? 'مهلت خرید به پایان رسیده و حداقل شرکت‌کنندگان کامل شده؛ بازی در حال شروع است.' : `تا پایان مهلت خرید و شروع خودکار بازی با حداقل ${faDigits(minPlayersToStart)} شرکت‌کننده:`)
     : 'با اولین خرید کارت، زمان‌سنج ۲ دقیقه و ۳۰ ثانیه‌ای شروع می‌شود.';
-  return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x => x.id === room.id) + 1}`, 'بدون محدودیت تعداد بازیکن و کارت در کل اتاق؛ هر حساب حداکثر ۵ کارت و شروع بازی با حداقل ۵ شرکت‌کننده.', 'DABERNAZ · LIVE ROOM')}
+  return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x => x.id === room.id) + 1}`, 'بدون محدودیت تعداد بازیکن و کارت در کل اتاق؛ هر حساب حداکثر ۵ کارت و شروع بازی با حداقل ۲ شرکت‌کننده.', 'DABERNAZ · LIVE ROOM')}
   <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
   <section class="room-info-strip room-prize-strip">
     <div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>قیمت هر کارت</small></div>
@@ -926,7 +926,7 @@ function renderRoomPurchasePage() {
       <div><b>${faDigits(fullEstimate)} تومان</b><small>مبلغ جایزه دبرنای کامل</small></div>
     </div>
     <div class="queue-wait-hint">${joined ? 'کارت‌های تو ثبت شده‌اند و تا پایان مهلت خرید در صف باقی می‌مانند.' : 'با خرید اولین کارت، زمان‌سنج همه بازیکنان شروع می‌شود؛ مهلت با خریدهای بعدی تمدید نمی‌شود.'}</div>
-    <p class="muted-note room-session-note">ظرفیت کلی اتاق و تعداد بازیکنان محدود نیست. بازی پس از پایان مهلت خرید و با حداقل ۵ شرکت‌کننده شروع می‌شود. هر حساب فقط می‌تواند در هر سانس حداکثر ۵ کارت داشته باشد. اگر چند نفر در یک شماره برنده شوند، مبلغ جایزه همان مرحله به‌طور مساوی بین آن‌ها تقسیم می‌شود.</p>
+    <p class="muted-note room-session-note">ظرفیت کلی اتاق و تعداد بازیکنان محدود نیست. بازی پس از پایان مهلت خرید و با حداقل ۲ شرکت‌کننده شروع می‌شود. هر حساب فقط می‌تواند در هر سانس حداکثر ۵ کارت داشته باشد. اگر چند نفر در یک شماره برنده شوند، مبلغ جایزه همان مرحله به‌طور مساوی بین آن‌ها تقسیم می‌شود.</p>
   </section>
   <section class="room-info-strip"><div><b>🏅 یک خط</b><small>اولین تکمیل ردیف</small></div><div><b>👑 دبرنای کامل</b><small>تکمیل هر ۱۵ عدد کارت</small></div><div><b>🎱 ۹۰ مهره</b><small>اعلام خودکار بدون تکرار</small></div></section>
   <section class="room-panel ticket-selection"><div class="room-panel-heading"><div><span class="eyebrow">YOUR TICKETS</span><h3>کارت‌های تو</h3><p>کارت‌ها هنگام خرید روی سرور ساخته و نگهداری می‌شوند.</p></div><span class="ticket-count-badge" id="roomTicketCount">${faDigits(selectedCount)} کارت</span></div><div class="room-tickets-list" id="roomTicketsList">${joined && roomCards.length ? roomCards.map(roomCardMarkup).join('') : '<div class="empty"><span>🎟️</span>کارت نهایی پس از خرید و ثبت در صف، به‌صورت تصادفی روی سرور ساخته می‌شود.</div>'}</div></section>`;
@@ -957,8 +957,14 @@ async function pollCurrentRoom() {
   roomPollBusy=true;
   try {
     const result=await apiRequest(`/api/rooms/${roomId}`,{method:'GET',headers:{}});
+    const wasJoined = !!roomServerSnapshot?.joined;
     roomServerSnapshot=result.room;
     if(result.room.joined && Array.isArray(result.room.myCards)) roomCards=result.room.myCards;
+    else if(wasJoined && result.room.status==='waiting') {
+      roomCards=[];
+      roomCardCount=1;
+      showToast('حداقل ۲ بازیکن در مهلت ثبت‌نام کامل نشد؛ سانس لغو و مبلغ خرید کارت به کیف پولت بازگشت.');
+    }
     roomCalledNumbers=Array.isArray(result.room.allCalledNumbers)?result.room.allCalledNumbers:(result.room.calledNumbers||[]);
     roomStages={one:roomHasWinner(result.room.winners?.line),full:roomHasWinner(result.room.winners?.full)};
     if (Number.isFinite(Number(result.room.myBingoCoins))) { state.bingoCoins=Math.max(0,Number(result.room.myBingoCoins)); state.coinTransactions=Array.isArray(result.room.myCoinTransactions)?result.room.myCoinTransactions.slice(0,50):state.coinTransactions; saveState(); updateHeader(); }
@@ -1004,7 +1010,7 @@ function updateRoomDrawDisplay() {
   updateRoomCardDisplay();
 }
 function showRoomQuickRules() {
-  openModal('راهنمای سریع دبرنا', `<div class="room-quick-rules"><p><b>۱. مهلت خرید:</b> از اولین خرید کارت، ۲ دقیقه و ۳۰ ثانیه برای ورود بازیکنان فرصت است. بازی پس از پایان مهلت و با حداقل ۵ شرکت‌کننده آغاز می‌شود.</p><p><b>۲. حداقل شروع:</b> اگر تعداد شرکت‌کنندگان کمتر از ۵ نفر باشد، بازی شروع نمی‌شود و اتاق تا رسیدن به حداقل ۵ نفر در انتظار می‌ماند.</p><p><b>۳. سقف خرید:</b> هر حساب در هر سانس حداکثر ۵ کارت می‌تواند بخرد؛ تعداد کل بازیکنان و کارت‌های اتاق محدود نیست.</p><p><b>۴. مبلغ جایزه:</b> مبلغ جایزه یک خط و دبرنای کامل در همان صفحه اتاق و بر اساس وضعیت سانس نمایش داده می‌شود.</p><p><b>۵. کارت و اعلام شماره:</b> هر کارت ۳ ردیف و ۹ ستون دارد؛ مهره‌ها از ۱ تا ۹۰ و بدون تکرار اعلام می‌شوند.</p><p class="muted-note">در صورت برنده شدن هم‌زمان چند نفر در یک مرحله، مبلغ جایزه همان مرحله به‌طور مساوی بین برندگان تقسیم می‌شود.</p></div>`);
+  openModal('راهنمای سریع دبرنا', `<div class="room-quick-rules"><p><b>۱. مهلت خرید:</b> از اولین خرید کارت، ۲ دقیقه و ۳۰ ثانیه برای ورود بازیکنان فرصت است. بازی پس از پایان مهلت و با حداقل ۲ شرکت‌کننده آغاز می‌شود.</p><p><b>۲. حداقل شروع:</b> اگر تا پایان مهلت حداقل ۲ شرکت‌کننده ثبت‌نام نکرده باشند، سانس لغو و وجه خرید کارت به کیف پول بازگردانده می‌شود.</p><p><b>۳. سقف خرید:</b> هر حساب در هر سانس حداکثر ۵ کارت می‌تواند بخرد؛ تعداد کل بازیکنان و کارت‌های اتاق محدود نیست.</p><p><b>۴. مبلغ جایزه:</b> مبلغ جایزه یک خط و دبرنای کامل در همان صفحه اتاق و بر اساس وضعیت سانس نمایش داده می‌شود.</p><p><b>۵. کارت و اعلام شماره:</b> هر کارت ۳ ردیف و ۹ ستون دارد؛ مهره‌ها از ۱ تا ۹۰ و بدون تکرار اعلام می‌شوند.</p><p class="muted-note">در صورت برنده شدن هم‌زمان چند نفر در یک مرحله، مبلغ جایزه همان مرحله به‌طور مساوی بین برندگان تقسیم می‌شود.</p></div>`);
 }
 
 
@@ -1388,6 +1394,9 @@ function openModal(title, content) {
 function closeModal() { $('#modalRoot').innerHTML = ''; }
 let rpsMatch = null;
 let ticMatch = null;
+let rpsMoveBusy = false;
+let ticMoveBusy = false;
+let ticResetBusy = false;
 const RPS_CHOICES = {
   rock: { label:'سنگ', emoji:'✊' },
   paper: { label:'کاغذ', emoji:'✋' },
@@ -1540,26 +1549,33 @@ function renderRpsMatch(lastRound = null) {
   if (rpsMatch.finished) {
     const result = rpsMatch.player === 3 ? 'win' : 'lose';
     body += `<div class="mini-game-final ${result}"><strong>${result === 'win' ? '🏆 برنده شدی!' : 'این بار رایانه برنده شد'}</strong><b>${result === 'win' ? 'یک مسابقه را با موفقیت به پایان رساندی.' : 'برای مسابقه بعدی آماده شو'}</b></div><button class="btn btn-primary btn-block" data-action="rps-start-again">مسابقه جدید</button>`;
-  } else if (lastRound) {
+  } else if (rpsMatch.awaitingNext && lastRound) {
     body += `<button class="btn btn-primary btn-block" data-action="rps-next">رفتن به دور بعد</button>`;
   } else {
-    body += `<p class="muted-note" style="text-align:center">دور ${faDigits(rpsMatch.round)} · اولین نفر با ۳ برد، قهرمان است.</p><div class="rps-options">${Object.entries(RPS_CHOICES).map(([key,item])=>`<button class="rps-choice" data-action="rps-play" data-choice="${key}"><span>${item.emoji}</span><b>${item.label}</b></button>`).join('')}</div>`;
+    body += `<p class="muted-note" style="text-align:center">دور ${faDigits(rpsMatch.round)} · اولین نفر با ۳ برد، قهرمان است.</p><div class="rps-options">${Object.entries(RPS_CHOICES).map(([key,item])=>`<button class="rps-choice" data-action="rps-play" data-choice="${key}" ${rpsMoveBusy?'disabled':''}><span>${item.emoji}</span><b>${item.label}</b></button>`).join('')}</div>`;
   }
   body += `<p class="muted-note" style="text-align:center">حریف تطبیقی فعال است · الگوهای قبلی انتخاب‌ها را بررسی می‌کند و برای جلوگیری از پیش‌بینی قطعی، گاهی تصادفی انتخاب می‌کند. سابقه ذخیره‌شده: ${faDigits(rpsMatch.history.length)} انتخاب.</p>`;
   openModal('✊ سنگ، کاغذ، قیچی · رقابت تا ۳ برد', body);
 }
 async function playRps(choice) {
-  if (!rpsMatch || rpsMatch.finished || rpsMatch.awaitingNext || !RPS_CHOICES[choice]) return;
+  if (!rpsMatch || rpsMatch.finished || rpsMatch.awaitingNext || rpsMoveBusy || !RPS_CHOICES[choice]) return;
+  rpsMoveBusy = true;
+  renderRpsMatch(rpsMatch.last || null);
   try {
     const result=await apiRequest('/api/games/move',{method:'POST',body:JSON.stringify({matchId:rpsMatch.id,choice})});
     rpsMatch={...result.match,awaitingNext:!result.match.finished,last:result.lastRound||null};
     saveRpsPlayerChoice(choice);
     if(result.user) applyMiniGameUser(result.user);
+    rpsMoveBusy = false;
     renderRpsMatch(result.lastRound||null);
-  } catch(error) { showToast(error.message || 'ثبت حرکت ناموفق بود.'); }
+  } catch(error) {
+    rpsMoveBusy = false;
+    renderRpsMatch(rpsMatch.last || null);
+    showToast(error.message || 'ثبت حرکت ناموفق بود.');
+  }
 }
 function nextRpsRound() {
-  if (!rpsMatch || !rpsMatch.awaitingNext || rpsMatch.finished) return;
+  if (!rpsMatch || !rpsMatch.awaitingNext || rpsMatch.finished || rpsMoveBusy) return;
   rpsMatch.awaitingNext = false;
   renderRpsMatch(rpsMatch.last);
 }
@@ -1612,6 +1628,23 @@ async function startTicMatch() {
     renderTicMatch();
   } catch(error) { showToast(error.message || 'شروع بازی دوز ممکن نشد.'); }
 }
+async function resetTicMatch() {
+  if (ticResetBusy || ticMoveBusy) return;
+  ticResetBusy = true;
+  try {
+    if (ticMatch?.id && !ticMatch.finished) {
+      await apiRequest('/api/games/abandon',{method:'POST',body:JSON.stringify({matchId:ticMatch.id})});
+    }
+    const started=await apiRequest('/api/games/start',{method:'POST',body:JSON.stringify({gameType:'tic'})});
+    ticMatch={...started.match};
+    ticResetBusy = false;
+    renderTicMatch();
+  } catch(error) {
+    ticResetBusy = false;
+    renderTicMatch();
+    showToast(error.message || 'شروع دوباره بازی دوز ممکن نشد.');
+  }
+}
 function finishTicMatch(result) {
   if (!ticMatch || ticMatch.finished) return;
   ticMatch.finished=true; ticMatch.result=result;
@@ -1619,7 +1652,7 @@ function finishTicMatch(result) {
 }
 function renderTicMatch() {
   if (!ticMatch) return;
-  const cells=ticMatch.board.map((mark,index)=>`<button class="tic-cell ${mark==='X'?'tic-x':mark==='O'?'tic-o':''}" data-action="tic-move" data-index="${index}" ${mark||ticMatch.finished?'disabled':''} aria-label="خانه ${faDigits(index+1)} ${mark?'علامت '+mark:'خالی'}">${mark==='X'?'×':mark==='O'?'○':''}</button>`).join('');
+  const cells=ticMatch.board.map((mark,index)=>`<button class="tic-cell ${mark==='X'?'tic-x':mark==='O'?'tic-o':''}" data-action="tic-move" data-index="${index}" ${mark||ticMatch.finished||ticMoveBusy||ticResetBusy?'disabled':''} aria-label="خانه ${faDigits(index+1)} ${mark?'علامت '+mark:'خالی'}">${mark==='X'?'×':mark==='O'?'○':''}</button>`).join('');
   let status = ticMatch.finished ? (ticMatch.result==='win'?'آفرین! تو برنده شدی.':ticMatch.result==='lose'?'حریف هوشمند برنده شد.':'بازی مساوی شد.') : 'نوبت توست؛ خانه‌ای را انتخاب کن.';
   let body=`<div class="mini-game-info-notice">حریف هوشمند · حرکت‌های برد فوری و دفاع‌های مهم را تشخیص می‌دهد، اما گاهی انتخاب متفاوتی دارد تا بازی قابل‌رقابت بماند.</div>
     <div class="tic-player-legend"><span class="tic-player-x"><b>×</b> تو · X</span><span class="tic-player-o"><b>○</b> رایانه · O</span></div>
@@ -1629,18 +1662,26 @@ function renderTicMatch() {
     const cls=ticMatch.result==='win'?'win':ticMatch.result==='lose'?'lose':'draw';
     body+=`<div class="mini-game-final ${cls}"><strong>${ticMatch.result==='win'?'🏆 پیروزی!':ticMatch.result==='lose'?'حریف این دور را برد':'🤝 مساوی'}</strong><b>${ticMatch.result==='win'?'بازی را بردی.':'این مسابقه به پایان رسید.'}</b></div><button class="btn btn-primary btn-block" data-action="tic-start-again">بازی دوباره</button>`;
   } else {
-    body+=`<p class="muted-note" style="text-align:center">سه علامت یکسان را در یک ردیف، ستون یا قطر قرار بده.</p><button class="btn btn-outline btn-block" data-action="tic-reset">شروع دوباره همین بازی</button>`;
+    body+=`<p class="muted-note" style="text-align:center">سه علامت یکسان را در یک ردیف، ستون یا قطر قرار بده.</p><button class="btn btn-outline btn-block" data-action="tic-reset" ${ticResetBusy?'disabled':''}>شروع بازی تازه</button>`;
   }
   openModal('⭕ دوز حرفه‌ای · حریف هوشمند',body);
 }
 async function playTicMove(index) {
-  if (!ticMatch || ticMatch.finished || ticMatch.board[index] || !Number.isInteger(index) || index<0 || index>8) return;
+  if (!ticMatch || ticMatch.finished || ticMoveBusy || ticResetBusy ||
+      ticMatch.board[index] || !Number.isInteger(index) || index<0 || index>8) return;
+  ticMoveBusy = true;
+  renderTicMatch();
   try {
     const result=await apiRequest('/api/games/move',{method:'POST',body:JSON.stringify({matchId:ticMatch.id,index})});
     ticMatch={...result.match};
     if(result.user) applyMiniGameUser(result.user);
+    ticMoveBusy = false;
     renderTicMatch();
-  } catch(error) { showToast(error.message || 'ثبت حرکت دوز ناموفق بود.'); }
+  } catch(error) {
+    ticMoveBusy = false;
+    renderTicMatch();
+    showToast(error.message || 'ثبت حرکت دوز ناموفق بود.');
+  }
 }
 let bingoLastCall = null;
 let memoryOpen = [];
@@ -1783,7 +1824,8 @@ document.addEventListener('click', async event => {
   else if (action === 'rps-start' || action === 'rps-start-again') startRpsMatch();
   else if (action === 'rps-play') playRps(actionEl.dataset.choice);
   else if (action === 'rps-next') nextRpsRound();
-  else if (action === 'tic-start' || action === 'tic-start-again' || action === 'tic-reset') startTicMatch();
+  else if (action === 'tic-start' || action === 'tic-start-again') startTicMatch();
+  else if (action === 'tic-reset') resetTicMatch();
   else if (action === 'tic-move') playTicMove(Number(actionEl.dataset.index));
   else if (action === 'room-increase') { if (roomCardCount < MAX_ROOM_CARDS_PER_PLAYER) { roomCardCount++; updateRoomCardDisplay(); } else showToast('حداکثر ۵ کارت برای هر حساب در هر سانس مجاز است.'); }
   else if (action === 'room-decrease') { if (roomCardCount > 1) { roomCardCount--; updateRoomCardDisplay(); } }
