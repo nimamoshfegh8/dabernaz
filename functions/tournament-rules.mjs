@@ -146,7 +146,7 @@ function lineComplete(card, called) {
   });
 }
 
-export function scoreTournamentPlayers(players, calledNumbers) {
+export function scoreTournamentPlayers(players, calledNumbers, tournamentType = 'simple') {
   const called = new Set(calledNumbers);
   const evaluated = players.map((player) => {
     const card = typeof player.card_json === 'string' ? JSON.parse(player.card_json) : player.card_json;
@@ -161,7 +161,8 @@ export function scoreTournamentPlayers(players, calledNumbers) {
     };
   });
   const ranked = [...evaluated].sort((a, b) => b.matchedCount - a.matchedCount || a.userId - b.userId);
-  const bonuses = [8, 6, 4];
+  const vip = tournamentType === 'bingo';
+  const bonuses = vip ? [10, 7, 5] : [8, 6, 4];
   let cursor = 0;
   while (cursor < ranked.length && cursor < bonuses.length) {
     let end = cursor + 1;
@@ -173,7 +174,7 @@ export function scoreTournamentPlayers(players, calledNumbers) {
   }
   return evaluated.map((player) => ({
     ...player,
-    score: 1 + (player.lineHit ? 10 : 0) + (player.fullHit ? 25 : 0) + player.progressBonus,
+    score: (vip ? 2 : 1) + (player.lineHit ? (vip ? 15 : 10) : 0) + (player.fullHit ? (vip ? 30 : 25) : 0) + player.progressBonus,
   }));
 }
 
