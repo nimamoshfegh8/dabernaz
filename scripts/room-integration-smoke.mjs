@@ -438,8 +438,8 @@ assert.equal(refundedRoom.status, 'waiting');
 assert.equal(refundedRoom.joined, false);
 assert.equal(refundedRoom.playerCount, 0);
 assert.equal(refundedRoom.cardCount, 0);
-assert.equal(Number((await accountMe(accounts[0])).balance), beforeSoloRefund,
-  'an expired room below the two-player minimum must return the exact card payment');
+assert.equal(Number((await accountMe(accounts[0])).balance), beforeSoloRefund + roomEconomics.room5000.price,
+  'an expired room below the two-player minimum must return every card payment, including the earlier next-session card');
 
 // Referral reward: five distinct newly registered accounts grant exactly one milestone.
 const inviterBefore = await accountMe(accounts[0]);
