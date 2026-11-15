@@ -627,7 +627,7 @@ async function loadAuthenticatedUser() {
     apiReady = false;
     apiErrorMessage = error?.message || 'ارتباط با API برقرار نشد.';
     currentUser = null;
-    supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;
+    supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;supportAdminKnownTicketIds=new Set();
     state = { ...cloneData(defaultState), settings:state.settings };
     authReady = true;
     saveState();
