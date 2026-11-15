@@ -2104,6 +2104,69 @@ document.addEventListener('click', event => {
   if (button) { state = cloneData(defaultState); saveState(); closeModal(); setPage('home'); showToast('اطلاعات محلی بازنشانی شد'); }
 });
 document.addEventListener('submit', async event => {
+
+  if(event.target.id==='walletDepositForm'){
+    event.preventDefault();
+    const amount=Number(new FormData(event.target).get('amount'));
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{
+      const result=await apiRequest('/api/wallet/requests',{method:'POST',body:JSON.stringify({type:'deposit',amount})});
+      await refreshWalletData();
+      closeModal();render();
+      const info=state.walletPaymentInfo||{};
+      openModal('پرداخت درخواست #'+faDigits(result.requestId),'<div class="wallet-transfer-instructions"><p>مبلغ دقیق <b>'+money(amount)+' تومان</b> را به کارت زیر انتقال بده:</p><strong dir="ltr">'+escapeHTML(walletCardNumber(info.cardNumber))+'</strong><b>'+escapeHTML(info.cardHolder||'')+'</b><small>'+escapeHTML(info.bankName||'')+'</small><p>'+escapeHTML(info.paymentNote||'پس از انتقال وجه، تصویر رسید را در همین درخواست ارسال کن.')+'</p></div><form id="walletReceiptForm" class="form-stack" data-request-id="'+Number(result.requestId)+'"><label>تصویر رسید (حداکثر ۵۱۲ کیلوبایت)<input class="form-control" type="file" name="receipt" accept="image/png,image/jpeg,image/webp" required></label><button class="btn btn-primary btn-block" type="submit">ارسال رسید برای بررسی</button></form>');
+      showToast('درخواست واریز ثبت شد؛ پس از انتقال وجه رسید را ارسال کن.');
+    }catch(error){showToast(error.message);}
+    finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletWithdrawForm'){
+    event.preventDefault();
+    const data=new FormData(event.target);
+    const payload={type:'withdraw',amount:Number(data.get('amount')),cardNumber:String(data.get('cardNumber')||''),cardHolder:String(data.get('cardHolder')||'').trim(),bankName:String(data.get('bankName')||'').trim()};
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{const result=await apiRequest('/api/wallet/requests',{method:'POST',body:JSON.stringify(payload)});await refreshWalletData();closeModal();render();showToast('درخواست برداشت #'+faDigits(result.requestId)+' ثبت شد؛ مبلغ از موجودی قابل برداشت رزرو شد.');}
+    catch(error){showToast(error.message);}
+    finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletReceiptForm'){
+    event.preventDefault();
+    const file=new FormData(event.target).get('receipt');
+    if(!(file instanceof File)||!file.size){showToast('ابتدا تصویر رسید را انتخاب کن.');return;}
+    if(!['image/png','image/jpeg','image/webp'].includes(file.type)){showToast('فقط تصویر PNG، JPG یا WebP پذیرفته می‌شود.');return;}
+    if(file.size>512*1024){showToast('حجم تصویر رسید باید حداکثر ۵۱۲ کیلوبایت باشد.');return;}
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{
+      const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result||''));reader.onerror=()=>reject(new Error('خواندن فایل رسید ناموفق بود.'));reader.readAsDataURL(file);});
+      await apiRequest('/api/wallet/requests/'+Number(event.target.dataset.requestId)+'/receipt',{method:'POST',body:JSON.stringify({dataUrl})});
+      await refreshWalletData();closeModal();render();showToast('رسید ارسال شد و درخواست در صف بررسی مدیر قرار گرفت.');
+    }catch(error){showToast(error.message);}
+    finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletAdminSettingsForm'){
+    event.preventDefault();
+    const data=new FormData(event.target);
+    const payload={cardNumber:String(data.get('cardNumber')||'').replace(/\D/g,''),cardHolder:String(data.get('cardHolder')||'').trim(),bankName:String(data.get('bankName')||'').trim(),paymentNote:String(data.get('paymentNote')||'').trim()};
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{const result=await apiRequest('/api/admin/wallet/settings',{method:'POST',body:JSON.stringify(payload)});state.walletPaymentInfo=result.settings||payload;await refreshWalletAdmin();render();showToast('اطلاعات کارت مقصد ذخیره شد.');}
+    catch(error){showToast(error.message);}
+    finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletAdminSearchForm'){
+    event.preventDefault();
+    const query=String(new FormData(event.target).get('query')||'').trim();
+    try{const result=await apiRequest('/api/admin/wallet/users?q='+encodeURIComponent(query),{method:'GET',headers:{}});walletAdminUsers=Array.isArray(result.users)?result.users:[];render();if(!walletAdminUsers.length)showToast('کاربری با این عبارت پیدا نشد.');}
+    catch(error){showToast(error.message);}
+  }
+  if(event.target.id==='walletAdminAdjustForm'){
+    event.preventDefault();
+    const data=new FormData(event.target);
+    const payload={memberId:String(data.get('memberId')||'').trim(),amount:Number(data.get('amount')),reason:String(data.get('reason')||'').trim()};
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{const result=await apiRequest('/api/admin/wallet/adjust',{method:'POST',body:JSON.stringify(payload)});await refreshWalletAdmin();await refreshWalletData();walletAdminSelectedMemberId=String(result.user?.member_id||payload.memberId);walletAdminUsers=[result.user,...walletAdminUsers.filter(u=>String(u.member_id)!==String(result.user?.member_id))].filter(Boolean);render();showToast('موجودی '+escapeHTML(result.user?.username||'کاربر')+' به اندازه '+money(payload.amount)+' تومان اصلاح شد.');}
+    catch(error){showToast(error.message);}
+    finally{if(button?.isConnected)button.disabled=false;}
+  }
+
   if (event.target.id === 'authForm') {
     event.preventDefault(); const data=new FormData(event.target); const register=authMode==='register';
     const payload={email:String(data.get('email')||'').trim(),password:String(data.get('password')||'')};
