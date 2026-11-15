@@ -184,5 +184,5 @@ export function scoreTournamentPlayers(players, calledNumbers, tournamentType = 
 }
 
 export function tournamentTieBreakLabel() {
-  return 'امتیاز کل، تعداد برد کامل، تعداد برد خطی، تعداد دورهای انجام‌شده و سپس زمان ثبت‌نام.';
+  return 'امتیاز کل، تعداد برد کامل، تعداد برد خطی، تعداد دورهای انجام‌شده، زمان ثبت‌نام و در نهایت شناسه عمومی بازیکن.';
 }
