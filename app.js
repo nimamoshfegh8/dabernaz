@@ -678,6 +678,7 @@ async function loadAuthenticatedUser() {
     if (tournamentResult.status === 'fulfilled') {
       const data = tournamentResult.value;
       state.tournamentEntries = Array.isArray(data.entries) ? data.entries : [];
+      if (Number.isFinite(Number(data.bingo_coins))) state.bingoCoins = Math.max(0, Number(data.bingo_coins) || 0);
       state.joined = state.tournamentEntries.filter(entry => entry.status !== 'refunded').map(entry => entry.tournament_type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
       state.tournamentRooms = Array.isArray(data.rooms) ? data.rooms : [];
     }
@@ -1091,6 +1092,7 @@ async function refreshTournamentData() {
       const mine = await apiRequest('/api/tournaments/me', { method:'GET', headers:{} });
       state.tournamentRooms = Array.isArray(mine.rooms) ? mine.rooms : state.tournamentRooms;
       state.tournamentEntries = Array.isArray(mine.entries) ? mine.entries : [];
+      if (Number.isFinite(Number(mine.bingo_coins))) state.bingoCoins = Math.max(0, Number(mine.bingo_coins) || 0);
       state.joined = state.tournamentEntries.filter(entry => entry.status !== 'refunded').map(entry => entry.tournament_type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
     }
     saveState();
