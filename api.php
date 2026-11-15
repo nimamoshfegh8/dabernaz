@@ -351,17 +351,30 @@ if ($method==='POST' && $path==='/api/games/result') {
     if(!$result)send_json(404,['error'=>'حساب کاربری پیدا نشد.']); send_json(200,['ok'=>true,'stats'=>$result]);
 }
 
-if (preg_match('~^/api/rooms/(room5000|room10000|room20000|room50000)(?:/(join|leave))?$~',$path,$m)) {
+if (preg_match('~^/api/rooms/(room5000|room10000|room20000|room50000)(?:/(join|leave|next))?$~',$path,$m)) {
     $roomId=$m[1]; $action=$m[2]??'';
     if ($method==='GET' && $action==='') {
         $room=store_update(function (&$db) use ($roomId,$userId) { $room=&$db['rooms'][$roomId]; advance_room($room,$db); return public_room($room,$userId,$db); });
         send_json(200,['ok'=>true,'room'=>$room]);
     }
+    if ($method==='POST' && $action==='next') {
+        $room=store_update(function (&$db) use ($roomId,$userId) {
+            $room=&$db['rooms'][$roomId];
+            advance_room($room,$db);
+            if($room['status']==='finished') $room=fresh_room($roomId);
+            if($room['status']==='playing') return ['error'=>'این سانس هنوز در حال اجراست و امکان باز کردن سانس بعدی وجود ندارد.','status'=>409,'room'=>public_room($room,$userId,$db)];
+            return ['room'=>public_room($room,$userId,$db)];
+        });
+        if(isset($room['error'])) send_json($room['status'],['error'=>$room['error'],'room'=>$room['room']]);
+        send_json(200,['ok'=>true,'room'=>$room['room']]);
+    }
     if ($method==='POST' && $action==='join') {
-        $body=request_body(); $cardCount=max(1,min(DABERNAZ_MAX_CARDS_PER_PLAYER,(int)($body['cardsCount']??1)));
+        $body=request_body();
+        if (($body['purchaseConfirmed']??false)!==true) send_json(400,['error'=>'برای خرید کارت باید خرید را جداگانه تأیید کنی.']);
+        $cardCount=max(1,min(DABERNAZ_MAX_CARDS_PER_PLAYER,(int)($body['cardsCount']??1)));
         $room=store_update(function (&$db) use ($roomId,$userId,$cardCount) {
             $room=&$db['rooms'][$roomId]; advance_room($room,$db);
-            if($room['status']==='finished') $room=fresh_room($roomId);
+            if($room['status']==='finished') return ['error'=>'ابتدا سانس بعدی را باز کن؛ خرید کارت در مرحله جداگانه انجام می‌شود.','status'=>409,'room'=>public_room($room,$userId,$db)];
             if($room['status']==='playing') return ['error'=>'این سانس در حال اجراست. بعد از پایان وارد سانس بعدی شو.','status'=>409,'room'=>public_room($room,$userId,$db)];
             $currentCards=max(0,(int)($room['cardCounts'][$userId]??0));
             $addCards=min($cardCount,DABERNAZ_MAX_CARDS_PER_PLAYER-$currentCards);
