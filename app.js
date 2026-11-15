@@ -1096,6 +1096,28 @@ function tournamentScheduleText(room, type) {
     return new Intl.DateTimeFormat('fa-IR',{timeZone:'Asia/Tehran',weekday:'long',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(room.scheduled_at));
   } catch (_) { return type === 'bingo' ? 'ماهانه' : 'هفتگی'; }
 }
+function tournamentCountdownText(room) {
+  if (room?.status === 'running') return 'در حال برگزاری · ' + (room.stage_label || 'مسابقه زنده');
+  if (room?.status === 'completed') return 'این دوره به پایان رسیده است';
+  if (room?.status === 'cancelled') return 'این دوره لغو شده است';
+  const start = Date.parse(room?.scheduled_at || '');
+  const opens = Date.parse(room?.registration_opens_at || '');
+  if (!Number.isFinite(start)) return 'زمان برگزاری به‌زودی اعلام می‌شود';
+  const now = Date.now();
+  const isScheduled = room?.status === 'scheduled' || !room?.status;
+  const target = isScheduled && Number.isFinite(opens) && opens > now ? opens : start;
+  let remaining = Math.max(0, target - now);
+  const days = Math.floor(remaining / 86400000); remaining %= 86400000;
+  const hours = Math.floor(remaining / 3600000); remaining %= 3600000;
+  const minutes = Math.floor(remaining / 60000); remaining %= 60000;
+  const seconds = Math.floor(remaining / 1000);
+  const parts = [];
+  if (days) parts.push(faDigits(days) + ' روز');
+  if (hours) parts.push(faDigits(hours) + ' ساعت');
+  if (minutes) parts.push(faDigits(minutes) + ' دقیقه');
+  if (!parts.length) parts.push(faDigits(seconds) + ' ثانیه');
+  return (isScheduled && target === opens && opens > now ? 'بازشدن ثبت‌نام تا ' : 'شروع مسابقه تا ') + parts.join(' و ');
+}
 function tournamentCard(type, index) {
   const bingo = type === 'bingo';
   const room = getTournamentRoom(type);
@@ -1115,6 +1137,7 @@ function tournamentCard(type, index) {
     <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>ثبت‌نام فعلی</small><b>${faDigits(registered)} <em>از ${faDigits(capacity)}</em></b></div></div>
     <div class="tour-progress"><span style="width:${progress}%"></span></div>
     <div class="tour-card-meta"><span>${tournamentScheduleText(room,type)}</span><span>${faDigits(registered)} شرکت‌کننده · حداقل ${faDigits(minimum)}</span></div>
+    <div class="tour-card-countdown">${tournamentCountdownText(room)}</div>
     <div class="tour-card-meta"><span>۹۰ توپ · کارت ۱۵ عددی</span><span>${tournamentStatus(room)}</span></div>${tournamentLivePanel(room,type)}
     <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} tour-card-button" data-page="${bingo ? 'bingoTournament' : 'tournamentRoom'}">${entered ? 'مشاهده ثبت‌نام' : 'مشاهده و ثبت‌نام'} <span>←</span></button>
   </article>`;
@@ -1188,18 +1211,20 @@ function renderTournamentDetail(bingo=false) {
     <div class="tour-registration-numbers"><div><b>${faDigits(registered)}</b><small>ثبت‌نام‌شده</small></div><div><b>${faDigits(left)}</b><small>ظرفیت باقی‌مانده</small></div><div><b>${faDigits(Number(room.prize_pool)||0)}</b><small>صندوق جایزه BGC</small></div></div>
     <div class="tour-progress tour-progress-large"><span style="width:${progress}%"></span></div>
     <div class="tour-registration-foot"><span>زمان برگزاری: ${tournamentScheduleText(room,type)}</span><span>${tournamentStatus(room)}</span></div>
+    <div class="tour-card-countdown tour-detail-countdown">${tournamentCountdownText(room)}</div>
     <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full || room.status === 'scheduled' ? 'disabled' : ''}>${entered ? '✓ ثبت‌نام تو قبلاً انجام شده' : room.status === 'scheduled' ? 'ثبت‌نام هنوز باز نشده' : full ? 'ثبت‌نام بسته است' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
     <p class="tour-balance-note">موجودی فعلی تو: <b>${state.bingoCoins.toLocaleString('fa-IR')} BGC</b> · هزینه فقط یک‌بار و پس از تأیید سرور کسر می‌شود.</p>
     ${tournamentLivePanel(room,type)}
   </section>
   <section class="tour-detail-grid">
     <div class="tour-rules-card"><div class="tour-panel-heading"><span>📜</span><div><small>GAME RULES</small><h3>قوانین مسابقه</h3></div></div>
-      <ul><li>هر کارت شامل ۳ ردیف و ۹ ستون و مجموعاً ۱۵ عدد است.</li><li>گوی‌ها از ۱ تا ۹۰ و به‌شکل تصادفی، بدون تکرار اعلام می‌شوند.</li><li>برد اول با تکمیل یک ردیف پنج‌عددی ثبت می‌شود.</li><li>برد کامل با اعلام تمام ۱۵ عدد یک کارت ثبت می‌شود.</li><li>در برد هم‌زمان، همه برندگان همان مرحله ثبت می‌شوند.</li></ul>
+      <ul><li>هر کارت شامل ۳ ردیف و ۹ ستون و مجموعاً ۱۵ عدد است.</li><li>گوی‌ها از ۱ تا ۹۰، تصادفی و بدون تکرار اعلام می‌شوند و همهٔ بازیکنان هر دور شماره‌های یکسان می‌گیرند.</li><li>برد خطی با تکمیل یک ردیف پنج‌عددی و برد کامل با تکمیل هر ۱۵ عدد ثبت می‌شود.</li><li>در برد هم‌زمان، همهٔ برندگان همان مرحله ثبت می‌شوند.</li><li>ثبت‌نام از ۷ روز پیش از زمان مسابقه باز می‌شود و حداکثر ۳۰ جایگاه دارد.</li><li>\${bingo ? 'فینال VIP پنج دور دارد؛ مقدماتی دو دور و نیمه‌نهایی سه دور دارند.' : 'فینال ساده سه دور دارد؛ مقدماتی و نیمه‌نهایی هرکدام دو دور دارند.'}</li><li>\${bingo ? 'امتیاز VIP: حضور ۲، خط ۱۵، کامل ۳۰ و پیشرفت ۱۰/۷/۵.' : 'امتیاز ساده: حضور ۱، خط ۱۰، کامل ۲۵ و پیشرفت ۸/۶/۴.'}</li></ul>
     </div>
     <div class="tour-prize-card"><div class="tour-panel-heading"><span>👑</span><div><small>WINNING FORMAT</small><h3>مراحل برد</h3></div></div>
       <div class="tour-winning-stage"><b>Ⅰ</b><div><strong>برنده یک خط</strong><small>تکمیل یک ردیف افقی</small></div></div>
       <div class="tour-winning-stage"><b>♛</b><div><strong>برنده دبرنای کامل</strong><small>تکمیل تمام خانه‌های کارت</small></div></div>
-      <p class="tour-prize-disclaimer">تورنومنت ساده پنجشنبه‌ها ساعت ۲۱ و تورنومنت VIP آخرین پنجشنبه هر ماه ساعت ۲۲ برگزار می‌شود. حداقل ۵ بازیکن برای شروع لازم است و در صورت لغو، ورودی به‌صورت سروری بازگردانده می‌شود.</p>
+      <div class="tour-prize-shares"><b>تقسیم صندوق جایزه</b><div><span>🥇 نفر اول</span><strong>\${bingo ? '۵۰٪' : '۶۰٪'}</strong></div><div><span>🥈 نفر دوم</span><strong>\${bingo ? '۳۰٪' : '۲۵٪'}</strong></div><div><span>🥉 نفر سوم</span><strong>\${bingo ? '۲۰٪' : '۱۵٪'}</strong></div></div>
+      <p class="tour-prize-disclaimer">ساده پنجشنبه‌ها ساعت ۲۱ و VIP آخرین پنجشنبهٔ هر ماه ساعت ۲۲ به وقت تهران برگزار می‌شود. ثبت‌نام ۷ روز قبل باز می‌شود؛ حداقل ۵ و حداکثر ۳۰ شرکت‌کننده لازم است. در صورت لغو، ورودی به‌صورت سروری بازگردانده می‌شود.</p>
     </div>
   </section>
   <section class="tour-next-cup"><div><small>مسیر جایگزین</small><b>${otherTitle}</b><span>هزینه ورود: ${otherCost}</span></div><button class="btn btn-outline" data-page="${otherPage}">مشاهده جام دیگر ←</button></section>
