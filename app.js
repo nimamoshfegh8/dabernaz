@@ -1058,7 +1058,8 @@ function tournamentLivePanel(room, type) {
       if (spokenTournamentAnnouncementKeys.size > 250) spokenTournamentAnnouncementKeys.delete(spokenTournamentAnnouncementKeys.values().next().value);
     }
   }
-  const winners = Array.isArray(current?.full_winner_ids) ? current.full_winner_ids : [];
+  const lineWinners = Array.isArray(current?.line_winners) ? current.line_winners : [];
+  const winners = Array.isArray(current?.full_winners) ? current.full_winners : [];
   const top = Array.isArray(room.top_players) ? room.top_players : [];
   const recent = called.slice(-12).reverse().map(number => '<span>' + faDigits(number) + '</span>').join('');
   const card = Array.isArray(room.my_card) ? room.my_card : [];
@@ -1076,7 +1077,8 @@ function tournamentLivePanel(room, type) {
   return `<section class="tour-live-panel"><div class="tour-live-heading"><div><small>LIVE TOURNAMENT</small><h3>${escapeHTML(stage)}</h3></div><span class="tour-live-state">${room.status === 'running' ? '● زنده' : '● برنامه‌ریزی‌شده'}</span></div>
     ${current ? `<div class="tour-live-number"><small>آخرین شماره اعلام‌شده</small><b>${latest ? faDigits(latest) : '—'}</b><span>${faDigits(called.length)} / ۹۰ شماره</span></div><div class="tour-called-list">${recent || '<span>هنوز شماره‌ای اعلام نشده</span>'}</div>` : '<p class="muted-note">پس از شروع مسابقه، شماره‌های اعلام‌شده و جدول زنده در این بخش نمایش داده می‌شوند.</p>'}
     ${cardMarkup}
-    ${winners.length ? '<p class="tour-winner-notice">🏆 برنده کامل این دور: ' + winners.map(faDigits).join('، ') + '</p>' : ''}
+    ${lineWinners.length ? '<p class="tour-winner-notice">🏅 برنده خط این دور: ' + lineWinners.map(player => escapeHTML(player.name) + (player.memberId ? ' · شناسه ' + faDigits(player.memberId) : '')).join('، ') + '</p>' : ''}
+    ${winners.length ? '<p class="tour-winner-notice">🏆 برنده کامل این دور: ' + winners.map(player => escapeHTML(player.name) + (player.memberId ? ' · شناسه ' + faDigits(player.memberId) : '')).join('، ') + '</p>' : ''}
     <div class="tour-live-leaders"><b>رتبه‌بندی برترها</b><ol>${leaderboard}</ol></div></section>`;
 }
 async function refreshTournamentData() {
