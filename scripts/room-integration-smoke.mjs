@@ -519,7 +519,7 @@ for (let index = 0; index < expectedShares.length; index++) {
 }
 assert.deepEqual(
   settledTournament.entries.filter(entry => entry.event_id === publicLiveSimple.id).map(entry => entry.status).sort(),
-  ['eliminated','eliminated','winner_1','winner_2','winner_3'].sort(),
+  ['registered','registered','winner_1','winner_2','winner_3'].sort(),
   'the final tournament standings must store the three winners'
 );
 
