@@ -1561,6 +1561,13 @@ async function myRecurringTournamentData(db, userId) {
     event.my_entry_status = ownEntry.status;
     event.my_total_points = Number(ownEntry.total_points) || 0;
   }
+  // Internal database user IDs are never needed by the browser. Public player
+  // IDs and winner profiles are sufficient for the live tournament UI.
+  for (const event of events) {
+    if (!event.current_round) continue;
+    delete event.current_round.line_winner_ids;
+    delete event.current_round.full_winner_ids;
+  }
   return { events, entries: ownedEntries, rooms: events };
 }
 
