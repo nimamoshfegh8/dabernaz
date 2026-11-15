@@ -183,6 +183,7 @@ async function ensureSchema(db) {
     `CREATE INDEX IF NOT EXISTS idx_game_results_user ON game_results(user_id, id DESC)`,
     `CREATE TABLE IF NOT EXISTS game_sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, game_type TEXT NOT NULL, state_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'playing', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id))`,
     `CREATE INDEX IF NOT EXISTS idx_game_sessions_user_status ON game_sessions(user_id,status,updated_at DESC)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_game_sessions_one_active ON game_sessions(user_id,game_type) WHERE status='playing'`,
     `CREATE TABLE IF NOT EXISTS auth_sessions (
       token_hash TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
@@ -680,21 +681,22 @@ async function startRoom(db, room) {
 }
 
 function advanceRoom(room) {
-  if (room.status !== 'playing' || !room.nextDrawAt) return { changed: false, awards: [] };
-  let changed = false;
-  let guard = 0;
+  if (room.status !== 'playing' || !room.nextDrawAt || room.nextDrawAt > Date.now()) {
+    return { changed: false, awards: [] };
+  }
+
+  // One request may announce at most one number. A participant returning after
+  // the app was backgrounded must never fast-forward an entire room to its end.
   const awards = [];
   const now = Date.now();
-  while (room.status === 'playing' && room.nextDrawAt <= now && guard < 90) {
-    guard++;
-    const remaining = Array.from({ length: 90 }, (_, i) => i + 1).filter((n) => !room.calledNumbers.includes(n));
-    if (!remaining.length) {
-      room.status = 'finished';
-      room.finishedAt = Math.floor(Date.now() / 1000);
-      room.nextDrawAt = null;
-      changed = true;
-      break;
-    }
+  const remaining = Array.from({ length: 90 }, (_, index) => index + 1)
+    .filter((number) => !room.calledNumbers.includes(number));
+
+  if (!remaining.length) {
+    room.status = 'finished';
+    room.finishedAt = Math.floor(now / 1000);
+    room.nextDrawAt = null;
+  } else {
     const number = remaining[randomInt(remaining.length)];
     room.calledNumbers.push(number);
     const called = new Set(room.calledNumbers);
@@ -703,8 +705,6 @@ function advanceRoom(room) {
     if (!Array.isArray(room.winners.line)) room.winners.line = room.winners.line ? [room.winners.line] : [];
     if (!Array.isArray(room.winners.full)) room.winners.full = room.winners.full ? [room.winners.full] : [];
 
-    // Everyone whose card first becomes complete on the same announced number wins together.
-    // Winners are unique players, even if one player owns multiple completed cards.
     const collectWinners = (checkComplete) => {
       const byUser = new Map();
       for (const player of room.players) {
@@ -714,7 +714,7 @@ function advanceRoom(room) {
             name: player.name,
             memberId: player.memberId,
             number,
-            at: Math.floor(Date.now() / 1000),
+            at: Math.floor(now / 1000),
           });
         }
       }
@@ -725,11 +725,11 @@ function advanceRoom(room) {
       if (!total || !winners.length) return [];
       const base = Math.floor(total / winners.length);
       const remainder = total % winners.length;
-      const createdAt = new Date().toISOString();
+      const createdAt = new Date(now).toISOString();
       return winners.map((winner, index) => ({
-        kind:'balance',
-        userId:winner.userId,
-        amount:base + (index < remainder ? 1 : 0),
+        kind: 'balance',
+        userId: winner.userId,
+        amount: base + (index < remainder ? 1 : 0),
         description,
         createdAt,
       })).filter((award) => award.amount > 0);
@@ -739,7 +739,8 @@ function advanceRoom(room) {
       const lineWinners = collectWinners(lineComplete);
       if (lineWinners.length) {
         room.winners.line = lineWinners;
-        const prize = Math.floor((Number(room.grossRevenue) || 0) * (Number(ROOM_ECONOMICS[room.id]?.linePrizePercent) || 0) / 100);
+        const prize = Math.floor((Number(room.grossRevenue) || 0) *
+          (Number(ROOM_ECONOMICS[room.id]?.linePrizePercent) || 0) / 100);
         room.linePrizePaid = prize;
         awards.push(...splitPrize(prize, lineWinners, 'سهم جایزه یک خط دبرنا'));
       }
@@ -748,19 +749,22 @@ function advanceRoom(room) {
       const fullWinners = collectWinners(fullComplete);
       if (fullWinners.length) {
         room.winners.full = fullWinners;
-        const prize = Math.floor((Number(room.grossRevenue) || 0) * (Number(ROOM_ECONOMICS[room.id]?.fullPrizePercent) || 0) / 100);
+        const prize = Math.floor((Number(room.grossRevenue) || 0) *
+          (Number(ROOM_ECONOMICS[room.id]?.fullPrizePercent) || 0) / 100);
         room.fullPrizePaid = prize;
         awards.push(...splitPrize(prize, fullWinners, 'سهم جایزه دبرنای کامل'));
       }
     }
-    room.nextDrawAt += DRAW_INTERVAL_MS;
-    changed = true;
-    if ((room.winners.line?.length && room.winners.full?.length) || room.calledNumbers.length >= 90) {
+
+    if ((room.winners.line.length && room.winners.full.length) || room.calledNumbers.length >= 90) {
       room.status = 'finished';
-      room.finishedAt = Math.floor(Date.now() / 1000);
+      room.finishedAt = Math.floor(now / 1000);
       room.nextDrawAt = null;
+    } else {
+      room.nextDrawAt = now + DRAW_INTERVAL_MS;
     }
   }
+
   if (room.status === 'finished' && room.roundId && !room.commissionFinalized) {
     const grossRevenue = Math.max(0, Number(room.grossRevenue) || 0);
     const linePrizePaid = Math.max(0, Number(room.linePrizePaid) || 0);
@@ -771,7 +775,7 @@ function advanceRoom(room) {
     }
     room.siteCommission = siteCommission;
     room.commissionFinalized = true;
-    const now = new Date().toISOString();
+    const createdAt = new Date(now).toISOString();
     awards.push({
       kind: 'room_commission',
       roundId: room.roundId,
@@ -784,14 +788,13 @@ function advanceRoom(room) {
       siteCommission,
       lineWinners: Array.isArray(room.winners?.line) ? room.winners.line : [],
       fullWinners: Array.isArray(room.winners?.full) ? room.winners.full : [],
-      finishedAt: room.finishedAt ? new Date(room.finishedAt * 1000).toISOString() : now,
-      createdAt: now,
+      finishedAt: room.finishedAt ? new Date(room.finishedAt * 1000).toISOString() : createdAt,
+      createdAt,
     });
-    changed = true;
   }
-  return { changed, awards };
-}
 
+  return { changed: true, awards };
+}
 async function publicRoom(db, room, userId) {
   const me = room.players.find((player) => Number(player.userId) === Number(userId));
   const queued = room.queue.some((id) => Number(id) === Number(userId));
@@ -830,7 +833,10 @@ async function publicRoom(db, room, userId) {
     calledNumbers:room.calledNumbers.slice(-15), allCalledNumbers:room.calledNumbers,
     drawCount:room.calledNumbers.length,
     latestNumber:room.calledNumbers.length ? room.calledNumbers[room.calledNumbers.length - 1] : null,
-    winners:room.winners,
+    winners: {
+      line: (Array.isArray(room.winners?.line) ? room.winners.line : []).map(({name,memberId,number,at}) => ({name,memberId,number,at})),
+      full: (Array.isArray(room.winners?.full) ? room.winners.full : []).map(({name,memberId,number,at}) => ({name,memberId,number,at}))
+    },
     myCards:room.status === 'finished' ? [] : (me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : [])),
     joined:room.status === 'finished' ? false : (queued || !!me), startedAt:room.startedAt, finishedAt:room.finishedAt,
     myBingoCoins:Number(account?.bingo_coins) || 0,
@@ -936,12 +942,27 @@ async function recentWinners(db, limit = 12) {
   const result = await db.prepare(`SELECT room_id, round_id, total_players, total_cards, line_prize_paid, full_prize_paid,
     line_winners_json, full_winners_json, finished_at
     FROM room_finances ORDER BY id DESC LIMIT ?`).bind(limit).all();
-  return (result.results || []).map((row) => {
-    const parse = (value) => { try { const parsed = JSON.parse(value || '[]'); return Array.isArray(parsed) ? parsed : []; } catch (_) { return []; } };
-    return { ...row, lineWinners: parse(row.line_winners_json), fullWinners: parse(row.full_winners_json), finishedAt: row.finished_at };
-  });
+  const parse = (value) => {
+    try {
+      const parsed = JSON.parse(value || '[]');
+      return Array.isArray(parsed)
+        ? parsed.map(({name,memberId,number,at}) => ({name,memberId,number,at}))
+        : [];
+    } catch (_) { return []; }
+  };
+  return (result.results || []).map((row) => ({
+    room_id: row.room_id,
+    round_id: row.round_id,
+    total_players: Number(row.total_players) || 0,
+    total_cards: Number(row.total_cards) || 0,
+    line_prize_paid: Number(row.line_prize_paid) || 0,
+    full_prize_paid: Number(row.full_prize_paid) || 0,
+    finished_at: row.finished_at,
+    lineWinners: parse(row.line_winners_json),
+    fullWinners: parse(row.full_winners_json),
+    finishedAt: row.finished_at,
+  }));
 }
-
 const GAME_RPS_CHOICES = ['rock','paper','scissors'];
 const GAME_RPS_BEATS = { rock:'scissors', paper:'rock', scissors:'paper' };
 const GAME_TIC_LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
@@ -995,7 +1016,15 @@ async function advanceServerGame(db,user,request,path) {
     if(active) throw new HttpError(409,'یک مسابقه فعال از این نوع داری؛ آن را ادامه بده.',{matchId:active.id});
     const id=randomToken(16), now=new Date().toISOString();
     const state=gameType==='rps'?{round:1,player:0,bot:0,draws:0,history:[],rounds:[],finished:false,result:null}:{board:Array(9).fill(''),moves:0,finished:false,result:null};
-    await db.prepare("INSERT INTO game_sessions (id,user_id,game_type,state_json,status,created_at,updated_at) VALUES (?,?,?,?,'playing',?,?)").bind(id,user.id,gameType,JSON.stringify(state),now,now).run();
+    try {
+      await db.prepare("INSERT INTO game_sessions (id,user_id,game_type,state_json,status,created_at,updated_at) VALUES (?,?,?,?,'playing',?,?)")
+        .bind(id,user.id,gameType,JSON.stringify(state),now,now).run();
+    } catch (error) {
+      const activeNow = await db.prepare("SELECT id,game_type,state_json FROM game_sessions WHERE user_id=? AND game_type=? AND status='playing' ORDER BY created_at DESC LIMIT 1")
+        .bind(user.id,gameType).first();
+      if (activeNow) return json({ok:true,match:publicGameSession(activeNow,JSON.parse(activeNow.state_json))});
+      throw error;
+    }
     return json({ok:true,match:publicGameSession({id,game_type:gameType},state)});
   }
   if(request.method==='GET'&&path==='/api/games/active'){
@@ -1003,6 +1032,18 @@ async function advanceServerGame(db,user,request,path) {
     if(!['rps','tic'].includes(gameType||'')) throw new HttpError(400,'نوع بازی معتبر نیست.');
     const row=await db.prepare("SELECT id,game_type,state_json FROM game_sessions WHERE user_id=? AND game_type=? AND status='playing' ORDER BY created_at DESC LIMIT 1").bind(user.id,gameType).first();
     return json({ok:true,match:row?publicGameSession(row,JSON.parse(row.state_json)):null});
+  }
+  if(request.method==='POST'&&path==='/api/games/abandon'){
+    validateWriteOrigin(request);
+    const body=await readJson(request), matchId=String(body.matchId||'');
+    if(!/^[0-9a-f]{32}$/i.test(matchId)) throw new HttpError(400,'شناسه مسابقه معتبر نیست.');
+    const updated=await db.prepare("UPDATE game_sessions SET status='abandoned',updated_at=? WHERE id=? AND user_id=? AND status='playing'")
+      .bind(new Date().toISOString(),matchId,user.id).run();
+    if(Number(updated.meta?.changes||0)) return json({ok:true,abandoned:true});
+    const existing=await db.prepare("SELECT status FROM game_sessions WHERE id=? AND user_id=? LIMIT 1").bind(matchId,user.id).first();
+    if(!existing) throw new HttpError(404,'مسابقه پیدا نشد.');
+    if(existing.status==='abandoned') return json({ok:true,abandoned:true});
+    throw new HttpError(409,'این مسابقه به پایان رسیده و قابل شروع مجدد از این مسیر نیست.');
   }
   if(request.method==='POST'&&path==='/api/games/move'){
     validateWriteOrigin(request);
@@ -1038,8 +1079,8 @@ async function advanceServerGame(db,user,request,path) {
     const now=new Date().toISOString(), nextStatus=state.finished?'finished':'playing';
     const statements=[db.prepare("UPDATE game_sessions SET state_json=?,status=?,updated_at=? WHERE id=? AND user_id=? AND status='playing' AND state_json=?").bind(JSON.stringify(state),nextStatus,now,matchId,user.id,row.state_json)];
     if(finalResult){
-      statements.push(db.prepare("INSERT INTO game_results (user_id,game_type,result,prize,bingo_coins_earned,created_at) SELECT user_id,game_type,?,0,0,? FROM game_sessions WHERE id=? AND status='finished' AND updated_at=?").bind(finalResult,now,matchId,now));
-      statements.push(db.prepare(`UPDATE users SET games_played=games_played+1,wins=wins+CASE WHEN ?='win' THEN 1 ELSE 0 END,points=points+CASE WHEN ?='win' THEN 10 ELSE 0 END WHERE id=(SELECT user_id FROM game_sessions WHERE id=? AND status='finished' AND updated_at=?)`).bind(finalResult,finalResult,matchId,now));
+      statements.push(db.prepare("INSERT INTO game_results (user_id,game_type,result,prize,bingo_coins_earned,created_at) SELECT user_id,game_type,?,0,0,? FROM game_sessions WHERE id=? AND status='finished' AND updated_at=? AND changes()=1").bind(finalResult,now,matchId,now));
+      statements.push(db.prepare(`UPDATE users SET games_played=games_played+1,wins=wins+CASE WHEN ?='win' THEN 1 ELSE 0 END,points=points+CASE WHEN ?='win' THEN 10 ELSE 0 END WHERE id=(SELECT user_id FROM game_sessions WHERE id=? AND status='finished' AND updated_at=?) AND changes()=1`).bind(finalResult,finalResult,matchId,now));
     }
     const batch=await db.batch(statements);
     if(!Number(batch[0]?.meta?.changes||0)) throw new HttpError(409,'حرکت هم‌زمان دیگری ثبت شده است؛ وضعیت مسابقه را دوباره دریافت کن.');
