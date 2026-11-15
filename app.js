@@ -7,7 +7,8 @@ const defaultState = {
   settings: { sounds: true, voiceNumbers: false, voiceAudioVersion: 6, notifications: false, vibration: false },
   referralCode: '', gamesPlayed: 0, wins: 0, points: 0,
   bingoCoins: 0, coinTransactions: [], inviteCount: 0, inviteRewardMilestones: [],
-  roomHistory: [], supportTickets: [], tournamentRooms: [], tournamentEntries: []
+  roomHistory: [], supportTickets: [], tournamentRooms: [], tournamentEntries: [],
+  walletRequests: [], walletPaymentInfo: {cardNumber:'',cardHolder:'',bankName:'',paymentNote:''}
 };
 
 function loadState() {
@@ -44,6 +45,7 @@ state.gamesPlayed=0; state.wins=0; state.points=0; state.joined=[];
 state.transactions=[]; state.coinTransactions=[]; state.referralCode='';
 let currentUser = null;
 let supportAdminEnabled=false, supportAdminTickets=[], supportSelectedTicketId=null, supportThread=null, supportAdminFilter='all', supportAdminKnownTicketIds=new Set();
+let walletAdminEnabled=false, walletAdminRequests=[], walletAdminFilter='all', walletAdminSelectedRequest=null, walletAdminUsers=[];
 let authReady = false;
 let apiReady = false;
 let apiErrorMessage = '';
@@ -614,6 +616,7 @@ function applyAuthenticatedUser(user) {
   state.referralCode = `DABERNAZ${user.memberId}`;
   state.balance = Math.max(0, Number(user.balance)||0); state.bingoCoins = Math.max(0, Number(user.bingoCoins)||0);
   state.coinTransactions = Array.isArray(user.coinTransactions) ? user.coinTransactions.slice(0,50) : [];
+  state.transactions = Array.isArray(user.transactions) ? user.transactions.slice(0,50) : [];
   state.gamesPlayed = Number(user.stats?.gamesPlayed)||0; state.wins = Number(user.stats?.wins)||0; state.points = Number(user.stats?.points)||0;
   state.transactions = []; state.joined = []; state.tournamentEntries = [];
   saveState(); updateHeader(); updateHomeMiniStats();
@@ -628,6 +631,7 @@ async function loadAuthenticatedUser() {
     apiErrorMessage = error?.message || 'ارتباط با API برقرار نشد.';
     currentUser = null;
     supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;supportAdminKnownTicketIds=new Set();
+    walletAdminEnabled=false;walletAdminRequests=[];walletAdminSelectedRequest=null;state.walletRequests=[];state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
     state = { ...cloneData(defaultState), settings:state.settings };
     authReady = true;
     saveState();
@@ -644,6 +648,7 @@ async function loadAuthenticatedUser() {
       state.supportTickets = [];
       state.tournamentRooms = [];
       state.tournamentEntries = [];
+      state.walletRequests=[]; state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
     }
   } catch (error) {
     apiReady = false;
@@ -652,7 +657,7 @@ async function loadAuthenticatedUser() {
     state = { ...cloneData(defaultState), settings:state.settings };
     showToast(apiErrorMessage);
   }
-  if(!currentUser){supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;}
+  if(!currentUser){supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;walletAdminEnabled=false;walletAdminRequests=[];walletAdminSelectedRequest=null;}
   authReady = true;
 
   // Completed room history is public; load it even for visitors who are not signed in.
@@ -667,10 +672,12 @@ async function loadAuthenticatedUser() {
   } catch (_) { /* Aggregate tournament counts are optional during an API outage. */ }
 
   if (currentUser) {
-    const [referralResult, tournamentResult, ticketResult] = await Promise.allSettled([
+    const [referralResult, tournamentResult, ticketResult, walletInfoResult, walletRequestsResult] = await Promise.allSettled([
       apiRequest('/api/referrals', { method:'GET', headers:{} }),
       apiRequest('/api/tournaments/me', { method:'GET', headers:{} }),
-      apiRequest('/api/tickets', { method:'GET', headers:{} })
+      apiRequest('/api/tickets', { method:'GET', headers:{} }),
+      apiRequest('/api/wallet/payment-info', { method:'GET', headers:{} }),
+      apiRequest('/api/wallet/requests', { method:'GET', headers:{}})
     ]);
     if (referralResult.status === 'fulfilled') {
       const referral = referralResult.value;
@@ -686,10 +693,20 @@ async function loadAuthenticatedUser() {
       state.tournamentRooms = Array.isArray(data.rooms) ? data.rooms : [];
     }
     if (ticketResult.status === 'fulfilled') state.supportTickets = Array.isArray(ticketResult.value.tickets) ? ticketResult.value.tickets : [];
+    if (walletInfoResult.status === 'fulfilled') state.walletPaymentInfo = walletInfoResult.value.paymentInfo || state.walletPaymentInfo;
+    if (walletRequestsResult.status === 'fulfilled') state.walletRequests = Array.isArray(walletRequestsResult.value.requests) ? walletRequestsResult.value.requests : [];
     try { const adminResult=await apiRequest('/api/admin/support',{method:'GET',headers:{}}); supportAdminEnabled=adminResult.isAdmin===true; supportAdminTickets=Array.isArray(adminResult.tickets)?adminResult.tickets:[]; supportAdminKnownTicketIds=new Set(supportAdminTickets.map(t=>Number(t.id))); }
     catch (_) { supportAdminEnabled=false; supportAdminTickets=[]; }
+    try {
+      const walletAdminResult=await apiRequest('/api/admin/wallet',{method:'GET',headers:{}});
+      walletAdminEnabled=walletAdminResult.isAdmin===true;
+      walletAdminRequests=Array.isArray(walletAdminResult.requests)?walletAdminResult.requests:[];
+      const walletSettings=await apiRequest('/api/admin/wallet/settings',{method:'GET',headers:{}});
+      if(walletSettings.settings)state.walletPaymentInfo=walletSettings.settings;
+    } catch (_) { walletAdminEnabled=false;walletAdminRequests=[];walletAdminSelectedRequest=null; }
   } else { supportAdminEnabled=false; supportAdminTickets=[]; }
   if(currentPage==='supportAdmin'&&!supportAdminEnabled) currentPage='support';
+  if(currentPage==='walletAdmin'&&!walletAdminEnabled) currentPage='wallet';
   saveState();
   render();
 }
@@ -705,7 +722,7 @@ function updateHeader() {
   $('#headerBalance').textContent = money(state.balance);
   if ($('#headerBingoCoins')) $('#headerBingoCoins').textContent = `${state.bingoCoins.toLocaleString('fa-IR')} BGC`;
 }
-const APP_PAGES = ['home','games','room5000','room10000','room20000','room50000','roomGame','tournaments','tournamentRoom','bingoTournament','invite','wallet','account','settings','support','supportAdmin'];
+const APP_PAGES = ['home','games','room5000','room10000','room20000','room50000','roomGame','tournaments','tournamentRoom','bingoTournament','invite','wallet','walletAdmin','account','settings','support','supportAdmin'];
 function pageFromLocation() {
   const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
   const page = hash.get('page');
@@ -1393,7 +1410,7 @@ function render() {
     room5000:renderRoomPurchasePage, room10000:renderRoomPurchasePage, room20000:renderRoomPurchasePage, room50000:renderRoomPurchasePage,
     roomGame:renderRoomGame, tournaments:renderTournaments,
     tournamentRoom:() => renderTournamentDetail(false), bingoTournament:() => renderTournamentDetail(true),
-    invite:renderInvite, wallet:renderWallet, account:renderAccount, settings:renderSettings, support:renderSupport, supportAdmin:renderSupportAdmin
+    invite:renderInvite, wallet:renderWallet, walletAdmin:renderWalletAdmin, account:renderAccount, settings:renderSettings, support:renderSupport, supportAdmin:renderSupportAdmin
   };
   $('#appView').innerHTML = pages[currentPage]();
   const roomPages = ['room5000','room10000','room20000','room50000','roomGame'];
