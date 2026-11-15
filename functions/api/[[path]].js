@@ -1043,7 +1043,8 @@ async function advanceServerGame(db,user,request,path) {
     const existing=await db.prepare("SELECT status FROM game_sessions WHERE id=? AND user_id=? LIMIT 1").bind(matchId,user.id).first();
     if(!existing) throw new HttpError(404,'مسابقه پیدا نشد.');
     if(existing.status==='abandoned') return json({ok:true,abandoned:true});
-    throw new HttpError(409,'این مسابقه به پایان رسیده و قابل شروع مجدد از این مسیر نیست.');
+    if(existing.status==='finished') return json({ok:true,abandoned:false});
+    throw new HttpError(409,'وضعیت این مسابقه تغییر کرده است؛ دوباره دریافتش کن.');
   }
   if(request.method==='POST'&&path==='/api/games/move'){
     validateWriteOrigin(request);
