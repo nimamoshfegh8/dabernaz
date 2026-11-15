@@ -43,7 +43,7 @@ state.username=''; state.memberId=''; state.balance=0; state.bingoCoins=0;
 state.gamesPlayed=0; state.wins=0; state.points=0; state.joined=[];
 state.transactions=[]; state.coinTransactions=[]; state.referralCode='';
 let currentUser = null;
-let supportAdminEnabled=false, supportAdminTickets=[], supportSelectedTicketId=null, supportThread=null, supportAdminFilter='all';
+let supportAdminEnabled=false, supportAdminTickets=[], supportSelectedTicketId=null, supportThread=null, supportAdminFilter='all', supportAdminKnownTicketIds=new Set();
 let authReady = false;
 let apiReady = false;
 let apiErrorMessage = '';
@@ -686,7 +686,7 @@ async function loadAuthenticatedUser() {
       state.tournamentRooms = Array.isArray(data.rooms) ? data.rooms : [];
     }
     if (ticketResult.status === 'fulfilled') state.supportTickets = Array.isArray(ticketResult.value.tickets) ? ticketResult.value.tickets : [];
-    try { const adminResult=await apiRequest('/api/admin/support',{method:'GET',headers:{}}); supportAdminEnabled=adminResult.isAdmin===true; supportAdminTickets=Array.isArray(adminResult.tickets)?adminResult.tickets:[]; }
+    try { const adminResult=await apiRequest('/api/admin/support',{method:'GET',headers:{}}); supportAdminEnabled=adminResult.isAdmin===true; supportAdminTickets=Array.isArray(adminResult.tickets)?adminResult.tickets:[]; supportAdminKnownTicketIds=new Set(supportAdminTickets.map(t=>Number(t.id))); }
     catch (_) { supportAdminEnabled=false; supportAdminTickets=[]; }
   } else { supportAdminEnabled=false; supportAdminTickets=[]; }
   if(currentPage==='supportAdmin'&&!supportAdminEnabled) currentPage='support';
@@ -2038,6 +2038,19 @@ window.addEventListener('online', () => {
   });
 });
 setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom(); }, 2200);
+setInterval(async()=>{
+  if(!currentUser)return;
+  if(currentPage==='supportAdmin'&&supportAdminEnabled){
+    try{await refreshSupportAdmin();render();}catch(_){}
+  }else if(currentPage==='support'){
+    try{
+      const list=await apiRequest('/api/tickets',{method:'GET',headers:{}});
+      state.supportTickets=Array.isArray(list.tickets)?list.tickets:[];
+      if(supportSelectedTicketId)supportThread=await apiRequest('/api/tickets/'+supportSelectedTicketId,{method:'GET',headers:{}});
+      render();
+    }catch(_){}
+  }
+},15000);
 
 window.addEventListener('hashchange', () => {
   const page = pageFromLocation();
