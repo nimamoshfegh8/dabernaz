@@ -45,7 +45,7 @@ state.gamesPlayed=0; state.wins=0; state.points=0; state.joined=[];
 state.transactions=[]; state.coinTransactions=[]; state.referralCode='';
 let currentUser = null;
 let supportAdminEnabled=false, supportAdminTickets=[], supportSelectedTicketId=null, supportThread=null, supportAdminFilter='all', supportAdminKnownTicketIds=new Set();
-let walletAdminEnabled=false, walletAdminRequests=[], walletAdminFilter='all', walletAdminSelectedRequest=null, walletAdminUsers=[];
+let walletAdminEnabled=false, walletAdminRequests=[], walletAdminFilter='all', walletAdminSelectedRequest=null, walletAdminUsers=[], walletAdminSelectedMemberId='';
 let authReady = false;
 let apiReady = false;
 let apiErrorMessage = '';
@@ -1827,6 +1827,55 @@ document.addEventListener('click', async event => {
   const actionEl = event.target.closest('[data-action]');
   if (!actionEl) return;
   const action = actionEl.dataset.action;
+  if(action==='wallet-open-deposit'){
+    if(!requireLogin())return;
+    if(!state.walletPaymentInfo?.cardNumber){showToast('شماره کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');return;}
+    openModal('درخواست واریز', '<form id="walletDepositForm" class="form-stack"><p class="muted-note">مبلغ موردنظر را وارد کن. پس از ثبت درخواست، شماره کارت مقصد نمایش داده می‌شود و می‌توانی رسید انتقال را ارسال کنی.</p><label>مبلغ واریز (تومان)<input class="form-control" name="amount" type="number" min="10000" max="50000000" step="1000" placeholder="حداقل ۱۰٬۰۰۰ تومان" required></label><button class="btn btn-primary btn-block" type="submit">ثبت درخواست و نمایش کارت مقصد</button></form>');
+    return;
+  }
+  if(action==='wallet-open-withdraw'){
+    if(!requireLogin())return;
+    openModal('درخواست برداشت', '<form id="walletWithdrawForm" class="form-stack"><p class="muted-note">مبلغ هنگام ثبت درخواست از موجودی قابل برداشت رزرو می‌شود. در صورت رد یا لغو درخواست، وجه به کیف پول برمی‌گردد.</p><label>مبلغ برداشت (تومان)<input class="form-control" name="amount" type="number" min="10000" max="50000000" step="1000" placeholder="مبلغ برداشت" required></label><label>شماره کارت ۱۶ رقمی<input class="form-control" name="cardNumber" inputmode="numeric" maxlength="19" placeholder="شماره کارت به نام خودت" required></label><label>نام صاحب کارت<input class="form-control" name="cardHolder" maxlength="80" placeholder="نام مطابق کارت" required></label><label>نام بانک (اختیاری)<input class="form-control" name="bankName" maxlength="60" placeholder="نام بانک"></label><button class="btn btn-primary btn-block" type="submit">ثبت درخواست برداشت</button></form>');
+    return;
+  }
+  if(action==='wallet-upload-receipt'){
+    if(!requireLogin())return;
+    const requestId=Number(actionEl.dataset.requestId);
+    openModal('ارسال رسید واریز', '<form id="walletReceiptForm" class="form-stack" data-request-id="'+requestId+'"><p class="muted-note">تصویر رسید باید واضح و حداکثر ۵۱۲ کیلوبایت باشد. فقط تصویر PNG، JPG یا WebP پذیرفته می‌شود.</p><input class="form-control" type="file" name="receipt" accept="image/png,image/jpeg,image/webp" required><button class="btn btn-primary btn-block" type="submit">ارسال رسید برای بررسی</button></form>');
+    return;
+  }
+  if(action==='wallet-copy-card'){
+    const card=String(state.walletPaymentInfo?.cardNumber||'');
+    if(card){try{await navigator.clipboard.writeText(card);showToast('شماره کارت کپی شد.');}catch(_){showToast('کپی خودکار انجام نشد؛ شماره کارت را انتخاب و کپی کن.');}}
+    return;
+  }
+  if(action==='wallet-cancel-request'){
+    const requestId=Number(actionEl.dataset.requestId);
+    if(!window.confirm('درخواست برداشت لغو و مبلغ به موجودی کیف پول برگردانده شود؟'))return;
+    try{await apiRequest('/api/wallet/requests/'+requestId+'/cancel',{method:'POST',body:JSON.stringify({})});await refreshWalletData();render();showToast('درخواست لغو شد و مبلغ به کیف پول برگشت.');}
+    catch(error){showToast(error.message);}
+    return;
+  }
+  if(action==='wallet-admin-filter'){walletAdminFilter=actionEl.dataset.filter||'all';render();return;}
+  if(action==='wallet-admin-open-request'){
+    if(!requireLogin())return;
+    try{walletAdminSelectedRequest=await apiRequest('/api/admin/wallet/'+Number(actionEl.dataset.requestId),{method:'GET',headers:{}});setPage('walletAdmin',{scroll:false});}
+    catch(error){showToast(error.message);}
+    return;
+  }
+  if(action==='wallet-admin-decision'){
+    const requestId=Number(actionEl.dataset.requestId),decision=actionEl.dataset.decision;
+    const confirmText=decision==='approve'?'واریز تأیید و موجودی کاربر شارژ شود؟':decision==='paid'?'پرداخت برداشت انجام‌شده ثبت شود؟':'درخواست رد شود؟'+(walletAdminSelectedRequest?.request?.request_type==='withdraw'?' مبلغ به کیف پول کاربر برگردد؟':'');
+    if(!window.confirm(confirmText))return;
+    try{await apiRequest('/api/admin/wallet/'+requestId+'/decision',{method:'POST',body:JSON.stringify({decision,note:''})});await refreshWalletAdmin();await refreshWalletData();render();showToast(decision==='approve'?'واریز تأیید و کیف پول شارژ شد.':decision==='paid'?'پرداخت برداشت ثبت شد.':'درخواست رد شد.');}
+    catch(error){showToast(error.message);}
+    return;
+  }
+  if(action==='wallet-admin-pick-user'){
+    walletAdminSelectedMemberId=String(actionEl.dataset.memberId||'');
+    render();
+    return;
+  }
   if(action==='support-open-ticket'||action==='support-admin-open-ticket'){
     if(!requireLogin())return;
     supportSelectedTicketId=Number(actionEl.dataset.ticketId);
