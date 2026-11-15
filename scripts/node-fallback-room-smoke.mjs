@@ -174,6 +174,16 @@ try {
 
   // The Node fallback must expose the same server-authoritative RPS and tic APIs as Pages.
   const statsBeforeMiniGames=(await request('/api/auth/me',{cookie:accounts[1].cookie})).data.user.stats;
+  const clientDeclaredResult=await request('/api/games/result',{
+    method:'POST',cookie:accounts[1].cookie,body:{won:true}
+  });
+  assert.equal(clientDeclaredResult.response.status,405,
+    'Node fallback must not accept client-declared outcomes');
+  assert.deepEqual(
+    (await request('/api/auth/me',{cookie:accounts[1].cookie})).data.user.stats,
+    statsBeforeMiniGames,
+    'unverified outcomes must leave player statistics unchanged'
+  );
   let rps=(await request('/api/games/start',{
     method:'POST',cookie:accounts[1].cookie,body:{gameType:'rps'}
   }));
