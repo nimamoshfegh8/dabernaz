@@ -554,6 +554,91 @@ const balancesAfterRepeatedSettlement = await Promise.all(accounts.slice(0, 5).m
 assert.deepEqual(balancesAfterRepeatedSettlement, balancesAfterSettlement,
   'a completed tournament must not issue duplicate prize credits');
 
+// VIP final settlement uses its own 50/30/20 split, with integer remainders
+// and one-time credits just like the weekly tournament's 60/25/15 split.
+const vipFixtureId = 'vip-payout-' + runId;
+const vipRoundId = vipFixtureId + '-final-1';
+const vipCard = JSON.stringify([
+  [1,null,21,null,41,null,61,null,81],
+  [2,12,null,32,null,52,null,72,null],
+  [null,13,23,null,43,null,63,73,null]
+]);
+const vipCalledNumbers = JSON.stringify(Array.from({ length: 90 }, (_, index) => index + 1));
+const vipBalancesBefore = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+const vipFixtureSql = [
+  "INSERT INTO tournament_events (id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,stages_json,stage_round,stage_rounds,current_round_id,started_at,created_at,updated_at) VALUES ('" +
+    vipFixtureId + "','bingo',datetime('now','-1 second'),datetime('now','-8 days'),'running',5,30,500,5,'final','[{\\"key\\":\\"final\\",\\"rounds\\":1}]',1,1,'" +
+    vipRoundId + "',datetime('now'),datetime('now'),datetime('now'))",
+  ...accounts.slice(0, 5).map(account =>
+    "UPDATE users SET bingo_coins=bingo_coins-100 WHERE id=" + Number(account.id) + " AND bingo_coins>=100"
+  ),
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,total_points,line_wins,full_wins,rounds_played,created_at) VALUES ('" +
+      vipFixtureId + "'," + Number(account.id) + ",100,'registered',0,0,0,0,datetime('now'))"
+  ),
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO transactions (user_id,type,amount,description,created_at) VALUES (" +
+      Number(account.id) + ",'bingo_coin',-100,'QA VIP fixture entry',datetime('now'))"
+  ),
+  "INSERT INTO tournament_rounds (id,event_id,stage,round_number,status,called_numbers_json,line_winner_ids_json,full_winner_ids_json,next_draw_at,started_at,finished_at) VALUES ('" +
+    vipRoundId + "','" + vipFixtureId + "','final',1,'finished','" + vipCalledNumbers + "','[]','[]',NULL," + Date.now() + ",datetime('now'))",
+  ...accounts.slice(0, 5).map(account =>
+    "INSERT INTO tournament_round_players (id,event_id,round_id,user_id,card_json) VALUES ('" +
+      vipRoundId + "-" + Number(account.id) + "','" + vipFixtureId + "','" + vipRoundId + "'," +
+      Number(account.id) + ",'" + vipCard + "')"
+  )
+].join('; ');
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', vipFixtureSql,
+], { stdio: 'inherit' });
+
+const vipSettled = await request('/api/tournaments/me', { account: accounts[0] });
+assert.equal(vipSettled.events.find(event => event.id === vipFixtureId)?.status, 'completed',
+  'VIP final tournament must settle and complete');
+const vipRankedAccounts = [...accounts.slice(0, 5)].sort((a, b) =>
+  String(a.memberId).localeCompare(String(b.memberId))
+);
+const vipExpectedPrize = new Map([
+  [String(vipRankedAccounts[0].id), 250],
+  [String(vipRankedAccounts[1].id), 150],
+  [String(vipRankedAccounts[2].id), 100],
+  [String(vipRankedAccounts[3].id), 0],
+  [String(vipRankedAccounts[4].id), 0]
+]);
+const vipBalancesAfter = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+for (let index = 0; index < 5; index++) {
+  const account = accounts[index];
+  assert.equal(
+    vipBalancesAfter[index] - vipBalancesBefore[index],
+    -100 + vipExpectedPrize.get(String(account.id)),
+    'VIP tournament must debit the entry and pay the 50/30/20 split exactly once'
+  );
+}
+const vipStatuses = await Promise.all(accounts.slice(0, 5).map(async account => {
+  const personal = await request('/api/tournaments/me', { account });
+  return personal.entries.find(entry => entry.event_id === vipFixtureId)?.status || null;
+}));
+assert.deepEqual(
+  vipStatuses,
+  accounts.slice(0, 5).map(account => {
+    const rank = vipRankedAccounts.findIndex(player => String(player.id) === String(account.id));
+    return rank < 3 ? 'winner_' + String(rank + 1) : 'registered';
+  }),
+  'VIP accounts must retain their own final rank'
+);
+await request('/api/tournaments/me', { account: accounts[0] });
+const vipBalancesAfterRepeat = await Promise.all(accounts.slice(0, 5).map(async account =>
+  Number((await accountMe(account)).bingoCoins)
+));
+assert.deepEqual(vipBalancesAfterRepeat, vipBalancesAfter,
+  'VIP prize credits must not be duplicated after repeated refreshes');
+
 // A due event below the five-player minimum must cancel and refund its single entry.
 const refundFixtureId = 'refund-' + runId;
 const refundAccount = accounts[5];
