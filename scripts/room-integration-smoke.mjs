@@ -289,7 +289,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     assert.equal(accountRoom.cardCount, 40);
     assert.equal(accountRoom.joined, true);
     checkCard(accountRoom.myCards, accounts[index].email, expectedCards);
-    const expectedBalance = balancesBeforeBuy.get(accounts[index].memberId) -
+    const expectedBalance = profileBeforeBuy.get(accounts[index].memberId).balance -
       economics.price * expectedCards;
     assert.equal(Number((await accountMe(accounts[index])).balance), expectedBalance,
       roomId + ': wallet must immediately reflect actual card fees');
