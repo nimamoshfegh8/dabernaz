@@ -480,12 +480,7 @@ async function routeApi(req,res,url) {
   const miniGameResponse=await handleServerMiniGame(req,res,url,user);
   if(miniGameResponse) return miniGameResponse;
   if (req.method==='POST' && url.pathname==='/api/games/result') {
-    const body=await readBody(req);
-    if(typeof body.won!=='boolean') return json(res,400,{error:'نتیجه مسابقه معتبر نیست.'});
-    user.stats=user.stats||{gamesPlayed:0,wins:0,points:0};
-    user.stats.gamesPlayed=Math.min(100000000,user.stats.gamesPlayed+1);
-    if(body.won){user.stats.wins=Math.min(100000000,user.stats.wins+1);user.stats.points=Math.min(1000000000,user.stats.points+10);}
-    await persist(); return json(res,200,{ok:true,stats:user.stats});
+    return json(res,405,{error:'نتیجه بازی فقط از مسیر حرکت‌های معتبر سرور محاسبه می‌شود.'});
   }
   if (req.method==='PATCH' && url.pathname==='/api/profile') {
     const body=await readBody(req); const name=String(body.name||'').trim();
