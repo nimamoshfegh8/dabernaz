@@ -2234,6 +2234,10 @@ setInterval(async()=>{
       if(supportSelectedTicketId)supportThread=await apiRequest('/api/tickets/'+supportSelectedTicketId,{method:'GET',headers:{}});
       const composing=document.activeElement?.closest('#supportForm,#supportReplyForm');if(!composing)render();
     }catch(_){}
+  }else if(currentPage==='wallet'){
+    try{await refreshWalletData();const composing=document.activeElement?.closest('#walletDepositForm,#walletWithdrawForm,#walletReceiptForm');if(!composing)render();}catch(_){}
+  }else if(currentPage==='walletAdmin'&&walletAdminEnabled){
+    try{await refreshWalletAdmin();const composing=document.activeElement?.closest('#walletAdminSettingsForm,#walletAdminSearchForm,#walletAdminAdjustForm');if(!composing)render();}catch(_){}
   }
 },15000);
 
