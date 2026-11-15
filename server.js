@@ -478,8 +478,8 @@ async function routeApi(req,res,url) {
   }
   const user=authenticate(req);
   if (!user) return json(res,401,{error:'برای ادامه ابتدا وارد حساب کاربری شو.'});
-  const miniGameResponse=await handleServerMiniGame(req,res,url,user);
-  if(miniGameResponse) return miniGameResponse;
+  await handleServerMiniGame(req,res,url,user);
+  if(res.writableEnded) return;
   if (req.method==='POST' && url.pathname==='/api/games/result') {
     return json(res,405,{error:'نتیجه بازی فقط از مسیر حرکت‌های معتبر سرور محاسبه می‌شود.'});
   }
