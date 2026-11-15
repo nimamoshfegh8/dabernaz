@@ -669,6 +669,8 @@ assert.equal(refundedTournament.entries.find(entry => entry.event_id === refundF
   'cancelled tournament entries must be marked refunded');
 assert.equal(refundedTournament.events.find(event => event.id === refundFixtureId)?.status, 'cancelled',
   'the underfilled tournament must be marked cancelled');
+assert.equal(Number(refundedTournament.events.find(event => event.id === refundFixtureId)?.prize_pool), 0,
+  'a cancelled and fully refunded tournament must show no remaining prize pool');
 
 // Client-supplied outcomes are rejected; only server-computed game sessions count.
 const statsBefore = await accountMe(accounts[0]);
