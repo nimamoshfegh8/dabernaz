@@ -2,7 +2,7 @@
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('./sw.js?v=14', {
+    navigator.serviceWorker.register('./sw.js?v=15', {
       scope: './',
       updateViaCache: 'none'
     }).then(registration => {

@@ -48,12 +48,12 @@ assert.match(android, /setOnUtteranceProgressListener/);
 
 assert.match(index, /styles\.css\?v=4\.6\.0/);
 assert.match(index, /app\.js\?v=4\.21\.0/);
-assert.match(sw, /dabernaz-shell-v23/);
+assert.match(sw, /dabernaz-shell-v24/);
 assert.match(sw, /styles\.css\?v=4\.6\.0/);
 assert.match(sw, /app\.js\?v=4\.21\.0/);
 assert.match(swRegister, /sw\.js\?v=14/);
 assert.match(app, /4\.21\.0/);
-assert.match(androidBuild, /versionCode 4/);
+assert.match(androidBuild, /versionCode 5/);
 assert.match(androidBuild, /versionName '4\.21\.0'/);
 
 assert.match(voiceScript, /چهل دو/);
