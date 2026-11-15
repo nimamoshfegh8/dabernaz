@@ -1014,28 +1014,36 @@ function hasTournamentEntry(type) {
   return (state.joined || []).includes(type === 'bingo' ? 'bingoTournamentEntry' : 'simpleTournamentEntry');
 }
 function tournamentStatus(room) {
-  const capacity = Math.max(1, Number(room.capacity) || 30);
-  const registered = Math.max(0, Number(room.registered_count) || 0);
-  if (room.status === 'full' || registered >= capacity) return 'ظرفیت تکمیل';
+  if (room.status === 'scheduled') return 'ثبت‌نام هنوز باز نشده';
+  if (room.status === 'cancelled') return 'این دوره لغو شد';
+  if (room.status === 'running') return room.stage ? 'در حال برگزاری · ' + room.stage : 'در حال برگزاری';
+  if (room.status === 'completed') return 'پایان‌یافته';
   return 'ثبت‌نام باز است';
+}
+function tournamentScheduleText(room, type) {
+  if (!room?.scheduled_at) return type === 'bingo' ? 'ماهانه · آخرین پنجشنبه' : 'هفتگی · پنجشنبه';
+  try {
+    return new Intl.DateTimeFormat('fa-IR',{timeZone:'Asia/Tehran',weekday:'long',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(room.scheduled_at));
+  } catch (_) { return type === 'bingo' ? 'ماهانه' : 'هفتگی'; }
 }
 function tournamentCard(type, index) {
   const bingo = type === 'bingo';
   const room = getTournamentRoom(type);
   const cost = bingo ? 100 : 20;
-  const capacity = Math.max(1, Number(room.capacity) || 30);
-  const registered = Math.min(capacity, Math.max(0, Number(room.registered_count) || 0));
+  const capacity = Math.max(5, Number(room.capacity) || Number(room.min_players) || 30);
+  const registered = Math.max(0, Number(room.registered_count) || 0);
   const entered = hasTournamentEntry(type);
-  const full = tournamentStatus(room) === 'ظرفیت تکمیل';
-  const progress = Math.min(100, Math.round(registered / capacity * 100));
+  const full = room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
+  const progress = Math.min(100, Math.round(registered / Math.max(capacity, registered || 1) * 100));
   const title = bingo ? 'جام ویژه بینگو' : 'جام کلاسیک دبرنا';
-  const subtitle = bingo ? 'مسابقه ویژه با ورودی بینگوکوین' : 'رقابت استاندارد دبرنای ۹۰ توپی';
+  const subtitle = bingo ? 'تورنومنت VIP ماهانه · آخرین پنجشنبه هر ماه ساعت ۲۲' : 'تورنومنت ساده هفتگی · پنجشنبه‌ها ساعت ۲۱';
   const typeLabel = bingo ? 'BINGO CUP' : 'CLASSIC CUP';
   return `<article class="tour-card ${bingo ? 'tour-card-gold' : 'tour-card-red'}">
     <div class="tour-card-top"><span class="tour-card-icon">${bingo ? '🎱' : '🏆'}</span><span class="tour-card-type">${typeLabel}</span><span class="tour-card-state ${full ? 'is-full' : entered ? 'is-entered' : 'is-open'}">${entered ? 'ثبت‌نام تو' : full ? 'تکمیل' : 'آزاد'}</span></div>
     <div class="tour-card-title"><h3>${title}</h3><p>${subtitle}</p></div>
     <div class="tour-card-entry"><div><small>هزینه ورود</small><b>${faDigits(cost)} <em>BGC</em></b></div><div><small>ثبت‌نام فعلی</small><b>${faDigits(registered)} <em>از ${faDigits(capacity)}</em></b></div></div>
     <div class="tour-progress"><span style="width:${progress}%"></span></div>
+    <div class="tour-card-meta"><span>${tournamentScheduleText(room,type)}</span><span>حداقل ${faDigits(Number(room.min_players)||5)} نفر</span></div>
     <div class="tour-card-meta"><span>۹۰ توپ · کارت ۱۵ عددی</span><span>${tournamentStatus(room)}</span></div>
     <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} tour-card-button" data-page="${bingo ? 'bingoTournament' : 'tournamentRoom'}">${entered ? 'مشاهده ثبت‌نام' : 'مشاهده و ثبت‌نام'} <span>←</span></button>
   </article>`;
@@ -1078,7 +1086,7 @@ function renderTournaments() {
   <section class="tour-how-section">
     <div class="tour-section-heading"><div><span class="tour-eyebrow">HOW IT WORKS</span><h2>مسیر ورود به رقابت</h2></div></div>
     <div class="tour-step-grid"><div><span>۱</span><b>انتخاب جام</b><small>نوع مسابقه و هزینه ورود را بررسی کن.</small></div><div><span>۲</span><b>ثبت‌نام سروری</b><small>ورود با بینگوکوین از موجودی حساب کسر می‌شود.</small></div><div><span>۳</span><b>اعلام برنامه مسابقه</b><small>جزئیات زمان‌بندی و اجرای مراحل از همین بخش اطلاع‌رسانی می‌شود.</small></div></div>
-    <p class="tour-honesty-note">وضعیت ثبت‌نام و کسر بینگوکوین در حال حاضر به‌صورت سروری فعال است. اجرای خودکار مراحل حذفی، جدول امتیاز زنده و پرداخت جوایز مستقل تورنومنت هنوز در موتور مسابقات پیاده‌سازی نشده‌اند و تا تکمیل آن‌ها به‌عنوان قابلیت فعال نمایش داده نمی‌شوند.</p>
+    <p class="tour-honesty-note">تورنومنت ساده به‌صورت هفتگی و تورنومنت VIP به‌صورت ماهانه زمان‌بندی می‌شوند. حداقل ۵ شرکت‌کننده برای شروع لازم است؛ در صورت تکمیل‌نشدن حداقل نفرات، دوره لغو و ورودی بینگوکوین به حساب شرکت‌کنندگان بازگردانده می‌شود.</p>
   </section>`;
 }
 function renderTournamentDetail(bingo=false) {
@@ -1086,13 +1094,13 @@ function renderTournamentDetail(bingo=false) {
   const type = bingo ? 'bingo' : 'simple';
   const cost = bingo ? 100 : 20;
   const room = getTournamentRoom(type);
-  const capacity = Math.max(1, Number(room.capacity) || 30);
-  const registered = Math.min(capacity, Math.max(0, Number(room.registered_count) || 0));
-  const full = tournamentStatus(room) === 'ظرفیت تکمیل';
+  const capacity = Math.max(5, Number(room.capacity) || Number(room.min_players) || 30);
+  const registered = Math.max(0, Number(room.registered_count) || 0);
+  const full = room.status === 'running' || room.status === 'completed' || room.status === 'cancelled';
   const entered = hasTournamentEntry(type);
   const left = Math.max(0, capacity - registered);
   const progress = Math.min(100, Math.round(registered / capacity * 100));
-  const statusText = entered ? 'ثبت‌نام تو تکمیل شده' : full ? 'ظرفیت این دوره تکمیل شده' : 'ثبت‌نام باز است';
+  const statusText = entered ? 'ثبت‌نام تو تکمیل شده' : tournamentStatus(room);
   const entryId = bingo ? 'bingoTournamentEntry' : 'simpleTournamentEntry';
   const otherPage = bingo ? 'tournamentRoom' : 'bingoTournament';
   const otherTitle = bingo ? 'مشاهده جام کلاسیک دبرنا' : 'مشاهده جام ویژه بینگو';
@@ -1107,8 +1115,8 @@ function renderTournamentDetail(bingo=false) {
     <div class="tour-registration-heading"><div><small>REGISTRATION STATUS</small><h2>وضعیت ثبت‌نام</h2></div><span class="tour-registration-icon">${entered ? '✓' : full ? '!' : '♟'}</span></div>
     <div class="tour-registration-numbers"><div><b>${faDigits(registered)}</b><small>ثبت‌نام‌شده</small></div><div><b>${faDigits(left)}</b><small>ظرفیت باقی‌مانده</small></div><div><b>${faDigits(capacity)}</b><small>ظرفیت این صف</small></div></div>
     <div class="tour-progress tour-progress-large"><span style="width:${progress}%"></span></div>
-    <div class="tour-registration-foot"><span>${progress.toLocaleString('fa-IR')}٪ تکمیل ظرفیت</span><span>${full ? 'ثبت‌نام بسته' : 'ثبت‌نام فعال'}</span></div>
-    <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full ? 'disabled' : ''}>${entered ? '✓ ثبت‌نام تو قبلاً انجام شده' : full ? 'ظرفیت تکمیل شده' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
+    <div class="tour-registration-foot"><span>زمان برگزاری: ${tournamentScheduleText(room,type)}</span><span>${tournamentStatus(room)}</span></div>
+    <button class="btn ${entered ? 'btn-outline' : 'btn-primary'} btn-block tour-register-button" data-action="join-tournament" data-tournament="${type}" ${entered || full || room.status === 'scheduled' ? 'disabled' : ''}>${entered ? '✓ ثبت‌نام تو قبلاً انجام شده' : room.status === 'scheduled' ? 'ثبت‌نام هنوز باز نشده' : full ? 'ثبت‌نام بسته است' : `ثبت‌نام و پرداخت ${faDigits(cost)} بینگوکوین`}</button>
     <p class="tour-balance-note">موجودی فعلی تو: <b>${state.bingoCoins.toLocaleString('fa-IR')} BGC</b> · هزینه فقط یک‌بار و پس از تأیید سرور کسر می‌شود.</p>
   </section>
   <section class="tour-detail-grid">
@@ -1118,7 +1126,7 @@ function renderTournamentDetail(bingo=false) {
     <div class="tour-prize-card"><div class="tour-panel-heading"><span>👑</span><div><small>WINNING FORMAT</small><h3>مراحل برد</h3></div></div>
       <div class="tour-winning-stage"><b>Ⅰ</b><div><strong>برنده یک خط</strong><small>تکمیل یک ردیف افقی</small></div></div>
       <div class="tour-winning-stage"><b>♛</b><div><strong>برنده دبرنای کامل</strong><small>تکمیل تمام خانه‌های کارت</small></div></div>
-      <p class="tour-prize-disclaimer">جزئیات زمان مسابقه و مبالغ جایزه مستقل این جام، تا زمان فعال‌شدن برنامه برگزاری و تسویه تورنومنت اعلام نمی‌شود.</p>
+      <p class="tour-prize-disclaimer">تورنومنت ساده پنجشنبه‌ها ساعت ۲۱ و تورنومنت VIP آخرین پنجشنبه هر ماه ساعت ۲۲ برگزار می‌شود. حداقل ۵ بازیکن برای شروع لازم است و در صورت لغو، ورودی به‌صورت سروری بازگردانده می‌شود.</p>
     </div>
   </section>
   <section class="tour-next-cup"><div><small>مسیر جایگزین</small><b>${otherTitle}</b><span>هزینه ورود: ${otherCost}</span></div><button class="btn btn-outline" data-page="${otherPage}">مشاهده جام دیگر ←</button></section>

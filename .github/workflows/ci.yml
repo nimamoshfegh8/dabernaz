@@ -39,6 +39,9 @@ jobs:
       - name: Test Persian voice UI and Android playback path
         run: node scripts/voice-ui-smoke.mjs
 
+      - name: Test weekly and monthly tournament schedule rules
+        run: node scripts/tournament-rules-smoke.mjs
+
       - name: Install Wrangler for isolated D1 integration tests
         run: npm install --global wrangler@4
 
