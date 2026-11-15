@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const [app, index, sw, swRegister, android, manifest, voiceScript, validator] = await Promise.all([
+const [app, index, sw, swRegister, android, androidBuild, manifest, voiceScript, validator] = await Promise.all([
   readFile(new URL('../app.js', import.meta.url), 'utf8'),
   readFile(new URL('../index.html', import.meta.url), 'utf8'),
   readFile(new URL('../sw.js', import.meta.url), 'utf8'),
   readFile(new URL('../sw-register.js', import.meta.url), 'utf8'),
   readFile(new URL('../android/app/src/main/java/app/dabernaz/club/MainActivity.java', import.meta.url), 'utf8'),
+  readFile(new URL('../android/app/build.gradle', import.meta.url), 'utf8'),
   readFile(new URL('../assets/voice/sage-woman.json', import.meta.url), 'utf8'),
   readFile(new URL('../docs/kenerate-90-number-script.txt', import.meta.url), 'utf8'),
   readFile(new URL('./voice-pack-validation.mjs', import.meta.url), 'utf8')
@@ -52,8 +53,8 @@ assert.match(sw, /styles\.css\?v=4\.6\.0/);
 assert.match(sw, /app\.js\?v=4\.21\.0/);
 assert.match(swRegister, /sw\.js\?v=14/);
 assert.match(app, /4\.21\.0/);
-assert.match(android, /versionCode 4/);
-assert.match(android, /versionName '4\.21\.0'/);
+assert.match(androidBuild, /versionCode 4/);
+assert.match(androidBuild, /versionName '4\.21\.0'/);
 
 assert.match(voiceScript, /چهل دو/);
 assert.doesNotMatch(voiceScript, /چهل و دو/);
