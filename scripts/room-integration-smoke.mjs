@@ -527,6 +527,25 @@ assert.deepEqual(
   'each player account must store its own final tournament status and winner rank'
 );
 
+// The live top-five list must use the same eligible-player scope as final prize ranking.
+// An eliminated entrant must never appear above current finalists or winners.
+execFileSync('wrangler', [
+  'd1', 'execute', 'dabernaz-ci', '--local',
+  '--persist-to', '.wrangler/test-state',
+  '--command', "UPDATE tournament_event_entries SET status='eliminated' WHERE event_id='" + publicLiveSimple.id + "' AND user_id=" + Number(accounts[4].id),
+], { stdio: 'inherit' });
+const standingsSnapshot = await request('/api/tournaments/me', { account: accounts[0] });
+const completedStandings = standingsSnapshot.events.find(event => event.id === publicLiveSimple.id);
+assert.ok(completedStandings, 'completed tournament standings must remain available');
+assert.ok(
+  !completedStandings.top_players.some(player => String(player.memberId) === String(accounts[4].memberId)),
+  'eliminated players must not appear in the live top-five ranking'
+);
+assert.ok(
+  completedStandings.top_players.some(player => ['winner_1','winner_2','winner_3'].includes(player.status)),
+  'the completed ranking must continue to show the paid winners'
+);
+
 // Repeated refreshes or scheduler invocations must never pay the same final prize twice.
 await request('/api/tournaments/me', { account: accounts[0] });
 const balancesAfterRepeatedSettlement = await Promise.all(accounts.slice(0, 5).map(async account =>
