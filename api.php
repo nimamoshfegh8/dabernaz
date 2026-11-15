@@ -74,7 +74,7 @@ function public_user(array $user): array {
 function fresh_room(string $id): array {
     return ['id'=>$id,'status'=>'waiting','queue'=>[],'cardCounts'=>[],'queuedCards'=>[],'players'=>[],
         'calledNumbers'=>[],'winners'=>['line'=>null,'full'=>null],'registrationStartedAt'=>null,'registrationDeadline'=>null,
-        'startedAt'=>null,'finishedAt'=>null,'nextDrawAt'=>null,'updatedAt'=>time()];
+        'startedAt'=>null,'finishedAt'=>null,'nextDrawAt'=>null,'updatedAt'=>time(),'resultsRecorded'=>false];
 }
 function random_int_safe(int $min, int $max): int { return random_int($min, $max); }
 function secure_shuffle(array $items): array {
@@ -128,7 +128,28 @@ function full_complete(array $card, array $called): bool {
     foreach ($numbers as $n) if (!isset($set[$n])) return false;
     return true;
 }
-function finish_room(array &$room): void {
+function finish_room(array &$room, array &$db): void {
+    if (empty($room['resultsRecorded']) && !empty($room['startedAt'])) {
+        $winnerMemberIds=[];
+        foreach (['line','full'] as $stage) {
+            $winner=$room['winners'][$stage]??null;
+            if (is_array($winner) && !empty($winner['memberId'])) {
+                $winnerMemberIds[(string)$winner['memberId']]=true;
+            }
+        }
+        foreach (($room['players']??[]) as $player) {
+            $i=get_user_index($db,(string)($player['userId']??''));
+            if ($i<0) continue;
+            $stats=$db['users'][$i]['stats']??['gamesPlayed'=>0,'wins'=>0,'points'=>0];
+            $stats['gamesPlayed']=min(100000000,(int)($stats['gamesPlayed']??0)+1);
+            if (isset($winnerMemberIds[(string)($player['memberId']??'')])) {
+                $stats['wins']=min(100000000,(int)($stats['wins']??0)+1);
+                $stats['points']=min(1000000000,(int)($stats['points']??0)+10);
+            }
+            $db['users'][$i]['stats']=$stats;
+        }
+        $room['resultsRecorded']=true;
+    }
     $room['status']='finished'; $room['finishedAt']=time(); $room['updatedAt']=time(); $room['nextDrawAt']=null;
 }
 function start_room(array &$room, array $db): bool {
@@ -144,7 +165,7 @@ function start_room(array &$room, array $db): bool {
     if (count($players) < DABERNAZ_MIN_PLAYERS) return false;
     $room['players']=$players; $room['queue']=[]; $room['queuedCards']=[]; $room['cardCounts']=[]; $room['status']='playing';
     $room['calledNumbers']=[]; $room['winners']=['line'=>null,'full'=>null]; $room['startedAt']=time();
-    $room['finishedAt']=null; $room['nextDrawAt']=time()+DABERNAZ_DRAW_INTERVAL; $room['updatedAt']=time();
+    $room['finishedAt']=null; $room['nextDrawAt']=time()+DABERNAZ_DRAW_INTERVAL; $room['updatedAt']=time(); $room['resultsRecorded']=false;
     return true;
 }
 function refund_expired_waiting_room(array &$room, array &$db): bool {
@@ -193,7 +214,7 @@ function advance_room(array &$room, array &$db): void {
     while ($room['status']==='playing' && !empty($room['nextDrawAt']) && $room['nextDrawAt'] <= $now && $guard < 90) {
         $guard++;
         $remaining=array_values(array_diff(range(1,90),$room['calledNumbers']));
-        if (!$remaining) { finish_room($room); break; }
+        if (!$remaining) { finish_room($room,$db); break; }
         $number=$remaining[random_int(0,count($remaining)-1)];
         $room['calledNumbers'][]=$number;
         foreach ($room['players'] as $player) {
@@ -213,7 +234,7 @@ function advance_room(array &$room, array &$db): void {
             }
         }
         $room['updatedAt']=time(); $room['nextDrawAt'] += DABERNAZ_DRAW_INTERVAL;
-        if (($room['winners']['line']!==null && $room['winners']['full']!==null) || count($room['calledNumbers'])>=90) finish_room($room);
+        if (($room['winners']['line']!==null && $room['winners']['full']!==null) || count($room['calledNumbers'])>=90) finish_room($room,$db);
     }
 }
 function public_room(array $room, string $userId, array $db): array {

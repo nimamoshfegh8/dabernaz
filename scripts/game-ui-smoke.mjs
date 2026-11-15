@@ -23,6 +23,10 @@ assert.doesNotMatch(roomCopy, /حداقل ۵ شرکت‌کننده/,
   'room UI must not contradict the server with a five-player minimum');
 assert.match(app, /room5000[\s\S]*?room10000[\s\S]*?room20000[\s\S]*?room50000/,
   'all four price-tier room IDs must remain available');
+assert.match(app, /id="homePoints"/,
+  'the homepage account status must expose an update target for the points counter');
+assert.match(app, /function updateHomeMiniStats\(\)[\s\S]*?homeGamesPlayed[\s\S]*?homeWins[\s\S]*?homePoints/,
+  'all three homepage account counters must refresh from the same authenticated stats snapshot');
 assert.match(app, /queue\.status === 'finished'[\s\S]*?data-action="room-next-session"/,
   'a finished room must offer a separate next-session action, not a purchase action');
 const nextSessionHandler = app.match(/if \(action === 'room-next-session'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-join-auto'\)/)?.[1] || '';

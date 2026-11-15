@@ -615,7 +615,7 @@ function applyAuthenticatedUser(user) {
   state.coinTransactions = Array.isArray(user.coinTransactions) ? user.coinTransactions.slice(0,50) : [];
   state.gamesPlayed = Number(user.stats?.gamesPlayed)||0; state.wins = Number(user.stats?.wins)||0; state.points = Number(user.stats?.points)||0;
   state.transactions = []; state.joined = []; state.tournamentEntries = [];
-  saveState(); updateHeader();
+  saveState(); updateHeader(); updateHomeMiniStats();
 }
 async function loadAuthenticatedUser() {
   // Probe the route first so a stale login cookie or account error is never shown
@@ -753,7 +753,7 @@ function renderHome() {
   ${section('بازی‌های محبوب', 'همه بازی‌ها', 'games')}
   <div class="game-grid">${roomGameCard()}${gameCard('rps','✊✋✌️','سنگ، کاغذ، قیچی','مسابقه خودکار تا رسیدن یکی از طرفین به ۳ برد','بازی مهارتی · بدون شرط‌بندی','game-cover-rps')}${gameCard('tic','⭕❌','دوز حرفه‌ای','صفحه ۳×۳ با حریف هوشمند و تصمیم‌های تاکتیکی','بازی مهارتی · بدون شرط‌بندی','game-cover-tic')}</div>
   ${section('وضعیت حساب', 'حساب کاربری', 'account')}
-  <div class="mini-stats"><div class="stat-card"><b id="homeGamesPlayed">${money(state.gamesPlayed)}</b><small>بازی انجام‌شده</small></div><div class="stat-card"><b id="homeWins">${money(state.wins)}</b><small>بردها</small></div><div class="stat-card"><b>${money(state.points)}</b><small>امتیاز کل</small></div></div>
+  <div class="mini-stats"><div class="stat-card"><b id="homeGamesPlayed">${money(state.gamesPlayed)}</b><small>بازی انجام‌شده</small></div><div class="stat-card"><b id="homeWins">${money(state.wins)}</b><small>بردها</small></div><div class="stat-card"><b id="homePoints">${money(state.points)}</b><small>امتیاز کل</small></div></div>
   <div class="ticker"><span>⭐ وضعیت حساب</span><strong>${currentUser ? 'حساب ثبت‌شده' : 'مهمان'}</strong><span>● آماده بازی</span></div>`;
 }
 function gameCard(id, symbol, name, desc, price, coverClass = '') {
@@ -1483,6 +1483,7 @@ function miniGameEntryPanel() { return ''; }
 function updateHomeMiniStats() {
   if ($('#homeGamesPlayed')) $('#homeGamesPlayed').textContent = money(state.gamesPlayed);
   if ($('#homeWins')) $('#homeWins').textContent = money(state.wins);
+  if ($('#homePoints')) $('#homePoints').textContent = money(state.points);
 }
 function applyMiniGameUser(user) {
   if (!user || !currentUser) return;

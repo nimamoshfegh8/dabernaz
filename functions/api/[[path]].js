@@ -495,7 +495,8 @@ function newRoom(roomId) {
     queuedNames: {}, entryPayments: {}, players: [], calledNumbers: [],
     winners: { line: [], full: [] }, roundId: null, totalPlayers: 0, totalCards: 0,
     grossRevenue: 0, linePrizePaid: 0, fullPrizePaid: 0, siteCommission: 0,
-    commissionFinalized: false, registrationStartedAt: null, registrationDeadline: null,
+    commissionFinalized: false, statsRecorded: false,
+    registrationStartedAt: null, registrationDeadline: null,
     startedAt: null, finishedAt: null, nextDrawAt: null, updatedAt: Date.now(),
   };
 }
@@ -513,6 +514,7 @@ async function loadRoom(db, roomId) {
       room.roundId ??= null; room.totalPlayers ||= 0; room.totalCards ||= 0;
       room.grossRevenue ||= 0; room.linePrizePaid ||= 0; room.fullPrizePaid ||= 0;
       room.siteCommission ||= 0; room.commissionFinalized ||= false;
+      room.statsRecorded ??= false;
       room.registrationStartedAt ??= null; room.registrationDeadline ??= null;
       // One-time migration for a queue created by the previous room rules.
       if (room.status === 'waiting' && room.queue.length && !room.registrationDeadline) {
@@ -548,6 +550,13 @@ async function saveRoom(db, room, awards = []) {
         ON CONFLICT(round_id) DO NOTHING`)
         .bind(award.roundId, award.roomId, award.totalPlayers, award.totalCards, award.grossRevenue,
           award.linePrizePaid, award.fullPrizePaid, award.siteCommission, JSON.stringify(award.lineWinners || []), JSON.stringify(award.fullWinners || []), award.finishedAt, award.createdAt));
+    } else if (award.kind === 'room_game_stats') {
+      statements.push(db.prepare(`UPDATE users
+        SET games_played = games_played + 1,
+            wins = wins + ?,
+            points = points + ?
+        WHERE id = ?`)
+        .bind(award.won ? 1 : 0, award.won ? 10 : 0, award.userId));
     } else {
       statements.push(db.prepare('UPDATE users SET bingo_coins = bingo_coins + ? WHERE id = ?').bind(award.amount, award.userId));
       statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
@@ -763,6 +772,23 @@ function advanceRoom(room) {
     } else {
       room.nextDrawAt = now + DRAW_INTERVAL_MS;
     }
+  }
+
+  if (room.status === 'finished' && room.startedAt && !room.statsRecorded && room.players.length) {
+    const winnerIds = new Set();
+    for (const winner of [
+      ...(Array.isArray(room.winners?.line) ? room.winners.line : []),
+      ...(Array.isArray(room.winners?.full) ? room.winners.full : []),
+    ]) {
+      if (winner?.userId != null) winnerIds.add(String(winner.userId));
+    }
+    for (const player of room.players) {
+      const userId = Number(player.userId);
+      if (!Number.isSafeInteger(userId) || userId <= 0) continue;
+      const won = winnerIds.has(String(userId));
+      awards.push({ kind:'room_game_stats', userId, won });
+    }
+    room.statsRecorded = true;
   }
 
   if (room.status === 'finished' && room.roundId && !room.commissionFinalized) {
