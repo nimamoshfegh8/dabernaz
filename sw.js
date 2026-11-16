@@ -1,14 +1,20 @@
 'use strict';
 
-// The service worker must not pin old app.js/styles.css after a Pages deployment.
-// Core code is network-first; cached copies are used only when the device is offline.
-const CACHE_NAME = 'dabernaz-shell-v29';
+// App shell assets are cached for first-load/offline recovery. Live app code remains network-first.
+const CACHE_NAME = 'dabernaz-shell-v30';
 const CORE_ASSETS = [
   './',
   './index.html',
+  './install.html',
   './styles.css?v=4.7.3',
+  './pwa-install.css?v=1',
   './app.js?v=4.27.0',
+  './install.js?v=1',
+  './pwa-entry.js?v=1',
   './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-maskable-512.png',
   './manifest.webmanifest'
 ];
 
@@ -33,7 +39,6 @@ self.addEventListener('activate', event => {
 async function networkFirst(request, cacheKey = request) {
   const cache = await caches.open(CACHE_NAME);
   try {
-    // Bypass the browser HTTP cache as well as the service-worker cache.
     const response = await fetch(request, { cache: 'no-store' });
     if (response && response.ok) await cache.put(cacheKey, response.clone());
     return response;
@@ -48,22 +53,17 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
-
-  // The standalone admin portal is a static page, not the SPA shell.
-  // Let Cloudflare Pages serve /admin and its index.html without SPA fallback.
   if (url.pathname === '/admin' || url.pathname === '/admin/' || url.pathname.startsWith('/admin/')) return;
 
-  // HTML, JavaScript and CSS must reflect the most recent Cloudflare deployment.
   if (request.mode === 'navigate') {
-    event.respondWith(networkFirst(request, './index.html'));
+    const offlineFallback = url.pathname.endsWith('/install.html') ? './install.html' : './index.html';
+    event.respondWith(networkFirst(request, offlineFallback));
     return;
   }
   if (request.destination === 'script' || request.destination === 'style') {
     event.respondWith(networkFirst(request));
     return;
   }
-
-  // Images and fonts may remain cache-first for faster repeat visits.
   if (request.destination === 'image' || request.destination === 'font') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);

@@ -6,12 +6,15 @@
   <meta name="theme-color" content="#09090c">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Dabernaz">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="description" content="Dabernaz - باشگاه بازی و رقابت آنلاین">
   <title>Dabernaz | دابرناز</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icon-192.png">
   <link rel="stylesheet" href="./styles.css?v=4.7.3">
+  <link rel="stylesheet" href="./pwa-install.css?v=1">
 </head>
 <body>
   <div class="ambient ambient-one"></div>
@@ -46,6 +49,7 @@
   <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="./app.js?v=4.27.0" defer></script>
-  <script src="./sw-register.js" defer></script>
+  <script src="./sw-register.js?v=20" defer></script>
+  <script src="./pwa-entry.js?v=1" defer></script>
 </body>
 </html>

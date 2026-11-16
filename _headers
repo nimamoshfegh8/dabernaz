@@ -9,8 +9,23 @@
 /manifest.webmanifest
   Cache-Control: public, max-age=3600
 
+/install.html
+  Cache-Control: public, max-age=0, must-revalidate
+
 /app.js
   Cache-Control: public, max-age=0, must-revalidate
+
+/install.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/pwa-entry.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/pwa-install.css
+  Cache-Control: public, max-age=0, must-revalidate
+
+/icon-*.png
+  Cache-Control: public, max-age=3600
 
 /styles.css
   Cache-Control: public, max-age=0, must-revalidate

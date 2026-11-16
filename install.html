@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#09090c">
+  <meta name="description" content="نصب دابرناز؛ وب‌اپ اندروید و iPhone یا دریافت نسخه رسمی APK">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Dabernaz">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <title>نصب دابرناز | Dabernaz</title>
+  <style>
+    :root{color-scheme:dark;--bg:#09090c;--panel:#151218;--line:#4a2229;--red:#ed182c;--gold:#f5bb45;--muted:#bcb4bb;--text:#fff}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% -10%,#4b111e 0,#1b1018 30%,var(--bg) 70%);color:var(--text);font-family:Vazirmatn,system-ui,Tahoma,Arial,sans-serif;padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom)}
+    a{color:inherit;text-decoration:none}.wrap{width:min(100%,700px);margin:0 auto;padding:24px 0 40px}.top{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px}.brand{display:flex;gap:10px;align-items:center;font:italic 22px Georgia,serif;direction:ltr}.logo{display:grid;place-items:center;width:42px;height:42px;border:1px solid #80303a;border-radius:13px;background:linear-gradient(145deg,#711828,#160b11);color:var(--gold);font:900 26px Georgia,serif}.back{font-size:12px;color:#ff7b88;border:1px solid #53242c;padding:9px 12px;border-radius:11px}
+    .hero{text-align:center;margin:0 auto 24px;max-width:580px}.hero img{width:76px;height:76px;filter:drop-shadow(0 8px 20px #0008)}.hero h1{font-size:25px;margin:10px 0 7px}.hero p{color:var(--muted);font-size:13px;line-height:2;margin:0}
+    .card{border:1px solid var(--line);background:linear-gradient(145deg,#1b151b,#0f0e12 75%);border-radius:20px;padding:19px;margin:14px 0;box-shadow:0 15px 35px #0006}.card-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}.card-icon{width:42px;height:42px;display:grid;place-items:center;border-radius:13px;background:#35131c;color:var(--gold);font-size:21px}.card h2{font-size:17px;margin:0}.card-sub{font-size:11px;color:var(--muted);margin:4px 0 0}.status{padding:11px 12px;background:#0c0b0f;border:1px solid #34262b;border-radius:12px;color:#d4cbd0;font-size:12px;line-height:1.9;margin:13px 0}.btn{display:flex;align-items:center;justify-content:center;width:100%;border:0;border-radius:13px;padding:14px 16px;font-size:14px;font-weight:900;color:white;background:linear-gradient(110deg,#ff344b,#a80c25);box-shadow:0 8px 22px #c4122d40;cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}.btn.secondary{background:linear-gradient(110deg,#e7b74d,#98651d);color:#1a1110;box-shadow:none}.steps{margin:12px 0 0;padding:0 20px 0 0;color:#e7dfe3;font-size:12px;line-height:2.2}.steps li{padding-right:2px}.muted{color:var(--muted)}.small{font-size:11px;line-height:1.9}.badge{display:inline-block;border:1px solid #75432e;border-radius:999px;padding:4px 9px;color:var(--gold);font-size:10px;margin-bottom:8px}.footer{text-align:center;color:#89818a;font-size:10px;margin-top:22px;line-height:2}
+    [hidden]{display:none!important}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <a class="brand" href="./" aria-label="Dabernaz"><span class="logo">D</span><strong>Dabernaz</strong></a>
+      <a class="back" href="./">بازگشت به بازی‌ها ←</a>
+    </header>
+    <section class="hero">
+      <img src="./icon-192.png" alt="لوگوی Dabernaz" width="76" height="76">
+      <h1>نصب دابرناز</h1>
+      <p>دابرناز را روی صفحهٔ اصلی گوشی یا رایانه اضافه کن تا مثل یک برنامهٔ مستقل و تمام‌صفحه باز شود.</p>
+    </section>
+
+    <section class="card" aria-labelledby="pwaTitle">
+      <div class="card-head"><span class="card-icon" aria-hidden="true">⌂</span><div><h2 id="pwaTitle">نصب وب‌اپ (پیشنهادی)</h2><p class="card-sub">بدون فایل APK و بدون نیاز به فروشگاه برنامه‌ها</p></div></div>
+      <div id="pwaStatus" class="status" role="status" aria-live="polite">در حال بررسی قابلیت نصب این مرورگر…</div>
+      <button id="pwaInstallButton" class="btn" type="button" hidden>نصب Dabernaz</button>
+      <div id="pwaAlreadyInstalled" class="status" hidden>دابرناز روی این دستگاه نصب شده است. از آیکن برنامه آن را باز کن.</div>
+      <div id="androidInstructions" hidden>
+        <ol class="steps"><li>منوی مرورگر Chrome را با علامت سه‌نقطه باز کن.</li><li>گزینهٔ «Install app» یا «افزودن به صفحهٔ اصلی» را انتخاب کن.</li><li>نصب را تأیید کن تا آیکن Dabernaz به صفحهٔ برنامه‌ها اضافه شود.</li></ol>
+      </div>
+      <div id="iosInstructions" hidden>
+        <ol class="steps"><li>در Safari دکمهٔ Share را بزن.</li><li>گزینهٔ «Add to Home Screen» را انتخاب کن.</li><li>نام Dabernaz را تأیید و Add را انتخاب کن.</li></ol>
+      </div>
+      <p class="small muted">برای نصب وب‌اپ باید سایت با HTTPS باز شود. امکانات بازی و حساب کاربری همچنان به اتصال اینترنت نیاز دارند.</p>
+    </section>
+
+    <section class="card" aria-labelledby="apkTitle">
+      <div class="card-head"><span class="card-icon" aria-hidden="true">⬇</span><div><h2 id="apkTitle">نسخهٔ اندروید APK</h2><p class="card-sub">برنامهٔ مستقل اندروید با نام Dabernaz</p></div></div>
+      <span class="badge">انتشار رسمی با امضای ثابت</span>
+      <div id="apkStatus" class="status" role="status" aria-live="polite">در حال بررسی آخرین نسخهٔ منتشرشده…</div>
+      <a id="apkDownloadButton" class="btn secondary" href="#" rel="noopener" hidden>دانلود APK دابرناز</a>
+      <a id="apkReleasesLink" class="small muted" href="https://github.com/nimamoshfegh8/dabernaz/releases" target="_blank" rel="noopener">مشاهدهٔ صفحهٔ انتشار نسخه‌ها در GitHub</a>
+      <p class="small muted">APK فقط پس از ساخت و تأیید امضای دیجیتال معتبر برای دانلود نمایش داده می‌شود. اندروید ممکن است هنگام نصب برنامه‌ای خارج از Play Store هشدار امنیتی نشان دهد؛ محافظت امنیتی دستگاه را خاموش نکن.</p>
+    </section>
+    <p class="footer">Dabernaz Game Club · نسخه وب و اندروید<br>برای دریافت نسخهٔ امن، فقط از همین صفحه و مخزن رسمی استفاده کن.</p>
+  </main>
+  <script src="./install.js?v=1" defer></script>
+  <script src="./sw-register.js?v=20" defer></script>
+</body>
+</html>
