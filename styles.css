@@ -940,3 +940,9 @@
 @media(max-width:360px){
  .wallet-request-type-option{align-items:flex-start;flex-direction:column}
 }
+
+
+/* Live room: show every participant's purchased cards below the game area. */
+.room-all-tickets-panel{margin-top:12px}
+.room-all-tickets-list{grid-template-columns:repeat(auto-fit,minmax(230px,1fr));}
+@media(max-width:600px){.room-all-tickets-list{grid-template-columns:1fr;}}
