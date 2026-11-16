@@ -2176,7 +2176,7 @@ document.addEventListener('submit', async event => {
   if(event.target.id==='walletAdminSettingsForm'){
     event.preventDefault();
     const data=new FormData(event.target);
-    const payload={cardNumber:String(data.get('cardNumber')||'').replace(/\D/g,''),cardHolder:String(data.get('cardHolder')||'').trim(),bankName:String(data.get('bankName')||'').trim(),paymentNote:String(data.get('paymentNote')||'').trim()};
+    const payload={cardNumber:String(data.get('cardNumber')||'').replace(/[۰-۹]/g,digit=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g,digit=>String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g,''),cardHolder:String(data.get('cardHolder')||'').trim(),bankName:String(data.get('bankName')||'').trim(),paymentNote:String(data.get('paymentNote')||'').trim()};
     const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
     try{const result=await apiRequest('/api/admin/wallet/settings',{method:'POST',body:JSON.stringify(payload)});state.walletPaymentInfo=result.settings||payload;await refreshWalletAdmin();render();showToast('اطلاعات کارت مقصد ذخیره شد.');}
     catch(error){showToast(error.message);}
