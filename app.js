@@ -672,11 +672,10 @@ async function loadAuthenticatedUser() {
   } catch (_) { /* Aggregate tournament counts are optional during an API outage. */ }
 
   if (currentUser) {
-    const [referralResult, tournamentResult, ticketResult, walletInfoResult, walletRequestsResult] = await Promise.allSettled([
+    const [referralResult, tournamentResult, ticketResult, walletRequestsResult] = await Promise.allSettled([
       apiRequest('/api/referrals', { method:'GET', headers:{} }),
       apiRequest('/api/tournaments/me', { method:'GET', headers:{} }),
       apiRequest('/api/tickets', { method:'GET', headers:{} }),
-      apiRequest('/api/wallet/payment-info', { method:'GET', headers:{} }),
       apiRequest('/api/wallet/requests', { method:'GET', headers:{}})
     ]);
     if (referralResult.status === 'fulfilled') {
@@ -693,7 +692,7 @@ async function loadAuthenticatedUser() {
       state.tournamentRooms = Array.isArray(data.rooms) ? data.rooms : [];
     }
     if (ticketResult.status === 'fulfilled') state.supportTickets = Array.isArray(ticketResult.value.tickets) ? ticketResult.value.tickets : [];
-    if (walletInfoResult.status === 'fulfilled') state.walletPaymentInfo = walletInfoResult.value.paymentInfo || state.walletPaymentInfo;
+    state.walletPaymentInfo = {cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
     if (walletRequestsResult.status === 'fulfilled') state.walletRequests = Array.isArray(walletRequestsResult.value.requests) ? walletRequestsResult.value.requests : [];
     try { const adminResult=await apiRequest('/api/admin/support',{method:'GET',headers:{}}); supportAdminEnabled=adminResult.isAdmin===true; supportAdminTickets=Array.isArray(adminResult.tickets)?adminResult.tickets:[]; supportAdminKnownTicketIds=new Set(supportAdminTickets.map(t=>Number(t.id))); }
     catch (_) { supportAdminEnabled=false; supportAdminTickets=[]; }
