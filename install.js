@@ -82,7 +82,7 @@
         return;
       }
       if (apkButton) {
-        apkButton.href = apk.browser_download_url;
+        apkButton.href = './download/Dabernaz.apk';
         apkButton.hidden = false;
       }
       if (apkStatus) apkStatus.textContent = 'آخرین نسخهٔ رسمی آمادهٔ دریافت است: ' + (release.name || release.tag_name || 'Dabernaz');
