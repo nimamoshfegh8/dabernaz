@@ -945,6 +945,12 @@ async function publicRoom(db, room, userId) {
       full: (Array.isArray(room.winners?.full) ? room.winners.full : []).map(({name,memberId,number,at}) => ({name,memberId,number,at}))
     },
     myCards:room.status === 'finished' ? [] : (me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : [])),
+    // Share every purchased card with authenticated participants of this live room only.
+    allPlayerCards:room.status === 'playing' ? room.players.flatMap((player) =>
+      (Array.isArray(player.cards) ? player.cards : []).map((card, cardIndex) => ({
+        playerName:String(player.name || 'بازیکن'), cardNumber:cardIndex + 1, card
+      }))
+    ) : [],
     joined:room.status === 'finished' ? false : (queued || !!me), startedAt:room.startedAt, finishedAt:room.finishedAt,
     myBingoCoins:Number(account?.bingo_coins) || 0,
     myCoinTransactions:await coinHistory(db, userId),
