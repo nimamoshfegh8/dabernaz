@@ -47,12 +47,12 @@ assert.match(android, /nativeTtsReady = true/);
 assert.match(android, /setOnUtteranceProgressListener/);
 
 assert.match(index, /styles\.css\?v=4\.7\.3/);
-assert.match(index, /app\.js\?v=4\.26\.0/);
-assert.match(sw, /dabernaz-shell-v28/);
+assert.match(index, /app\.js\?v=4\.27\.0/);
+assert.match(sw, /dabernaz-shell-v29/);
 assert.match(sw, /styles\.css\?v=4\.7\.3/);
-assert.match(sw, /app\.js\?v=4\.26\.0/);
-assert.match(swRegister, /sw\.js\?v=18/);
-assert.match(app, /4\.26\.0/);
+assert.match(sw, /app\.js\?v=4\.27\.0/);
+assert.match(swRegister, /sw\.js\?v=19/);
+assert.match(app, /4\.27\.0/);
 assert.match(androidBuild, /versionCode 5/);
 assert.match(androidBuild, /versionName '4\.22\.0'/);
 
