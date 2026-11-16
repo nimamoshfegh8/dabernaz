@@ -134,6 +134,21 @@ for (const account of accounts) {
   assert.equal(Number((await accountMe(account)).balance), startingBalance);
 }
 
+const outsiderEmail = 'qa-' + runId + '-outsider@example.test';
+const outsiderRegistered = await request('/api/auth/register', {
+  method: 'POST', body: { name: 'QA Outsider', email: outsiderEmail, password },
+});
+assert.equal(outsiderRegistered.ok, true, 'non-participant account must register for privacy test');
+const outsiderLogin = await fetch(baseUrl + '/api/auth/login', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', origin, accept: 'application/json' },
+  body: JSON.stringify({ email: outsiderEmail, password }),
+});
+assert.equal(outsiderLogin.status, 200, 'non-participant account must be able to sign in');
+const outsider = { email: outsiderEmail, id: outsiderRegistered.user.id, memberId: outsiderRegistered.user.memberId };
+outsider.cookie = (outsiderLogin.headers.get('set-cookie') || '').split(';', 1)[0];
+assert.match(outsider.cookie, /^dabernaz_session=[0-9a-f]{64}$/i);
+
 for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   const economics = roomEconomics[roomId];
   const profileBeforeBuy = new Map();
@@ -269,6 +284,19 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
   assert.equal(startedRoom.cardCount, 40);
   assert.equal(startedRoom.players.length, 8);
   assert.equal(startedRoom.myCards.length, 5);
+  assert.equal(startedRoom.allPlayerCards.length, 40,
+    roomId + ': an active participant must receive every purchased card in the live room');
+  checkCard(startedRoom.allPlayerCards.map(entry => entry.card), roomId + ' shared room cards', 40);
+  assert.ok(startedRoom.allPlayerCards.every(entry =>
+    typeof entry.playerName === 'string' && Number(entry.cardNumber) >= 1 && Number(entry.cardNumber) <= 5
+  ), roomId + ': shared cards must include their owner and per-player card number');
+  const outsiderRoom = await roomFor(outsider, roomId);
+  assert.equal(outsiderRoom.status, 'playing');
+  assert.equal(outsiderRoom.joined, false);
+  assert.deepEqual(outsiderRoom.allPlayerCards, [],
+    roomId + ': a non-participant must not receive any players\' cards');
+  assert.equal(outsiderRoom.cardCount, 40,
+    roomId + ': a non-participant may still see aggregate card count only');
   assert.equal(startedRoom.finance.totalPlayers, 8);
   assert.equal(startedRoom.finance.totalCards, 40);
   assert.equal(startedRoom.finance.grossRevenue, 40 * economics.price);
@@ -289,6 +317,11 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
     assert.equal(accountRoom.cardCount, 40);
     assert.equal(accountRoom.joined, true);
     checkCard(accountRoom.myCards, accounts[index].email, expectedCards);
+    assert.equal(accountRoom.allPlayerCards.length, 40,
+      roomId + ': every joined player must see all cards purchased in this room');
+    assert.equal(accountRoom.allPlayerCards.filter(entry =>
+      entry.playerName === 'QA Player ' + (index + 1)
+    ).length, expectedCards, roomId + ': every player's own cards must be labeled by owner');
     const expectedBalance = profileBeforeBuy.get(accounts[index].memberId).balance -
       economics.price * expectedCards;
     assert.equal(Number((await accountMe(accounts[index])).balance), expectedBalance,
@@ -920,5 +953,6 @@ assert.equal(deniedAdmin.status,403,'non-allowlisted accounts must not access ad
 for (const account of accounts) {
   await request('/api/auth/logout', { account, method: 'POST', body: {} });
 }
+await request('/api/auth/logout', { account: outsider, method: 'POST', body: {} });
 
 console.log('PASS: Daberna uncapped rooms, minimum-five-player policy, 150-second first-purchase timer, per-account five-card limit, deadline/late-purchase enforcement, prize calculations, simultaneous winners and history; referrals; support tickets; tournaments; server-authoritative mini-games.');
