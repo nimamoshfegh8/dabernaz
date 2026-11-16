@@ -47,6 +47,22 @@ jobs:
       - name: Install Android platform and build tools
         run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
 
+      - name: Package APK signing utilities (no private keys)
+        run: |
+          set -euo pipefail
+          mkdir -p apk-signing-tools/lib
+          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" apk-signing-tools/
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" apk-signing-tools/
+          cp -R "$ANDROID_HOME/build-tools/35.0.0/lib/." apk-signing-tools/lib/
+
+      - name: Upload APK signing utilities
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dabernaz-APK-Signing-Tools
+          path: apk-signing-tools/*
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
