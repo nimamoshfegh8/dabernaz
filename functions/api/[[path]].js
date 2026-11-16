@@ -262,6 +262,11 @@ async function ensureSchema(db) {
       card_number TEXT,
       card_holder TEXT,
       bank_name TEXT,
+      user_note TEXT NOT NULL DEFAULT '',
+      payment_card_number TEXT NOT NULL DEFAULT '',
+      payment_card_holder TEXT NOT NULL DEFAULT '',
+      payment_bank_name TEXT NOT NULL DEFAULT '',
+      payment_note TEXT NOT NULL DEFAULT '',
       admin_note TEXT,
       handled_by INTEGER,
       handled_at TEXT,
@@ -303,6 +308,23 @@ async function ensureSchema(db) {
     )`,
   ];
   for (const sql of statements) await db.prepare(sql).run();
+  const walletRequestInfo = await db.prepare('PRAGMA table_info(manual_wallet_requests)').all();
+  const walletRequestColumns = new Set((walletRequestInfo.results || []).map((item) => item.name));
+  const walletRequestAdditions = [
+    ['user_note', "TEXT NOT NULL DEFAULT ''"],
+    ['payment_card_number', "TEXT NOT NULL DEFAULT ''"],
+    ['payment_card_holder', "TEXT NOT NULL DEFAULT ''"],
+    ['payment_bank_name', "TEXT NOT NULL DEFAULT ''"],
+    ['payment_note', "TEXT NOT NULL DEFAULT ''"],
+  ];
+  for (const [name, definition] of walletRequestAdditions) {
+    if (!walletRequestColumns.has(name)) {
+      try { await db.prepare(`ALTER TABLE manual_wallet_requests ADD COLUMN ${name} ${definition}`).run(); }
+      catch (error) {
+        if (!String(error?.message || error).toLowerCase().includes('duplicate column')) throw error;
+      }
+    }
+  }
   // One-time, idempotent migration: preserve the original customer message
   // for tickets created before threaded support was introduced.
   await db.prepare(`INSERT INTO support_messages (ticket_id,sender_user_id,sender_role,message,created_at)
@@ -1917,7 +1939,7 @@ async function routeRequest(request, env) {
       const allowed = ['all','awaiting_receipt','pending_review','pending_transfer','approved','rejected','paid','cancelled'];
       if (!allowed.includes(status)) throw new HttpError(400, 'فیلتر وضعیت درخواست مالی معتبر نیست.');
       const rows = await env.DB.prepare(
-        'SELECT r.id,r.request_type,r.amount,r.status,r.card_number,r.card_holder,r.bank_name,r.admin_note,r.created_at,r.updated_at,r.handled_at,' +
+        'SELECT r.id,r.request_type,r.amount,r.status,r.card_number,r.card_holder,r.bank_name,r.user_note,r.admin_note,r.created_at,r.updated_at,r.handled_at,' +
         'u.username,u.member_id,u.email,u.balance,CASE WHEN r.receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt ' +
         'FROM manual_wallet_requests r JOIN users u ON u.id=r.user_id ' +
         (status === 'all' ? '' : 'WHERE r.status=? ') + 'ORDER BY r.id DESC LIMIT 300'
@@ -1933,7 +1955,7 @@ async function routeRequest(request, env) {
     if (request.method === 'POST' && path === '/api/admin/wallet/settings') {
       validateWriteOrigin(request);
       const body = await readJson(request);
-      const cardNumber = String(body.cardNumber || '').replace(/\D/g, '');
+      const cardNumber = String(body.cardNumber || '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g, '');
       const cardHolder = String(body.cardHolder || '').trim();
       const bankName = String(body.bankName || '').trim();
       const paymentNote = String(body.paymentNote || '').trim();
@@ -2051,8 +2073,33 @@ async function routeRequest(request, env) {
     const inserted = await env.DB.prepare("INSERT INTO wallet_messages(user_id,sender_type,message,created_at) VALUES(?,'user',?,?)").bind(user.id,message,now).run();
     return json({ok:true,message:{id:Number(inserted.meta?.last_row_id||0),sender_type:'user',message,created_at:now}});
   }
+  const paymentInstructionsMatch = path.match(/^\/api\/wallet\/requests\/(\d+)\/payment-instructions$/);
+  if (paymentInstructionsMatch && request.method === 'GET') {
+    const requestId = Number(paymentInstructionsMatch[1]);
+    const item = await env.DB.prepare("SELECT id,request_type,status,payment_card_number,payment_card_holder,payment_bank_name,payment_note FROM manual_wallet_requests WHERE id=? AND user_id=? LIMIT 1").bind(requestId,user.id).first();
+    if (!item) throw new HttpError(404, 'درخواست واریز پیدا نشد.');
+    if (item.request_type !== 'deposit' || item.status !== 'awaiting_receipt') throw new HttpError(409, 'اطلاعات پرداخت فقط برای درخواست واریزِ منتظر رسید در دسترس است.');
+    let paymentInfo = {
+      cardNumber: item.payment_card_number || '',
+      cardHolder: item.payment_card_holder || '',
+      bankName: item.payment_bank_name || '',
+      paymentNote: item.payment_note || '',
+    };
+    // Older pending requests did not store a card snapshot; keep them usable with current admin settings.
+    if (!paymentInfo.cardNumber) {
+      const settings = await env.DB.prepare('SELECT card_number,card_holder,bank_name,payment_note FROM wallet_payment_settings WHERE id=1').first();
+      paymentInfo = {
+        cardNumber: settings?.card_number || '',
+        cardHolder: settings?.card_holder || '',
+        bankName: settings?.bank_name || '',
+        paymentNote: settings?.payment_note || '',
+      };
+    }
+    if (!paymentInfo.cardNumber) throw new HttpError(409, 'اطلاعات کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');
+    return json({ok:true,requestId,paymentInfo});
+  }
   if (request.method === 'GET' && path === '/api/wallet/requests') {
-    const rows = await env.DB.prepare('SELECT id,request_type,amount,status,admin_note,handled_at,created_at,updated_at,CASE WHEN receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt FROM manual_wallet_requests WHERE user_id=? ORDER BY id DESC LIMIT 50').bind(user.id).all();
+    const rows = await env.DB.prepare('SELECT id,request_type,amount,status,user_note,admin_note,handled_at,created_at,updated_at,CASE WHEN receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt FROM manual_wallet_requests WHERE user_id=? ORDER BY id DESC LIMIT 50').bind(user.id).all();
     return json({ok:true,requests:rows.results || []});
   }
   if (request.method === 'POST' && path === '/api/wallet/requests') {
@@ -2061,25 +2108,33 @@ async function routeRequest(request, env) {
     const requestType = String(body.type || '');
     const amount = Number(body.amount);
     if (!['deposit','withdraw'].includes(requestType)) throw new HttpError(400, 'نوع درخواست مالی معتبر نیست.');
-    if (!Number.isSafeInteger(amount) || amount < 10000 || amount > 50000000) throw new HttpError(400, 'مبلغ باید بین ۱۰ هزار تا ۵۰ میلیون تومان باشد.');
+    const minimumAmount = requestType === 'deposit' ? 105 : 205;
+    if (!Number.isSafeInteger(amount) || amount < minimumAmount || amount > 50000000) {
+      throw new HttpError(400, requestType === 'deposit'
+        ? 'حداقل مبلغ واریز ۱۰۵ تومان و حداکثر آن ۵۰ میلیون تومان است.'
+        : 'حداقل مبلغ برداشت ۲۰۵ تومان و حداکثر آن ۵۰ میلیون تومان است.');
+    }
+    const userNote = String(body.userNote || '').trim();
+    if (userNote.length > 300) throw new HttpError(400, 'توضیحات درخواست حداکثر ۳۰۰ نویسه است.');
     const now = new Date().toISOString();
     if (requestType === 'deposit') {
-      const settings = await env.DB.prepare('SELECT card_number FROM wallet_payment_settings WHERE id=1').first();
-      if (!settings?.card_number) throw new HttpError(409, 'شماره کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');
-      const inserted = await env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,created_at,updated_at) VALUES(?,'deposit',?,'awaiting_receipt',?,?)").bind(user.id,amount,now,now).run();
+      const settings = await env.DB.prepare('SELECT card_number,card_holder,bank_name,payment_note FROM wallet_payment_settings WHERE id=1').first();
+      if (!settings?.card_number) throw new HttpError(409, 'اطلاعات کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');
+      const inserted = await env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,user_note,payment_card_number,payment_card_holder,payment_bank_name,payment_note,created_at,updated_at) VALUES(?,'deposit',?,'awaiting_receipt',?,?,?,?,?,?,?)")
+        .bind(user.id,amount,userNote,settings.card_number,settings.card_holder || '',settings.bank_name || '',settings.payment_note || '',now,now).run();
       const id = Number(inserted.meta?.last_row_id || 0);
       if (!id) throw new HttpError(500, 'ثبت درخواست واریز انجام نشد.');
       return json({ok:true,requestId:id,status:'awaiting_receipt'});
     }
-    const cardNumber = String(body.cardNumber || '').replace(/\D/g, '');
+    const cardNumber = String(body.cardNumber || '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g, '');
     const cardHolder = String(body.cardHolder || '').trim();
     const bankName = String(body.bankName || '').trim();
     if (!/^\d{16}$/.test(cardNumber)) throw new HttpError(400, 'شماره کارت مقصد برای برداشت باید ۱۶ رقم باشد.');
     if (cardHolder.length < 2 || cardHolder.length > 80 || bankName.length > 60) throw new HttpError(400, 'مشخصات صاحب کارت معتبر نیست.');
     const batch = await env.DB.batch([
       env.DB.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=?').bind(amount,user.id,amount),
-      env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,card_number,card_holder,bank_name,created_at,updated_at) SELECT ?,'withdraw',?,'pending_transfer',?,?,?,?,? WHERE changes()=1")
-        .bind(user.id,amount,cardNumber,cardHolder,bankName,now,now),
+      env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,card_number,card_holder,bank_name,user_note,created_at,updated_at) SELECT ?,'withdraw',?,'pending_transfer',?,?,?,?,?,? WHERE changes()=1")
+        .bind(user.id,amount,cardNumber,cardHolder,bankName,userNote,now,now),
       env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_reserved',?,?,? WHERE changes()=1")
         .bind(user.id,-amount,'رزرو موجودی برای درخواست برداشت',now),
     ]);
