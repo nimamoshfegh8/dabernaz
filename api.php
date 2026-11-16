@@ -242,7 +242,7 @@ function public_room(array $room, string $userId, array $db): array {
     $queued=in_array($userId,$room['queue'],true);
     $players=array_map(fn($p)=>['name'=>$p['name'],'memberId'=>$p['memberId']],$room['players']);
     $allPlayerCards=[];
-    if (($room['status'] ?? '') === 'playing') {
+    if (($room['status'] ?? '') === 'playing' && $me !== null) {
         foreach (($room['players'] ?? []) as $player) {
             foreach (($player['cards'] ?? []) as $cardIndex=>$card) {
                 $allPlayerCards[]=['playerName'=>(string)($player['name'] ?? 'بازیکن'),'cardNumber'=>$cardIndex+1,'card'=>$card];
