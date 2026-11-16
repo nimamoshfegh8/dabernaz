@@ -1,4 +1,4 @@
-name: Build Dabernaz Android APK
+name: Build Dabernaz Android Release
 
 on:
   push:
@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 jobs:
-  build-apk:
+  build-release:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out source
@@ -44,7 +44,7 @@ jobs:
         with:
           packages: platform-tools
 
-      - name: Install Android platform
+      - name: Install Android platform and build tools
         run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle
@@ -52,13 +52,21 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build installable debug APK
-        run: gradle -p android --no-daemon :app:assembleDebug
+      - name: Build production APK and Play Store bundle
+        run: gradle -p android --no-daemon :app:assembleRelease :app:bundleRelease
 
-      - name: Upload Android APK
+      - name: Collect release outputs
+        run: |
+          set -euo pipefail
+          mkdir -p release-output
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk release-output/Dabernaz-release-unsigned.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab release-output/Dabernaz-release-unsigned.aab
+          printf 'Application ID: app.dabernaz.club\nVersion: 4.22.1\nVersion code: 6\nLauncher name: Dabernaz\n' > release-output/BUILD-INFO.txt
+
+      - name: Upload production release outputs
         uses: actions/upload-artifact@v4
         with:
-          name: Dabernaz-Android-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: Dabernaz-Production-Release-Unsigned
+          path: release-output/*
           if-no-files-found: error
           retention-days: 30
