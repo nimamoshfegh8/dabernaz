@@ -49,7 +49,7 @@ assert.doesNotMatch(app,/data-page="walletAdmin"/,'the public wallet page must n
 assert.match(app,/supportAdminReplyForm/,'administrators must be able to reply from the ticket thread');
 assert.match(app,/supportReplyForm/,'customers must be able to continue an open ticket');
 assert.match(app,/support-admin-status/,'administrators must be able to change ticket status');
-assert.match(app,/\\/api\\/admin\\/support/,'admin inbox must use protected server API routes');
+assert.ok(app.includes('/api/admin/support'),'admin inbox must use protected server API routes');
 assert.ok(portal.includes('href="/#page=walletAdmin"'),'the standalone portal must link to the finance admin panel');
 assert.ok(portal.includes('href="/#page=supportAdmin"'),'the standalone portal must link to the support admin panel');
 assert.ok(redirects.includes('/admin /admin/ 301'),'the clean /admin route must redirect to the portal directory');
