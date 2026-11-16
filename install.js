@@ -65,10 +65,15 @@
   const apiUrl = 'https://api.github.com/repos/nimamoshfegh8/dabernaz/releases/latest';
   fetch(apiUrl, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' })
     .then(response => {
+      if (response.status === 404) return null;
       if (!response.ok) throw new Error('Release lookup returned ' + response.status);
       return response.json();
     })
     .then(release => {
+      if (!release) {
+        if (apkStatus) apkStatus.textContent = 'هنوز نسخهٔ APK امضاشده منتشر نشده است. تا آماده‌شدن انتشار رسمی، وب‌اپ بالا قابل نصب و استفاده است.';
+        return;
+      }
       const apk = Array.isArray(release.assets)
         ? release.assets.find(asset => asset?.name === 'Dabernaz.apk' && typeof asset.browser_download_url === 'string')
         : null;
