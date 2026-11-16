@@ -58,4 +58,12 @@ assert.ok(portal.includes('<title>درگاه مدیریت | Dabernaz</title>'),'
 assert.ok(worker.includes("url.pathname === '/admin'"),'the service worker must not replace the portal with the SPA shell');
 assert.ok(api.includes('if (!isWalletAdmin) throw new HttpError(403'),'finance APIs must continue to enforce the server-side admin allowlist');
 assert.ok(api.includes('if(!isSupportAdmin) throw new HttpError(403'),'support APIs must continue to enforce the server-side admin allowlist');
-console.log('Game-room, mini-game and standalone admin portal smoke tests passed.');
+assert.ok(app.includes('wallet-chat-panel') && app.includes('walletUserChatForm'),'the customer wallet must show a private finance conversation and message form');
+assert.ok(app.includes('wallet-admin-chat-panel') && app.includes('walletAdminChatForm'),'the finance admin page must show the conversation and reply form');
+assert.ok(!app.includes('/api/wallet/payment-info'),'the public app must not request payment card details');
+assert.ok(!api.includes("path === '/api/wallet/payment-info'"),'the public payment-info endpoint must not exist');
+assert.ok(api.includes('CREATE TABLE IF NOT EXISTS wallet_messages'),'private finance messages must have persistent D1 storage');
+assert.ok(api.includes("VALUES(?,'user',?,?)"),'customer messages must be stored as customer messages');
+assert.ok(api.includes("VALUES(?,'admin',?,?)"),'admin replies must be stored as admin messages');
+assert.ok(!api.includes('SELECT id,request_type,amount,status,receipt_mime,card_number,card_holder,bank_name'),'user wallet requests must not return card details');
+console.log('Game-room, mini-game, support, admin portal and private wallet chat UI smoke tests passed.');
