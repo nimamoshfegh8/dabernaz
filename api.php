@@ -241,6 +241,14 @@ function public_room(array $room, string $userId, array $db): array {
     $me=null; foreach ($room['players'] as $player) if ($player['userId']===$userId) {$me=$player;break;}
     $queued=in_array($userId,$room['queue'],true);
     $players=array_map(fn($p)=>['name'=>$p['name'],'memberId'=>$p['memberId']],$room['players']);
+    $allPlayerCards=[];
+    if (($room['status'] ?? '') === 'playing') {
+        foreach (($room['players'] ?? []) as $player) {
+            foreach (($player['cards'] ?? []) as $cardIndex=>$card) {
+                $allPlayerCards[]=['playerName'=>(string)($player['name'] ?? 'بازیکن'),'cardNumber'=>$cardIndex+1,'card'=>$card];
+            }
+        }
+    }
     $playerCount=$room['status']==='waiting'?count($room['queue']):count($room['players']);
     $cardCount=0;
     if ($room['status']==='waiting') foreach (($room['cardCounts']??[]) as $count) $cardCount+=max(0,(int)$count);
@@ -255,7 +263,7 @@ function public_room(array $room, string $userId, array $db): array {
         'playerCount'=>$playerCount,'cardCount'=>$cardCount,'queueCount'=>$playerCount,
         'players'=>$players,'calledNumbers'=>array_slice($room['calledNumbers'],-15),'allCalledNumbers'=>$room['calledNumbers'],
         'drawCount'=>count($room['calledNumbers']),'latestNumber'=>$room['calledNumbers'] ? end($room['calledNumbers']) : null,
-        'winners'=>$room['winners'],'myCards'=>$me['cards'] ?? ($queued?($room['queuedCards'][$userId]??[]):[]),
+        'winners'=>$room['winners'],'myCards'=>$me['cards'] ?? ($queued?($room['queuedCards'][$userId]??[]):[]),'allPlayerCards'=>$allPlayerCards,
         'joined'=>$queued || $me!==null,'startedAt'=>$room['startedAt'],'finishedAt'=>$room['finishedAt'],
         'myBingoCoins'=>(int)($account['bingoCoins'] ?? 0),
         'myCoinTransactions'=>array_slice($account['coinTransactions'] ?? [],0,50)];
