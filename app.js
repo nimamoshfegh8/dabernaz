@@ -1307,7 +1307,7 @@ function renderWallet(){
  return heading('کیف پول من','شارژ و برداشت دستی با بررسی مدیر؛ بدون اتصال درگاه پرداخت.','MANUAL WALLET')+
  '<div class="wallet-currency-grid"><section class="wallet-hero"><small>موجودی تومان</small><div class="wallet-balance">'+money(state.balance)+' <span>تومان</span></div><p>اعتبار قابل استفاده در بازی‌ها و خدمات دابرناز.</p><div class="wallet-actions"><button class="btn btn-outline" data-action="wallet-open-deposit">درخواست واریز</button><button class="btn btn-outline" data-action="wallet-open-withdraw">درخواست برداشت</button></div></section><section class="wallet-hero bingocoin-wallet-hero"><small>موجودی BINGO COIN</small><div class="wallet-balance">'+state.bingoCoins.toLocaleString('fa-IR')+' <img class="bingocoin-icon-img wallet-coin-img" src="./assets/bingocoin.svg" alt="بینگوکوین"></div><p>ارز مجازی اختصاصی برای ورود به تورنومنت‌ها.</p><button class="btn btn-gold btn-block" data-page="tournaments">مشاهده تورنومنت‌ها</button></section></div>'+
  '<section class="panel wallet-bank-panel"><div class="section-title"><h2>اطلاعات کارت مقصد برای واریز</h2></div>'+(info.cardNumber?'<div class="wallet-bank-details"><small>'+(escapeHTML(info.bankName||'حساب مقصد'))+'</small><strong dir="ltr">'+escapeHTML(walletCardNumber(info.cardNumber))+'</strong><b>'+escapeHTML(info.cardHolder||'')+'</b><button class="btn btn-outline" data-action="wallet-copy-card">کپی شماره کارت</button></div><p class="muted-note">'+escapeHTML(info.paymentNote||'پس از انتقال وجه، تصویر رسید را در درخواست واریز ثبت کن. شارژ پس از بررسی مدیر اعمال می‌شود.')+'</p>':'<p class="muted-note">شماره کارت مقصد هنوز توسط مدیریت ثبت نشده است. پس از تنظیم کارت، امکان ثبت درخواست واریز فعال می‌شود.</p>')+'</section>'+
- (walletAdminEnabled?'<button class="btn btn-outline btn-block" data-page="walletAdmin">ورود به پنل مدیریت مالی</button>':'')+
+
  section('درخواست‌های واریز و برداشت')+'<section class="panel wallet-request-list">'+requestRows+'</section>'+
  section('تاریخچه کیف پول تومانی')+'<section class="panel" style="padding:2px 12px">'+rows+'</section>'+
  section('تاریخچه بینگوکوین')+'<section class="panel" style="padding:2px 12px">'+coinRows+'</section>'+
@@ -1404,7 +1404,7 @@ function renderSettings() {
   </section>
   <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
     <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
-    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.23.0</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.24.0</span></div>
   </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
@@ -1458,7 +1458,7 @@ function renderSupport() {
   ${section('تیکت‌های من')}
   ${renderSupportTickets()}
   ${renderSupportThread()}
-  ${supportAdminEnabled?'<button class="btn btn-outline btn-block" data-page="supportAdmin">ورود به پنل مدیریت پشتیبانی</button>':''}`;
+`;
 }
 function render() {
   const pages = {

@@ -2,12 +2,12 @@
 
 // The service worker must not pin old app.js/styles.css after a Pages deployment.
 // Core code is network-first; cached copies are used only when the device is offline.
-const CACHE_NAME = 'dabernaz-shell-v25';
+const CACHE_NAME = 'dabernaz-shell-v26';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './styles.css?v=4.7.0',
-  './app.js?v=4.23.0',
+  './styles.css?v=4.7.1',
+  './app.js?v=4.24.0',
   './icon.svg',
   './manifest.webmanifest'
 ];
@@ -48,6 +48,10 @@ self.addEventListener('fetch', event => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
+
+  // The standalone admin portal is a static page, not the SPA shell.
+  // Let Cloudflare Pages serve /admin and its index.html without SPA fallback.
+  if (url.pathname === '/admin' || url.pathname === '/admin/' || url.pathname.startsWith('/admin/')) return;
 
   // HTML, JavaScript and CSS must reflect the most recent Cloudflare deployment.
   if (request.mode === 'navigate') {
