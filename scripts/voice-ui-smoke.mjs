@@ -46,13 +46,13 @@ assert.match(android, /TextToSpeech\.QUEUE_ADD/);
 assert.match(android, /nativeTtsReady = true/);
 assert.match(android, /setOnUtteranceProgressListener/);
 
-assert.match(index, /styles\.css\?v=4\.7\.3/);
-assert.match(index, /app\.js\?v=4\.27\.0/);
-assert.match(sw, /dabernaz-shell-v30/);
-assert.match(sw, /styles\.css\?v=4\.7\.3/);
-assert.match(sw, /app\.js\?v=4\.27\.0/);
+assert.match(index, /styles\.css\?v=4\.8\.0/);
+assert.match(index, /app\.js\?v=4\.28\.0/);
+assert.match(sw, /dabernaz-shell-v31/);
+assert.match(sw, /styles\.css\?v=4\.8\.0/);
+assert.match(sw, /app\.js\?v=4\.28\.0/);
 assert.match(swRegister, /sw\.js\?v=20/);
-assert.match(app, /4\.27\.0/);
+assert.match(app, /4\.28\.0/);
 assert.match(androidBuild, /versionCode 6/);
 assert.match(androidBuild, /versionName '4\.22\.1'/);
 
