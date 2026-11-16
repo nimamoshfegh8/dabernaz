@@ -17,6 +17,8 @@ function loadState() {
     if (!saved || typeof saved !== 'object') return cloneData(defaultState);
     return {
       ...cloneData(defaultState), ...saved,
+      // Payment card settings are server-owned secrets: never hydrate them from browser storage.
+      walletPaymentInfo: {cardNumber:'',cardHolder:'',bankName:'',paymentNote:''},
       balance: Number.isFinite(Number(saved.balance)) ? Math.max(0, Number(saved.balance)) : defaultState.balance,
       joined: Array.isArray(saved.joined) ? saved.joined : [],
       transactions: Array.isArray(saved.transactions) ? saved.transactions.slice(0, 30) : [],
@@ -562,7 +564,13 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const money = value => Number(value).toLocaleString('en-US');
 const faDigits = value => Number(value).toLocaleString('fa-IR');
 const escapeHTML = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-function saveState() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (_) { showToast('فضای ذخیره‌سازی مرورگر در دسترس نیست'); } }
+function saveState() {
+  try {
+    // Never persist finance destination card details or payment notes in localStorage.
+    const safeState = { ...state, walletPaymentInfo:{cardNumber:'',cardHolder:'',bankName:'',paymentNote:''} };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeState));
+  } catch (_) { showToast('فضای ذخیره‌سازی مرورگر در دسترس نیست'); }
+}
 async function apiRequest(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const requestOptions = {
@@ -632,7 +640,7 @@ async function loadAuthenticatedUser() {
     apiErrorMessage = error?.message || 'ارتباط با API برقرار نشد.';
     currentUser = null;
     supportAdminEnabled=false;supportAdminTickets=[];supportThread=null;supportSelectedTicketId=null;supportAdminKnownTicketIds=new Set();
-    walletAdminEnabled=false;walletAdminRequests=[];walletAdminSelectedRequest=null;state.walletRequests=[];state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
+    walletAdminEnabled=false;walletAdminRequests=[];walletAdminSelectedRequest=null;walletActivePaymentInfo=null;state.walletRequests=[];state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
     state = { ...cloneData(defaultState), settings:state.settings };
     authReady = true;
     saveState();
@@ -649,7 +657,7 @@ async function loadAuthenticatedUser() {
       state.supportTickets = [];
       state.tournamentRooms = [];
       state.tournamentEntries = [];
-      state.walletRequests=[]; state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
+      state.walletRequests=[]; state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};walletActivePaymentInfo=null;
     }
   } catch (error) {
     apiReady = false;
@@ -1417,8 +1425,8 @@ function renderSettings() {
 }
 const faqs = [
   ['چطور وارد اتاق بازی بشم؟','از صفحه خانه روی «اتاق بازی» بزن یا از کارت بازی مورد علاقه‌ات وارد شو.'],
-  ['ورود به اتاق دبرنا هزینه دارد؟','خرید کارت از اعتبار کیف پول انجام می‌شود. شارژ آنلاین و برداشت پول تا اتصال درگاه پرداخت غیرفعال است.'],
-  ['تورنمنت‌ها و کیف پول فعال هستند؟','ثبت‌نام تورنومنت با بینگوکوین روی سرور انجام می‌شود. شارژ و برداشت واقعی کیف پول تا اتصال درگاه پرداخت فعال نیست.'],
+  ['ورود به اتاق دبرنا هزینه دارد؟','خرید کارت از اعتبار کیف پول انجام می‌شود. برای شارژ، درخواست واریز ثبت کن و پس از انتقال وجه رسید را بفرست؛ مدیریت پس از بررسی موجودی را شارژ می‌کند. برداشت نیز با ثبت کارت مقصد و بررسی مدیریت انجام می‌شود. درگاه پرداخت خودکار هنوز متصل نیست.'],
+  ['تورنمنت‌ها و کیف پول فعال هستند؟','ثبت‌نام تورنومنت با بینگوکوین روی سرور انجام می‌شود. واریز و برداشت تومانی کیف پول به‌صورت دستی و با بررسی مدیریت انجام می‌شود؛ درگاه پرداخت خودکار هنوز متصل نیست.'],
   ['اطلاعات حساب من کجا ذخیره می‌شود؟','در نسخه فعلی Cloudflare، اطلاعات حساب و آمار در دیتابیس D1 نگهداری می‌شوند و رمز عبور فقط به‌شکل هش‌شده ذخیره می‌شود. تنظیمات ظاهری غیرحساس در مرورگر می‌مانند.'],
   ['چطور با پشتیبانی ارتباط بگیرم؟','فرم پایین صفحه را تکمیل کن. پیام روی سرور ذخیره می‌شود و شماره پیگیری دریافت می‌کنی.']
 ];
@@ -2008,7 +2016,7 @@ document.addEventListener('click', async event => {
     else { try { await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`); showToast('متن دعوت کپی شد'); } catch (_) { showToast('اشتراک‌گذاری در این مرورگر پشتیبانی نمی‌شود'); } }
   } else if (action === 'demo-credit') {
     showToast('برای شارژ واقعی، اتصال درگاه پرداخت لازم است.');
-  } else if (action === 'wallet-info') showToast('شارژ و برداشت تا اتصال درگاه پرداخت در دسترس نیست.');
+  } else if (action === 'wallet-info') setPage('wallet');
   else if (action === 'join-tournament') {
     if(!requireLogin() || actionEl.disabled) return;
     actionEl.disabled=true;
@@ -2033,7 +2041,7 @@ document.addEventListener('click', async event => {
   else if (action === 'settings') setPage('settings');
   else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه فعلی Cloudflare رمز عبور با PBKDF2-SHA256 و salt اختصاصی هش می‌شود. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
-  else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
+  else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; walletActivePaymentInfo=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
   else if (action === 'test-number-voice') {
     voicePlaybackErrorShown = false;
     const ok = await PersianAudioManager.speak(42, { fromGesture: true });
