@@ -80,7 +80,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: Require the main branch for public releases
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[android-release]')) }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = 'refs/heads/main' || {
@@ -89,7 +89,7 @@ jobs:
           }
 
       - name: Validate signing secrets and decode private keystore
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' }}
+        if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[android-release]'))) && github.ref == 'refs/heads/main' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -107,9 +107,9 @@ jobs:
 
       - name: Build Android APK and App Bundle
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
-          ANDROID_KEY_ALIAS: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' && secrets.ANDROID_KEY_ALIAS || '' }}
-          ANDROID_KEY_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' && secrets.ANDROID_KEY_PASSWORD || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[android-release]'))) && github.ref == 'refs/heads/main' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          ANDROID_KEY_ALIAS: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[android-release]'))) && github.ref == 'refs/heads/main' && secrets.ANDROID_KEY_ALIAS || '' }}
+          ANDROID_KEY_PASSWORD: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[android-release]'))) && github.ref == 'refs/heads/main' && secrets.ANDROID_KEY_PASSWORD || '' }}
         run: gradle -p android --no-daemon :app:assembleRelease :app:bundleRelease
 
       - name: Verify APK signature and collect outputs
@@ -167,7 +167,7 @@ jobs:
         run: rm -f android/dabernaz-release.keystore
 
   publish-release:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' }}
+    if: ${{ ((github.event_name == 'workflow_dispatch' && inputs.publish_release) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[android-release]'))) && github.ref == 'refs/heads/main' }}
     needs: build-release
     runs-on: ubuntu-24.04
     permissions:
