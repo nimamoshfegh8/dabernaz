@@ -1003,12 +1003,12 @@ async function pollCurrentRoom() {
     const wasJoined = !!roomServerSnapshot?.joined;
     roomServerSnapshot=result.room;
     if(result.room.joined && Array.isArray(result.room.myCards)) roomCards=result.room.myCards;
-    roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
     else if(wasJoined && result.room.status==='waiting') {
       roomCards=[];
       roomCardCount=1;
       showToast('حداقل ۲ بازیکن در مهلت ثبت‌نام کامل نشد؛ سانس لغو و مبلغ خرید کارت به کیف پولت بازگشت.');
     }
+    roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
     roomCalledNumbers=Array.isArray(result.room.allCalledNumbers)?result.room.allCalledNumbers:(result.room.calledNumbers||[]);
     roomStages={one:roomHasWinner(result.room.winners?.line),full:roomHasWinner(result.room.winners?.full)};
     if (Number.isFinite(Number(result.room.myBingoCoins))) { state.bingoCoins=Math.max(0,Number(result.room.myBingoCoins)); state.coinTransactions=Array.isArray(result.room.myCoinTransactions)?result.room.myCoinTransactions.slice(0,50):state.coinTransactions; saveState(); updateHeader(); }
