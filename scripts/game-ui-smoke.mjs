@@ -72,4 +72,4 @@ assert.ok(api.includes("r.user_note"),'the finance admin inbox must receive the 
 assert.ok(api.includes("VALUES(?,'user',?,?)"),'customer messages must be stored as customer messages');
 assert.ok(api.includes("VALUES(?,'admin',?,?)"),'admin replies must be stored as admin messages');
 assert.ok(!api.includes('SELECT id,request_type,amount,status,receipt_mime,card_number,card_holder,bank_name'),'user wallet requests must not return card details');
-console.log('Game-room, mini-game, support, admin portal and private wallet chat UI smoke tests passed.');
+console.log('Game-room, mini-game, support, admin portal and wallet request center UI smoke tests passed.');
