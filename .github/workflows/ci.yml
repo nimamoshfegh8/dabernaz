@@ -32,6 +32,8 @@ jobs:
         run: npm run check
       - name: Build Cloudflare Pages assets
         run: npm run build:pages
+      - name: Test PWA install and Android release metadata
+        run: node scripts/pwa-install-smoke.mjs
 
       - name: Test Node fallback room and mini-game rules
         run: node scripts/node-fallback-room-smoke.mjs
@@ -108,7 +110,6 @@ jobs:
             exit 1
           fi
 
-      # This is intentionally strict: a green test run must not call a release complete
-      # until the selected Sage Woman MP3 and all 90 indexed clips have been supplied.
+      # A green test run must not call a release complete until all required audio assets are supplied.
       - name: Verify release has complete Sage Woman audio assets
         run: node scripts/voice-pack-validation.mjs

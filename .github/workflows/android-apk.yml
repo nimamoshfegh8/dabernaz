@@ -12,6 +12,11 @@ on:
       - 'styles.css'
       - 'sw.js'
       - 'sw-register.js'
+      - 'install.html'
+      - 'install.js'
+      - 'pwa-entry.js'
+      - 'pwa-install.css'
+      - 'icon-*.png'
   pull_request:
     paths:
       - 'android/**'
@@ -21,14 +26,30 @@ on:
       - 'styles.css'
       - 'sw.js'
       - 'sw-register.js'
+      - 'install.html'
+      - 'install.js'
+      - 'pwa-entry.js'
+      - 'pwa-install.css'
+      - 'icon-*.png'
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish a signed APK and AAB to GitHub Releases (requires signing secrets)'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-release:
     runs-on: ubuntu-24.04
+    env:
+      ANDROID_KEYSTORE_PATH: \${{ github.workspace }}/android/dabernaz-release.keystore
+      ANDROID_KEYSTORE_PASSWORD: \${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: \${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: \${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -47,42 +68,89 @@ jobs:
       - name: Install Android platform and build tools
         run: sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
 
-      - name: Package APK signing utilities (no private keys)
-        run: |
-          set -euo pipefail
-          mkdir -p apk-signing-tools/lib
-          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" apk-signing-tools/
-          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" apk-signing-tools/
-          cp -R "$ANDROID_HOME/build-tools/35.0.0/lib/." apk-signing-tools/lib/
-
-      - name: Upload APK signing utilities
-        uses: actions/upload-artifact@v4
-        with:
-          name: Dabernaz-APK-Signing-Tools
-          path: apk-signing-tools/*
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.9'
 
-      - name: Build production APK and Play Store bundle
-        run: gradle -p android --no-daemon :app:assembleRelease :app:bundleRelease
-
-      - name: Collect release outputs
+      - name: Validate signing secrets and decode private keystore
+        if: \${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        env:
+          KEYSTORE_BASE64: \${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          mkdir -p release-output
-          cp android/app/build/outputs/apk/release/app-release-unsigned.apk release-output/Dabernaz-release-unsigned.apk
-          cp android/app/build/outputs/bundle/release/app-release.aab release-output/Dabernaz-release-unsigned.aab
-          printf 'Application ID: app.dabernaz.club\nVersion: 4.22.1\nVersion code: 6\nLauncher name: Dabernaz\n' > release-output/BUILD-INFO.txt
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing ANDROID_SIGNING_KEYSTORE_BASE64 secret.'; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD secret.'; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo 'Missing ANDROID_KEY_ALIAS secret.'; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo 'Missing ANDROID_KEY_PASSWORD secret.'; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+          test -s "$ANDROID_KEYSTORE_PATH"
+          chmod 600 "$ANDROID_KEYSTORE_PATH"
 
-      - name: Upload production release outputs
+      - name: Build Android APK and App Bundle
+        run: gradle -p android --no-daemon :app:assembleRelease :app:bundleRelease
+
+      - name: Verify APK signature and collect outputs
+        id: collect
+        run: |
+          set -euo pipefail
+          APK_DIR=android/app/build/outputs/apk/release
+          AAB_DIR=android/app/build/outputs/bundle/release
+          mkdir -p release-output
+          if [ -f "$APK_DIR/app-release.apk" ]; then
+            APK="$APK_DIR/app-release.apk"
+            AAB="$AAB_DIR/app-release.aab"
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+            jarsigner -verify "$AAB" >/dev/null
+            cp "$APK" release-output/Dabernaz.apk
+            cp "$AAB" release-output/Dabernaz.aab
+            SIGNED=true
+          else
+            APK="$APK_DIR/app-release-unsigned.apk"
+            AAB="$AAB_DIR/app-release.aab"
+            test -f "$APK"
+            test -f "$AAB"
+            cp "$APK" release-output/Dabernaz-release-unsigned.apk
+            cp "$AAB" release-output/Dabernaz-release-unsigned.aab
+            SIGNED=false
+          fi
+          echo "signed=$SIGNED" >> "$GITHUB_OUTPUT"
+          APP_ID=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | sed -n "s/^package: name='\\([^']*\\)'.*/\\1/p")
+          test "$APP_ID" = 'app.dabernaz.club' || { echo "Unexpected Android applicationId: $APP_ID"; exit 1; }
+          VERSION=$(sed -n "s/.*versionName '\\([^']*\\)'.*/\\1/p" android/app/build.gradle | head -n 1)
+          VERSION_CODE=$(sed -n 's/.*versionCode \\([0-9][0-9]*\\).*/\\1/p' android/app/build.gradle | head -n 1)
+          printf 'Application ID: %s\nVersion: %s\nVersion code: %s\nLauncher name: Dabernaz\nSigned: %s\n' "$APP_ID" "$VERSION" "$VERSION_CODE" "$SIGNED" > release-output/BUILD-INFO.txt
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Stop if a public release was requested without a verified signed APK
+        if: \${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          test "\${{ steps.collect.outputs.signed }}" = 'true'
+          test -f release-output/Dabernaz.apk
+
+      - name: Upload Android build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Dabernaz-Production-Release-Unsigned
+          name: Dabernaz-Android-\${{ steps.collect.outputs.version }}-\${{ github.run_number }}
           path: release-output/*
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish signed APK and AAB to GitHub Releases
+        if: \${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dabernaz-v\${{ steps.collect.outputs.version }}-\${{ github.run_number }}
+          name: Dabernaz v\${{ steps.collect.outputs.version }}
+          make_latest: true
+          files: |
+            release-output/Dabernaz.apk
+            release-output/Dabernaz.aab
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+
+      - name: Remove temporary private signing key
+        if: always()
+        run: rm -f android/dabernaz-release.keystore

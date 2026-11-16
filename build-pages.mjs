@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(root, 'dist');
 const files = [
-  'index.html', 'app.js', 'styles.css', 'icon.svg',
-  'manifest.webmanifest', 'sw.js', 'sw-register.js', '_headers', '_redirects',
+  'index.html', 'install.html', 'app.js', 'install.js', 'pwa-entry.js', 'styles.css',
+  'pwa-install.css', 'icon.svg', 'icon-192.png', 'icon-512.png',
+  'icon-maskable-512.png', 'manifest.webmanifest', 'sw.js', 'sw-register.js',
+  '_headers', '_redirects',
 ];
 
 await rm(out, { recursive: true, force: true });
@@ -15,7 +17,6 @@ for (const file of files) await copyFile(path.join(root, file), path.join(out, f
 await cp(path.join(root, 'assets'), path.join(out, 'assets'), { recursive: true });
 await cp(path.join(root, 'admin'), path.join(out, 'admin'), { recursive: true });
 
-// Only API requests invoke Pages Functions; ordinary static requests stay on the asset CDN.
 const routes = { version: 1, include: ['/api/*'], exclude: [] };
-await writeFile(path.join(out, '_routes.json'), `${JSON.stringify(routes, null, 2)}\n`, 'utf8');
-console.log(`Dabernaz Pages assets built in ${out}`);
+await writeFile(path.join(out, '_routes.json'), JSON.stringify(routes, null, 2) + '\n', 'utf8');
+console.log('Dabernaz Pages assets built in ' + out);
