@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 const app = await readFile(new URL('../app.js', import.meta.url), 'utf8');
+const portal = await readFile(new URL('../admin/index.html', import.meta.url), 'utf8');
+const redirects = await readFile(new URL('../_redirects', import.meta.url), 'utf8');
+const worker = await readFile(new URL('../sw.js', import.meta.url), 'utf8');
+const api = await readFile(new URL('../functions/api/[[path]].js', import.meta.url), 'utf8');
 
 assert.match(app, /rpsMatch\.awaitingNext\s*&&\s*lastRound/,
   'RPS must show the next-round button only while awaiting the player confirmation');
@@ -38,10 +42,19 @@ const explicitPurchaseHandler = app.match(/if \(action === 'room-join-auto'\) \{
 assert.match(explicitPurchaseHandler, /purchaseConfirmed\s*:\s*true/,
   'a new room card may be purchased only through the explicit purchase action');
 
-assert.match(app,/supportAdmin:renderSupportAdmin/,'the administrator support inbox must be a registered app page');
-assert.match(app,/data-page="supportAdmin"/,'authorized administrators must have an in-app path to the support inbox');
+assert.match(app,/supportAdmin:renderSupportAdmin/,'the administrator support inbox must remain a registered app page');
+assert.match(app,/walletAdmin:renderWalletAdmin/,'the finance admin panel must remain a registered app page');
+assert.doesNotMatch(app,/data-page="supportAdmin"/,'the public support page must not expose an admin-entry button');
+assert.doesNotMatch(app,/data-page="walletAdmin"/,'the public wallet page must not expose an admin-entry button');
 assert.match(app,/supportAdminReplyForm/,'administrators must be able to reply from the ticket thread');
 assert.match(app,/supportReplyForm/,'customers must be able to continue an open ticket');
 assert.match(app,/support-admin-status/,'administrators must be able to change ticket status');
-assert.match(app,/\/api\/admin\/support/,'admin inbox must use protected server API routes');
-console.log('Game-room, mini-game and support UI smoke tests passed.');
+assert.match(app,/\\/api\\/admin\\/support/,'admin inbox must use protected server API routes');
+assert.ok(portal.includes('href="/#page=walletAdmin"'),'the standalone portal must link to the finance admin panel');
+assert.ok(portal.includes('href="/#page=supportAdmin"'),'the standalone portal must link to the support admin panel');
+assert.ok(redirects.includes('/admin /admin/index.html 200'),'the clean /admin route must resolve to the portal');
+assert.ok(redirects.includes('/admin/ /admin/index.html 200'),'the /admin/ route must resolve to the portal');
+assert.ok(worker.includes("url.pathname === '/admin'"),'the service worker must not replace the portal with the SPA shell');
+assert.ok(api.includes('if (!isWalletAdmin) throw new HttpError(403'),'finance APIs must continue to enforce the server-side admin allowlist');
+assert.ok(api.includes('if(!isSupportAdmin) throw new HttpError(403'),'support APIs must continue to enforce the server-side admin allowlist');
+console.log('Game-room, mini-game and standalone admin portal smoke tests passed.');
