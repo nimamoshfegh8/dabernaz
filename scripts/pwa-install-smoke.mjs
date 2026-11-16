@@ -3,10 +3,10 @@ import { readFile, stat } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
 const read = path => readFile(new URL(path, root), 'utf8');
-const [index, manifestText, sw, register, build, packageText, installHtml, installJs, entryJs, css, workflow] = await Promise.all([
+const [index, manifestText, sw, register, build, packageText, installHtml, installJs, entryJs, css, workflow, redirects] = await Promise.all([
   read('index.html'), read('manifest.webmanifest'), read('sw.js'), read('sw-register.js'),
   read('build-pages.mjs'), read('package.json'), read('install.html'), read('install.js'),
-  read('pwa-entry.js'), read('pwa-install.css'), read('.github/workflows/android-apk.yml')
+  read('pwa-entry.js'), read('pwa-install.css'), read('.github/workflows/android-apk.yml'), read('_redirects')
 ]);
 const manifest = JSON.parse(manifestText);
 assert.equal(manifest.name, 'Dabernaz Game Club');
@@ -41,6 +41,8 @@ assert.match(installJs, /beforeinstallprompt/);
 assert.match(installJs, /appinstalled/);
 assert.match(installJs, /releases\/latest/);
 assert.match(installJs, /response\.status === 404/);
+assert.match(installJs, /\.\/download\/Dabernaz\.apk/);
+assert.match(redirects, /\/download\/Dabernaz\.apk https:\/\/github\.com\/nimamoshfegh8\/dabernaz\/releases\/latest\/download\/Dabernaz\.apk 302/);
 assert.match(entryJs, /install\.html/);
 assert.match(css, /pwa-install-entry/);
 assert.match(workflow, /ANDROID_SIGNING_KEYSTORE_BASE64/);
