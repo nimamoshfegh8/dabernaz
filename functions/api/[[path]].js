@@ -1955,7 +1955,7 @@ async function routeRequest(request, env) {
     if (request.method === 'POST' && path === '/api/admin/wallet/settings') {
       validateWriteOrigin(request);
       const body = await readJson(request);
-      const cardNumber = String(body.cardNumber || '').replace(/\D/g, '');
+      const cardNumber = String(body.cardNumber || '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g, '');
       const cardHolder = String(body.cardHolder || '').trim();
       const bankName = String(body.bankName || '').trim();
       const paymentNote = String(body.paymentNote || '').trim();
