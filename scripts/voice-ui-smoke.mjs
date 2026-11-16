@@ -53,8 +53,8 @@ assert.match(sw, /styles\.css\?v=4\.7\.3/);
 assert.match(sw, /app\.js\?v=4\.27\.0/);
 assert.match(swRegister, /sw\.js\?v=19/);
 assert.match(app, /4\.27\.0/);
-assert.match(androidBuild, /versionCode 5/);
-assert.match(androidBuild, /versionName '4\.22\.0'/);
+assert.match(androidBuild, /versionCode 6/);
+assert.match(androidBuild, /versionName '4\.22\.1'/);
 
 assert.match(voiceScript, /چهل دو/);
 assert.doesNotMatch(voiceScript, /چهل و دو/);
