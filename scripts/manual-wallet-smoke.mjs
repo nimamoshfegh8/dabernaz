@@ -62,6 +62,9 @@ await expectStatus('/api/wallet/payment-info',405,{account:customer});
 
 const deposit=await request('/api/wallet/requests',{account:customer,method:'POST',body:{type:'deposit',amount:50000,userNote:'کد پیگیری آزمایشی 50000'}});
 assert.ok(deposit.requestId>0);
+await request('/api/admin/wallet/settings',{account:admin,method:'POST',body:{
+ cardNumber:'1111111111111111',cardHolder:'Wallet QA Updated Holder',bankName:'بانک جدید',paymentNote:'تنظیمات جدید برای درخواست‌های بعدی'
+}});
 assert.equal(deposit.status,'awaiting_receipt');
 const customerRequests=await request('/api/wallet/requests',{account:customer});
 assert.equal(customerRequests.requests[0].status,'awaiting_receipt');
@@ -140,14 +143,14 @@ assert.ok(tx.transactions.some(t=>t.title.includes('اصلاح موجودی تو
 const minimumDeposit=await request('/api/wallet/requests',{account:customer,method:'POST',body:{type:'deposit',amount:105,userNote:'حداقل واریز'}});
 assert.equal(minimumDeposit.status,'awaiting_receipt');
 const minimumPayment=await request('/api/wallet/requests/'+minimumDeposit.requestId+'/payment-instructions',{account:customer});
-assert.equal(minimumPayment.paymentInfo.cardNumber,'1234567812345678');
+assert.equal(minimumPayment.paymentInfo.cardNumber,'1111111111111111');
 const minReceipt=await request('/api/wallet/requests/'+minimumDeposit.requestId+'/receipt',{account:customer,method:'POST',body:{dataUrl:fakePng}});
 assert.equal(minReceipt.status,'pending_review');
 await request('/api/admin/wallet/'+minimumDeposit.requestId+'/decision',{account:admin,method:'POST',body:{decision:'approve',note:'حداقل واریز آزمون شد'}});
 assert.equal(Number((await me(customer)).balance),235105,'a 105-toman deposit must credit exactly 105 toman');
 
 const minimumWithdraw=await request('/api/wallet/requests',{account:customer,method:'POST',body:{
- type:'withdraw',amount:205,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer',bankName:'بانک مقصد',userNote:'حداقل برداشت'
+ type:'withdraw',amount:205,cardNumber:'۹۸۷۶۵۴۳۲۹۸۷۶۵۴۳۲',cardHolder:'Wallet QA Customer',bankName:'بانک مقصد',userNote:'حداقل برداشت'
 }});
 assert.equal(minimumWithdraw.status,'pending_transfer');
 assert.equal(Number((await me(customer)).balance),234900,'a 205-toman withdrawal must reserve exactly 205 toman');
@@ -158,6 +161,9 @@ assert.equal(Number((await me(customer)).balance),234900,'marking the minimum wi
 
 const adminList=await request('/api/admin/wallet',{account:admin});
 assert.ok(adminList.requests.length>=3);
+assert.ok(adminList.requests.some(r=>r.id===deposit.requestId),'the initial deposit must arrive in the finance admin inbox');
+assert.ok(adminList.requests.some(r=>r.id===minimumDeposit.requestId),'the minimum deposit must arrive in the finance admin inbox');
+assert.ok(adminList.requests.some(r=>r.id===minimumWithdraw.requestId&&r.user_note==='حداقل برداشت'),'the minimum withdrawal and its user details must arrive in the finance admin inbox');
 const customerList=await request('/api/wallet/requests',{account:customer});
 assert.ok(customerList.requests.some(r=>r.id===deposit.requestId&&r.status==='approved'));
 assert.ok(customerList.requests.some(r=>r.id===withdraw.requestId&&r.status==='paid'));
