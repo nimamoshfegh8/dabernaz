@@ -2169,8 +2169,9 @@ async function routeRequest(request, env) {
     if (!isPng && !isJpeg && !isWebp) throw new HttpError(400, 'محتوای فایل با فرمت تصویر اعلام‌شده مطابقت ندارد.');
     if (item.status !== 'awaiting_receipt') throw new HttpError(409, 'این درخواست در وضعیت دریافت رسید نیست.');
     const now = new Date().toISOString();
-    await env.DB.prepare("UPDATE manual_wallet_requests SET receipt_data_url=?,receipt_mime=?,status='pending_review',updated_at=? WHERE id=? AND user_id=? AND status='awaiting_receipt'")
+    const updated = await env.DB.prepare("UPDATE manual_wallet_requests SET receipt_data_url=?,receipt_mime=?,status='pending_review',updated_at=? WHERE id=? AND user_id=? AND status='awaiting_receipt'")
       .bind(dataUrl,match[1],now,id,user.id).run();
+    if (Number(updated?.meta?.changes || 0) !== 1) throw new HttpError(409, 'این درخواست قبلاً رسید دریافت کرده یا وضعیت آن تغییر کرده است.');
     return json({ok:true,status:'pending_review'});
   }
   const cancelMatch = path.match(/^\/api\/wallet\/requests\/(\d+)\/cancel$/);
