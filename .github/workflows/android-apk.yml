@@ -20,6 +20,7 @@ on:
   pull_request:
     paths:
       - 'android/**'
+      - '.github/workflows/android-apk.yml'
       - 'index.html'
       - 'manifest.webmanifest'
       - 'app.js'
@@ -39,20 +40,25 @@ on:
         default: false
         type: boolean
 
+# The build job only needs read access. The isolated publication job gets write access.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-release:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     env:
       ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android/dabernaz-release.keystore
-      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    outputs:
+      version: ${{ steps.collect.outputs.version }}
+      artifact_name: ${{ steps.collect.outputs.artifact_name }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Java 17
         uses: actions/setup-java@v6
@@ -73,10 +79,22 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Validate signing secrets and decode private keystore
+      - name: Require the main branch for public releases
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = 'refs/heads/main' || {
+            echo 'Public Android releases can only be published from the main branch.'
+            exit 1
+          }
+
+      - name: Validate signing secrets and decode private keystore
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' }}
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           test -n "$KEYSTORE_BASE64" || { echo 'Missing ANDROID_SIGNING_KEYSTORE_BASE64 secret.'; exit 1; }
@@ -88,6 +106,10 @@ jobs:
           chmod 600 "$ANDROID_KEYSTORE_PATH"
 
       - name: Build Android APK and App Bundle
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          ANDROID_KEY_ALIAS: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' && secrets.ANDROID_KEY_ALIAS || '' }}
+          ANDROID_KEY_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' && secrets.ANDROID_KEY_PASSWORD || '' }}
         run: gradle -p android --no-daemon :app:assembleRelease :app:bundleRelease
 
       - name: Verify APK signature and collect outputs
@@ -120,37 +142,59 @@ jobs:
           VERSION=$(grep -o "versionName '[^']*'" android/app/build.gradle | head -n 1 | cut -d "'" -f 2)
           VERSION_CODE=$(grep -o 'versionCode [0-9]*' android/app/build.gradle | head -n 1 | awk '{print $2}')
           printf 'Application ID: %s\nVersion: %s\nVersion code: %s\nLauncher name: Dabernaz\nSigned: %s\n' "$APP_ID" "$VERSION" "$VERSION_CODE" "$SIGNED" > release-output/BUILD-INFO.txt
+          ARTIFACT_NAME="Dabernaz-Android-${VERSION}-${GITHUB_RUN_NUMBER}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Stop if a public release was requested without a verified signed APK
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
         run: |
           set -euo pipefail
           test "${{ steps.collect.outputs.signed }}" = 'true'
-          test -f release-output/Dabernaz.apk
+          test -s release-output/Dabernaz.apk
 
       - name: Upload Android build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Dabernaz-Android-${{ steps.collect.outputs.version }}-${{ github.run_number }}
+          name: ${{ steps.collect.outputs.artifact_name }}
           path: release-output/*
           if-no-files-found: error
           retention-days: 30
 
+      - name: Remove temporary private signing key
+        if: always()
+        run: rm -f android/dabernaz-release.keystore
+
+  publish-release:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release && github.ref == 'refs/heads/main' }}
+    needs: build-release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Download verified Android build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-release.outputs.artifact_name }}
+          path: release-output
+
+      - name: Re-check release files before publication
+        run: |
+          set -euo pipefail
+          test -s release-output/Dabernaz.apk
+          test -s release-output/Dabernaz.aab
+          grep -q '^Signed: true$' release-output/BUILD-INFO.txt
+
       - name: Publish signed APK and AAB to GitHub Releases
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: dabernaz-v${{ steps.collect.outputs.version }}-${{ github.run_number }}
-          name: Dabernaz v${{ steps.collect.outputs.version }}
+          tag_name: dabernaz-v${{ needs.build-release.outputs.version }}-${{ github.run_number }}
+          name: Dabernaz v${{ needs.build-release.outputs.version }}
           make_latest: true
           files: |
             release-output/Dabernaz.apk
             release-output/Dabernaz.aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Remove temporary private signing key
-        if: always()
-        run: rm -f android/dabernaz-release.keystore
