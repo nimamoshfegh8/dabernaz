@@ -321,7 +321,7 @@ for (const roomId of ['room5000', 'room10000', 'room20000', 'room50000']) {
       roomId + ': every joined player must see all cards purchased in this room');
     assert.equal(accountRoom.allPlayerCards.filter(entry =>
       entry.playerName === 'QA Player ' + (index + 1)
-    ).length, expectedCards, roomId + ': every player's own cards must be labeled by owner');
+    ).length, expectedCards, roomId + ": every player's own cards must be labeled by owner");
     const expectedBalance = profileBeforeBuy.get(accounts[index].memberId).balance -
       economics.price * expectedCards;
     assert.equal(Number((await accountMe(accounts[index])).balance), expectedBalance,
