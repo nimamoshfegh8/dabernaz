@@ -52,8 +52,9 @@ assert.match(app,/support-admin-status/,'administrators must be able to change t
 assert.match(app,/\\/api\\/admin\\/support/,'admin inbox must use protected server API routes');
 assert.ok(portal.includes('href="/#page=walletAdmin"'),'the standalone portal must link to the finance admin panel');
 assert.ok(portal.includes('href="/#page=supportAdmin"'),'the standalone portal must link to the support admin panel');
-assert.ok(redirects.includes('/admin /admin/index.html 200'),'the clean /admin route must resolve to the portal');
-assert.ok(redirects.includes('/admin/ /admin/index.html 200'),'the /admin/ route must resolve to the portal');
+assert.ok(redirects.includes('/admin /admin/ 301'),'the clean /admin route must redirect to the portal directory');
+assert.ok(!redirects.includes('/admin/index.html 200'),'the portal route must not rewrite back to index.html and risk a directory redirect loop');
+assert.ok(portal.includes('<title>درگاه مدیریت | Dabernaz</title>'),'the portal directory must contain its own static index page');
 assert.ok(worker.includes("url.pathname === '/admin'"),'the service worker must not replace the portal with the SPA shell');
 assert.ok(api.includes('if (!isWalletAdmin) throw new HttpError(403'),'finance APIs must continue to enforce the server-side admin allowlist');
 assert.ok(api.includes('if(!isSupportAdmin) throw new HttpError(403'),'support APIs must continue to enforce the server-side admin allowlist');
