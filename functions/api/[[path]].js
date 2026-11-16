@@ -946,7 +946,7 @@ async function publicRoom(db, room, userId) {
     },
     myCards:room.status === 'finished' ? [] : (me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : [])),
     // Share every purchased card with authenticated participants of this live room only.
-    allPlayerCards:room.status === 'playing' ? room.players.flatMap((player) =>
+    allPlayerCards:room.status === 'playing' && !!me ? room.players.flatMap((player) =>
       (Array.isArray(player.cards) ? player.cards : []).map((card, cardIndex) => ({
         playerName:String(player.name || 'بازیکن'), cardNumber:cardIndex + 1, card
       }))
