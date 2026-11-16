@@ -2126,7 +2126,7 @@ async function routeRequest(request, env) {
       if (!id) throw new HttpError(500, 'ثبت درخواست واریز انجام نشد.');
       return json({ok:true,requestId:id,status:'awaiting_receipt'});
     }
-    const cardNumber = String(body.cardNumber || '').replace(/\D/g, '');
+    const cardNumber = String(body.cardNumber || '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g, '');
     const cardHolder = String(body.cardHolder || '').trim();
     const bankName = String(body.bankName || '').trim();
     if (!/^\d{16}$/.test(cardNumber)) throw new HttpError(400, 'شماره کارت مقصد برای برداشت باید ۱۶ رقم باشد.');
