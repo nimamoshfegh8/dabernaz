@@ -2051,10 +2051,6 @@ async function routeRequest(request, env) {
     const inserted = await env.DB.prepare("INSERT INTO wallet_messages(user_id,sender_type,message,created_at) VALUES(?,'user',?,?)").bind(user.id,message,now).run();
     return json({ok:true,message:{id:Number(inserted.meta?.last_row_id||0),sender_type:'user',message,created_at:now}});
   }
-  if (request.method === 'GET' && path === '/api/wallet/payment-info') {
-    const row = await env.DB.prepare('SELECT card_number,card_holder,bank_name,payment_note,updated_at FROM wallet_payment_settings WHERE id=1').first();
-    return json({ok:true,paymentInfo:{cardNumber:row?.card_number || '',cardHolder:row?.card_holder || '',bankName:row?.bank_name || '',paymentNote:row?.payment_note || '',updatedAt:row?.updated_at || ''}});
-  }
   if (request.method === 'GET' && path === '/api/wallet/requests') {
     const rows = await env.DB.prepare('SELECT id,request_type,amount,status,receipt_mime,card_number,card_holder,bank_name,admin_note,handled_at,created_at,updated_at,CASE WHEN receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt FROM manual_wallet_requests WHERE user_id=? ORDER BY id DESC LIMIT 50').bind(user.id).all();
     return json({ok:true,requests:rows.results || []});
