@@ -1947,7 +1947,7 @@ async function routeRequest(request, env) {
     }
     if (request.method === 'GET' && path === '/api/admin/wallet/messages') {
       const memberId = String(new URL(request.url).searchParams.get('member_id') || '').trim();
-      if (!/^\\d{4,12}$/.test(memberId)) throw new HttpError(400, 'شناسه کاربر معتبر نیست.');
+      if (!/^\d{4,12}$/.test(memberId)) throw new HttpError(400, 'شناسه کاربر معتبر نیست.');
       const target = await env.DB.prepare('SELECT id,member_id,username FROM users WHERE member_id=? LIMIT 1').bind(memberId).first();
       if (!target) throw new HttpError(404, 'کاربر پیدا نشد.');
       const rows = await env.DB.prepare('SELECT id,sender_type,message,created_at FROM wallet_messages WHERE user_id=? ORDER BY id ASC LIMIT 200').bind(target.id).all();
@@ -1958,7 +1958,7 @@ async function routeRequest(request, env) {
       const body = await readJson(request);
       const memberId = String(body.memberId || '').trim();
       const message = String(body.message || '').trim();
-      if (!/^\\d{4,12}$/.test(memberId)) throw new HttpError(400, 'شناسه کاربر معتبر نیست.');
+      if (!/^\d{4,12}$/.test(memberId)) throw new HttpError(400, 'شناسه کاربر معتبر نیست.');
       if (!message || message.length > 1000) throw new HttpError(400, 'پیام باید بین ۱ تا ۱۰۰۰ نویسه باشد.');
       const target = await env.DB.prepare('SELECT id FROM users WHERE member_id=? LIMIT 1').bind(memberId).first();
       if (!target) throw new HttpError(404, 'کاربر پیدا نشد.');
