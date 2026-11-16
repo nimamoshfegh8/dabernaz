@@ -556,6 +556,7 @@ function currentRoomConfig() { const id = currentPage === 'roomGame' ? activeRoo
 const MAX_ROOM_CARDS_PER_PLAYER = 5;
 let activeRoomId = 'room5000';
 let roomCards = [];
+let roomAllCards = [];
 let roomCardCount = 1;
 let roomCalledNumbers = [];
 let roomStages = { one:false, full:false };
@@ -752,7 +753,7 @@ function setPage(page, options = {}) {
   const { sync = true, scroll = true } = options;
   if (!APP_PAGES.includes(page)) page = 'home';
   if (ROOM_CONFIGS.some(room => room.id === page)) {
-    if(roomServerSnapshot && roomServerSnapshot.id!==page){roomServerSnapshot=null;roomCards=[];roomCardCount=1;roomCalledNumbers=[];roomStages={one:false,full:false};}
+    if(roomServerSnapshot && roomServerSnapshot.id!==page){roomServerSnapshot=null;roomCards=[];roomAllCards=[];roomCardCount=1;roomCalledNumbers=[];roomStages={one:false,full:false};}
     activeRoomId = page;
   }
   currentPage = page;
@@ -832,18 +833,26 @@ function getRoomQueueState() {
   const room = roomServerSnapshot;
   return room || { joined:false, queueCount:0, status:'waiting', myCards:[], calledNumbers:[], winners:{line:[],full:[]} };
 }
-function roomCardMarkup(card, index) {
+function roomCardMarkup(card, index, details = null) {
+  const meta = details && typeof details === 'object' && !Array.isArray(details) ? details : {};
+  const cardNumber = Math.max(1, Number(meta.cardNumber) || index + 1);
+  const ownerLabel = meta.playerName ? `بازیکن: ${escapeHTML(meta.playerName)} · ` : '';
   const rowsDone = card.map(row => row.filter(n => n !== null && roomCalledNumbers.includes(n)).length === 5);
   const doneRows = rowsDone.filter(Boolean).length;
   const full = doneRows === 3;
   const line = doneRows > 0;
   return `<article class="room-ticket">
-    <div class="room-ticket-head"><div><b>کارت شماره ${index + 1}</b><small>شناسه کارت · DB-${String(index + 1).padStart(3,'0')}</small></div><span class="room-ticket-state ${line ? 'is-progress' : ''}">${full ? 'دبرنای کامل' : line ? 'یک خط تکمیل' : 'در حال بازی'}</span></div>
-    <div class="daberna-grid" role="group" aria-label="کارت دبرنا شماره ${index + 1}">${card.map(row => row.map(number => number === null
+    <div class="room-ticket-head"><div><b>کارت شماره ${faDigits(cardNumber)}</b><small>${ownerLabel}شناسه کارت · DB-${String(index + 1).padStart(3,'0')}</small></div><span class="room-ticket-state ${line ? 'is-progress' : ''}">${full ? 'دبرنای کامل' : line ? 'یک خط تکمیل' : 'در حال بازی'}</span></div>
+    <div class="daberna-grid" role="group" aria-label="کارت دبرنا شماره ${faDigits(cardNumber)}">${card.map(row => row.map(number => number === null
       ? `<span class="daberna-cell empty-cell" aria-hidden="true"></span>`
       : `<span class="daberna-cell ${roomCalledNumbers.includes(number) ? 'called-cell' : ''}" data-number="${number}" aria-label="${number}${roomCalledNumbers.includes(number) ? ' اعلام شده' : ''}">${number}</span>`).join('')).join('')}</div>
     <div class="room-ticket-foot"><span>۱۵ عدد در ۳ ردیف</span><span>${full ? 'هر ۱۵ عدد اعلام شده' : line ? 'یک ردیف کامل شده' : 'منتظر اعلام شماره'}</span></div>
   </article>`;
+}
+function roomAllCardsMarkup() {
+  const entries = Array.isArray(roomAllCards) ? roomAllCards.filter(item => item && Array.isArray(item.card)) : [];
+  if (!entries.length) return '<div class="empty"><span>🎟️</span>کارت‌های بازیکنان این اتاق هنوز دریافت نشده‌اند.</div>';
+  return entries.map((item, index) => roomCardMarkup(item.card, index, item)).join('');
 }
 function roomHasWinner(value) {
   return Array.isArray(value) ? value.length > 0 : !!value;
@@ -981,6 +990,7 @@ function renderRoomGame() {
       <aside class="room-panel stages-panel"><div class="room-panel-heading"><div><span class="eyebrow">WINNING PATTERNS</span><h3>برندگان سانس</h3></div><span class="trophy-mark">🏆</span></div><div class="room-stages-list" id="roomStagesList">${roomStageMarkup()}</div><div class="room-rules-tip"><b>برد هم‌زمان پشتیبانی می‌شود</b><p>یک یا چند نفر می‌توانند در یک شماره هم‌زمان برنده یک خط یا دبرنای کامل شوند؛ جایزه همان مرحله بین برندگان تقسیم می‌شود.</p></div></aside>
     </section>
     <section class="room-panel"><div class="room-panel-heading"><div><span class="eyebrow">SESSION HISTORY</span><h3>برندگان سانس‌های اخیر</h3></div><span class="trophy-mark">🏆</span></div><div id="recentSessionWinners">${recentSessionWinnersMarkup()}</div></section>
+    <section class="room-panel room-all-tickets-panel"><div class="room-panel-heading"><div><span class="eyebrow">ALL ROOM TICKETS</span><h3>تمام کارت‌های خریداری‌شده در این اتاق</h3><p>کارت‌های همهٔ بازیکنان همین سانس؛ شماره‌های اعلام‌شده روی تمام کارت‌ها مشخص می‌شوند.</p></div><span class="ticket-count-badge" id="roomAllTicketCount">${faDigits(roomAllCards.length)} کارت</span></div><div id="roomAllTicketsList" class="room-tickets-list room-all-tickets-list">${roomAllCardsMarkup()}</div></section>
     ${isFinished?'<button class="btn btn-primary btn-block" data-action="room-back-lobby">بازگشت به اتاق‌ها</button>':''}`;
 }
 async function pollCurrentRoom() {
@@ -993,6 +1003,7 @@ async function pollCurrentRoom() {
     const wasJoined = !!roomServerSnapshot?.joined;
     roomServerSnapshot=result.room;
     if(result.room.joined && Array.isArray(result.room.myCards)) roomCards=result.room.myCards;
+    roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
     else if(wasJoined && result.room.status==='waiting') {
       roomCards=[];
       roomCardCount=1;
@@ -1035,12 +1046,19 @@ function detectRoomStages() {
   roomStages={one:roomHasWinner(winners.line),full:roomHasWinner(winners.full)};
   const stages=$('#roomStagesList'); if(stages) stages.innerHTML=roomStageMarkup();
 }
+function updateRoomAllCardDisplay() {
+  const list = $('#roomAllTicketsList');
+  if (list) list.innerHTML = roomAllCardsMarkup();
+  const count = $('#roomAllTicketCount');
+  if (count) count.textContent = `${faDigits(Array.isArray(roomAllCards) ? roomAllCards.length : 0)} کارت`;
+}
 function updateRoomDrawDisplay() {
   const room=roomServerSnapshot||{}; const last=room.latestNumber;
   if($('#roomLatestNumber')) $('#roomLatestNumber').textContent=last?faDigits(last):'—';
   if($('#roomDrawCount')) $('#roomDrawCount').textContent=`${faDigits(room.drawCount||0)} / ۹۰`;
   if($('#roomNumberHistory')) $('#roomNumberHistory').innerHTML=roomCalledMarkup();
   updateRoomCardDisplay();
+  updateRoomAllCardDisplay();
 }
 function showRoomQuickRules() {
   openModal('راهنمای سریع دبرنا', `<div class="room-quick-rules"><p><b>۱. مهلت خرید:</b> از اولین خرید کارت، ۲ دقیقه و ۳۰ ثانیه برای ورود بازیکنان فرصت است. بازی پس از پایان مهلت و با حداقل ۲ شرکت‌کننده آغاز می‌شود.</p><p><b>۲. حداقل شروع:</b> اگر تا پایان مهلت حداقل ۲ شرکت‌کننده ثبت‌نام نکرده باشند، سانس لغو و وجه خرید کارت به کیف پول بازگردانده می‌شود.</p><p><b>۳. سقف خرید:</b> هر حساب در هر سانس حداکثر ۵ کارت می‌تواند بخرد؛ تعداد کل بازیکنان و کارت‌های اتاق محدود نیست.</p><p><b>۴. مبلغ جایزه:</b> مبلغ جایزه یک خط و دبرنای کامل در همان صفحه اتاق و بر اساس وضعیت سانس نمایش داده می‌شود.</p><p><b>۵. کارت و اعلام شماره:</b> هر کارت ۳ ردیف و ۹ ستون دارد؛ مهره‌ها از ۱ تا ۹۰ و بدون تکرار اعلام می‌شوند.</p><p class="muted-note">در صورت برنده شدن هم‌زمان چند نفر در یک مرحله، مبلغ جایزه همان مرحله به‌طور مساوی بین برندگان تقسیم می‌شود.</p></div>`);
@@ -1915,6 +1933,7 @@ document.addEventListener('click', async event => {
       });
       roomServerSnapshot = result.room;
       roomCards = Array.isArray(result.room.myCards) ? result.room.myCards : [];
+      roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
       roomCalledNumbers = Array.isArray(result.room.allCalledNumbers) ? result.room.allCalledNumbers : [];
       roomStages = {one:false,full:false};
       roomCardCount = Math.max(1, Math.min(MAX_ROOM_CARDS_PER_PLAYER, Number(roomCardCount) || 1));
@@ -1948,6 +1967,7 @@ document.addEventListener('click', async event => {
       const requestedCardCount=roomCardCount;
       roomServerSnapshot=result.room;
       roomCards=result.room.myCards||[];
+      roomAllCards=Array.isArray(result.room.allPlayerCards)?result.room.allPlayerCards:[];
       roomCardCount=roomCards.length||roomCardCount;
       if(result.room.status==='playing'){
         activeRoomId=result.room.id;
@@ -1987,6 +2007,7 @@ document.addEventListener('click', async event => {
       }
       roomServerSnapshot=result.room;
       roomCards=Array.isArray(result.room.myCards)?result.room.myCards:[];
+      roomAllCards=Array.isArray(result.room.allPlayerCards)?result.room.allPlayerCards:[];
       roomCardCount=roomCards.length;
       if(result.room.status==='playing') {
         activeRoomId=result.room.id;
@@ -2006,7 +2027,7 @@ document.addEventListener('click', async event => {
     return;
   }
   if (action === 'room-open-game') { unlockPersianAudio(); if(roomServerSnapshot?.status==='playing'){setPage('roomGame');} else showToast('این سانس هنوز شروع نشده است.'); return; }
-  if (action === 'room-back-lobby') { roomCards=[]; roomCardCount=1; roomServerSnapshot=null; roomCalledNumbers=[]; roomStages={one:false,full:false}; setPage('games'); return; }
+  if (action === 'room-back-lobby') { roomCards=[]; roomAllCards=[]; roomCardCount=1; roomServerSnapshot=null; roomCalledNumbers=[]; roomStages={one:false,full:false}; setPage('games'); return; }
   if (action === 'copy-ref') {
     try { await navigator.clipboard.writeText(state.referralCode); showToast('کد دعوت کپی شد'); }
     catch (_) { const input = $('#refCode'); input?.select(); showToast('کد دعوت را به‌صورت دستی کپی کن'); }
