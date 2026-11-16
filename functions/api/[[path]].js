@@ -2052,7 +2052,7 @@ async function routeRequest(request, env) {
     return json({ok:true,message:{id:Number(inserted.meta?.last_row_id||0),sender_type:'user',message,created_at:now}});
   }
   if (request.method === 'GET' && path === '/api/wallet/requests') {
-    const rows = await env.DB.prepare('SELECT id,request_type,amount,status,receipt_mime,card_number,card_holder,bank_name,admin_note,handled_at,created_at,updated_at,CASE WHEN receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt FROM manual_wallet_requests WHERE user_id=? ORDER BY id DESC LIMIT 50').bind(user.id).all();
+    const rows = await env.DB.prepare('SELECT id,request_type,amount,status,admin_note,handled_at,created_at,updated_at,CASE WHEN receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt FROM manual_wallet_requests WHERE user_id=? ORDER BY id DESC LIMIT 50').bind(user.id).all();
     return json({ok:true,requests:rows.results || []});
   }
   if (request.method === 'POST' && path === '/api/wallet/requests') {
