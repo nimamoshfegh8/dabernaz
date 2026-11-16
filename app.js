@@ -1343,14 +1343,15 @@ function renderWalletAdmin(){
  '<section class="panel wallet-admin-inbox"><div class="section-title"><h2>صندوق درخواست‌های مالی</h2></div><div class="support-admin-filters">'+filters.map(x=>'<button class="btn '+(walletAdminFilter===x[0]?'btn-primary':'btn-outline')+'" data-action="wallet-admin-filter" data-filter="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>'+detail+'<div class="wallet-admin-request-list">'+list+'</div></section>';
 }
 async function refreshWalletData(){
- const [profile,info,requests]=await Promise.all([
+ const [profile,requests,messages]=await Promise.all([
   apiRequest('/api/auth/me',{method:'GET',headers:{}}),
-  apiRequest('/api/wallet/payment-info',{method:'GET',headers:{}}),
-  apiRequest('/api/wallet/requests',{method:'GET',headers:{}})
+  apiRequest('/api/wallet/requests',{method:'GET',headers:{}}),
+  apiRequest('/api/wallet/messages',{method:'GET',headers:{}})
  ]);
  if(profile.user)applyAuthenticatedUser(profile.user);
- state.walletPaymentInfo=info.paymentInfo||state.walletPaymentInfo;
+ state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
  state.walletRequests=Array.isArray(requests.requests)?requests.requests:[];
+ walletMessages=Array.isArray(messages.messages)?messages.messages:[];
  saveState();
 }
 async function refreshWalletAdmin(){
@@ -1361,6 +1362,11 @@ async function refreshWalletAdmin(){
  if(settings.settings)state.walletPaymentInfo=settings.settings;
  if(walletAdminSelectedRequest&&walletAdminSelectedRequest.request){
   walletAdminSelectedRequest=await apiRequest('/api/admin/wallet/'+Number(walletAdminSelectedRequest.request.id),{method:'GET',headers:{}});
+ }
+ if(walletAdminConversationMemberId){
+  const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(walletAdminConversationMemberId),{method:'GET',headers:{}});
+  walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];
+  walletAdminConversationUser=chat.user||walletAdminConversationUser;
  }
 }
 
@@ -1833,8 +1839,7 @@ document.addEventListener('click', async event => {
   const action = actionEl.dataset.action;
   if(action==='wallet-open-deposit'){
     if(!requireLogin())return;
-    if(!state.walletPaymentInfo?.cardNumber){showToast('شماره کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');return;}
-    openModal('درخواست واریز', '<form id="walletDepositForm" class="form-stack"><p class="muted-note">مبلغ موردنظر را وارد کن. پس از ثبت درخواست، شماره کارت مقصد نمایش داده می‌شود و می‌توانی رسید انتقال را ارسال کنی.</p><label>مبلغ واریز (تومان)<input class="form-control" name="amount" type="number" min="10000" max="50000000" step="1000" placeholder="حداقل ۱۰٬۰۰۰ تومان" required></label><button class="btn btn-primary btn-block" type="submit">ثبت درخواست و نمایش کارت مقصد</button></form>');
+    openModal('درخواست واریز', '<form id="walletDepositForm" class="form-stack"><p class="muted-note">پس از ثبت درخواست، از بخش گفت‌وگوی خصوصی مالی در همین صفحه برای دریافت اطلاعات پرداخت به مدیریت پیام بده. شماره کارت در صفحه کیف پول نمایش داده نمی‌شود.</p><label>مبلغ واریز (تومان)<input class="form-control" name="amount" type="number" min="10000" max="50000000" step="1000" placeholder="حداقل ۱۰٬۰۰۰ تومان" required></label><button class="btn btn-primary btn-block" type="submit">ثبت درخواست واریز</button></form>');
     return;
   }
   if(action==='wallet-open-withdraw'){
@@ -1863,7 +1868,21 @@ document.addEventListener('click', async event => {
   if(action==='wallet-admin-filter'){walletAdminFilter=actionEl.dataset.filter||'all';render();return;}
   if(action==='wallet-admin-open-request'){
     if(!requireLogin())return;
-    try{walletAdminSelectedRequest=await apiRequest('/api/admin/wallet/'+Number(actionEl.dataset.requestId),{method:'GET',headers:{}});setPage('walletAdmin',{scroll:false});}
+    try{
+     walletAdminSelectedRequest=await apiRequest('/api/admin/wallet/'+Number(actionEl.dataset.requestId),{method:'GET',headers:{}});
+     walletAdminConversationMemberId=String(walletAdminSelectedRequest.request?.member_id||'');
+     const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(walletAdminConversationMemberId),{method:'GET',headers:{}});
+     walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];
+     walletAdminConversationUser=chat.user||null;
+     setPage('walletAdmin',{scroll:false});
+    }catch(error){showToast(error.message);}
+    return;
+  }
+  if(action==='wallet-admin-open-chat'||action==='wallet-admin-pick-user'){
+    walletAdminConversationMemberId=String(actionEl.dataset.memberId||'');
+    walletAdminConversationUser={memberId:walletAdminConversationMemberId,username:String(actionEl.dataset.username||'')};
+    walletAdminSelectedMemberId=walletAdminConversationMemberId;
+    try{const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(walletAdminConversationMemberId),{method:'GET',headers:{}});walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];walletAdminConversationUser=chat.user||walletAdminConversationUser;render();}
     catch(error){showToast(error.message);}
     return;
   }
@@ -2117,9 +2136,7 @@ document.addEventListener('submit', async event => {
       const result=await apiRequest('/api/wallet/requests',{method:'POST',body:JSON.stringify({type:'deposit',amount})});
       await refreshWalletData();
       closeModal();render();
-      const info=state.walletPaymentInfo||{};
-      openModal('پرداخت درخواست #'+faDigits(result.requestId),'<div class="wallet-transfer-instructions"><p>مبلغ دقیق <b>'+money(amount)+' تومان</b> را به کارت زیر انتقال بده:</p><strong dir="ltr">'+escapeHTML(walletCardNumber(info.cardNumber))+'</strong><b>'+escapeHTML(info.cardHolder||'')+'</b><small>'+escapeHTML(info.bankName||'')+'</small><p>'+escapeHTML(info.paymentNote||'پس از انتقال وجه، تصویر رسید را در همین درخواست ارسال کن.')+'</p></div><form id="walletReceiptForm" class="form-stack" data-request-id="'+Number(result.requestId)+'"><label>تصویر رسید (حداکثر ۵۱۲ کیلوبایت)<input class="form-control" type="file" name="receipt" accept="image/png,image/jpeg,image/webp" required></label><button class="btn btn-primary btn-block" type="submit">ارسال رسید برای بررسی</button></form>');
-      showToast('درخواست واریز ثبت شد؛ پس از انتقال وجه رسید را ارسال کن.');
+      showToast('درخواست واریز #'+faDigits(result.requestId)+' ثبت شد. برای دریافت شماره کارت، در گفت‌وگوی خصوصی مالی پیام بده.');
     }catch(error){showToast(error.message);}
     finally{if(button?.isConnected)button.disabled=false;}
   }
@@ -2145,6 +2162,24 @@ document.addEventListener('submit', async event => {
       await refreshWalletData();closeModal();render();showToast('رسید ارسال شد و درخواست در صف بررسی مدیر قرار گرفت.');
     }catch(error){showToast(error.message);}
     finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletUserChatForm'){
+    event.preventDefault();
+    const message=String(new FormData(event.target).get('message')||'').trim();if(!message)return;
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{await apiRequest('/api/wallet/messages',{method:'POST',body:JSON.stringify({message})});await refreshWalletData();render();}
+    catch(error){showToast(error.message);}finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletAdminChatSelectForm'){
+    event.preventDefault();const memberId=String(new FormData(event.target).get('memberId')||'').trim();
+    try{const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(memberId),{method:'GET',headers:{}});walletAdminConversationMemberId=memberId;walletAdminConversationUser=chat.user||null;walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];render();}
+    catch(error){showToast(error.message);}
+  }
+  if(event.target.id==='walletAdminChatForm'){
+    event.preventDefault();const data=new FormData(event.target),memberId=String(data.get('memberId')||'').trim(),message=String(data.get('message')||'').trim();if(!memberId||!message)return;
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{await apiRequest('/api/admin/wallet/messages',{method:'POST',body:JSON.stringify({memberId,message})});const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(memberId),{method:'GET',headers:{}});walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];render();}
+    catch(error){showToast(error.message);}finally{if(button?.isConnected)button.disabled=false;}
   }
   if(event.target.id==='walletAdminSettingsForm'){
     event.preventDefault();
@@ -2239,9 +2274,9 @@ setInterval(async()=>{
       const composing=document.activeElement?.closest('#supportForm,#supportReplyForm');if(!composing)render();
     }catch(_){}
   }else if(currentPage==='wallet'){
-    try{await refreshWalletData();const composing=document.activeElement?.closest('#walletDepositForm,#walletWithdrawForm,#walletReceiptForm');if(!composing)render();}catch(_){}
+    try{await refreshWalletData();const composing=document.activeElement?.closest('#walletDepositForm,#walletWithdrawForm,#walletReceiptForm,#walletUserChatForm');if(!composing)render();}catch(_){}
   }else if(currentPage==='walletAdmin'&&walletAdminEnabled){
-    try{await refreshWalletAdmin();const composing=document.activeElement?.closest('#walletAdminSettingsForm,#walletAdminSearchForm,#walletAdminAdjustForm');if(!composing)render();}catch(_){}
+    try{await refreshWalletAdmin();const composing=document.activeElement?.closest('#walletAdminSettingsForm,#walletAdminSearchForm,#walletAdminAdjustForm,#walletAdminChatForm,#walletAdminChatSelectForm');if(!composing)render();}catch(_){}
   }
 },15000);
 
