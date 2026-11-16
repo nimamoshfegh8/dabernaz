@@ -56,15 +56,27 @@ const saved=await request('/api/admin/wallet/settings',{account:admin,method:'PO
  cardNumber:'1234567812345678',cardHolder:'Wallet QA Holder',bankName:'بانک آزمون',paymentNote:'رسید را واضح ارسال کن.'
 }});
 assert.equal(saved.settings.cardNumber,'1234567812345678');
-const publicSettings=await request('/api/wallet/payment-info',{account:customer});
-assert.equal(publicSettings.paymentInfo.cardNumber,'1234567812345678');
-assert.equal(publicSettings.paymentInfo.cardHolder,'Wallet QA Holder');
+await expectStatus('/api/wallet/payment-info',405,{account:customer});
 
 const deposit=await request('/api/wallet/requests',{account:customer,method:'POST',body:{type:'deposit',amount:50000}});
 assert.ok(deposit.requestId>0);
 assert.equal(deposit.status,'awaiting_receipt');
 const customerRequests=await request('/api/wallet/requests',{account:customer});
 assert.equal(customerRequests.requests[0].status,'awaiting_receipt');
+assert.ok(!('card_number' in customerRequests.requests[0]),'customer wallet responses must not expose destination card numbers');
+assert.ok(!('card_holder' in customerRequests.requests[0]),'customer wallet responses must not expose destination card holders');
+const sentByCustomer=await request('/api/wallet/messages',{account:customer,method:'POST',body:{message:'برای واریز لطفاً شماره کارت را ارسال کنید.'}});
+assert.ok(sentByCustomer.message?.id>0);
+assert.deepEqual((await request('/api/wallet/messages',{account:other})).messages,[],'a different customer must not read another account conversation');
+await expectStatus('/api/admin/wallet/messages?member_id='+encodeURIComponent(customer.memberId),403,{account:customer});
+await expectStatus('/api/admin/wallet/messages',403,{account:customer,method:'POST',body:{memberId:customer.memberId,message:'ارسال غیرمجاز'}});
+const adminThread=await request('/api/admin/wallet/messages?member_id='+encodeURIComponent(customer.memberId),{account:admin});
+assert.equal(adminThread.messages.length,1);
+assert.equal(adminThread.messages[0].sender_type,'user');
+await request('/api/admin/wallet/messages',{account:admin,method:'POST',body:{memberId:customer.memberId,message:'شماره کارت آزمایشی: 1234567812345678'}});
+const customerThread=await request('/api/wallet/messages',{account:customer});
+assert.deepEqual(customerThread.messages.map(message=>message.sender_type),['user','admin']);
+assert.match(customerThread.messages[1].message,/1234567812345678/,'the customer must receive the finance admin reply privately');
 assert.equal((await request('/api/wallet/requests',{account:other})).requests.length,0);
 await expectStatus('/api/wallet/requests/'+deposit.requestId+'/receipt',404,{account:other,method:'POST',body:{dataUrl:'data:image/png;base64,'+Buffer.from('receipt-proof-payload-'.repeat(10)).toString('base64')}});
 const fakePng='data:image/png;base64,'+Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),Buffer.from('X'.repeat(220))]).toString('base64');

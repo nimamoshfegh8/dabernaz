@@ -2,12 +2,12 @@
 
 // The service worker must not pin old app.js/styles.css after a Pages deployment.
 // Core code is network-first; cached copies are used only when the device is offline.
-const CACHE_NAME = 'dabernaz-shell-v26';
+const CACHE_NAME = 'dabernaz-shell-v27';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './styles.css?v=4.7.1',
-  './app.js?v=4.24.0',
+  './styles.css?v=4.7.2',
+  './app.js?v=4.25.0',
   './icon.svg',
   './manifest.webmanifest'
 ];

@@ -45,7 +45,7 @@ state.gamesPlayed=0; state.wins=0; state.points=0; state.joined=[];
 state.transactions=[]; state.coinTransactions=[]; state.referralCode='';
 let currentUser = null;
 let supportAdminEnabled=false, supportAdminTickets=[], supportSelectedTicketId=null, supportThread=null, supportAdminFilter='all', supportAdminKnownTicketIds=new Set();
-let walletAdminEnabled=false, walletAdminRequests=[], walletAdminFilter='all', walletAdminSelectedRequest=null, walletAdminUsers=[], walletAdminSelectedMemberId='';
+let walletAdminEnabled=false, walletAdminRequests=[], walletAdminFilter='all', walletAdminSelectedRequest=null, walletAdminUsers=[], walletAdminSelectedMemberId='', walletMessages=[], walletAdminMessages=[], walletAdminConversationMemberId='', walletAdminConversationUser=null;
 let authReady = false;
 let apiReady = false;
 let apiErrorMessage = '';
@@ -672,11 +672,10 @@ async function loadAuthenticatedUser() {
   } catch (_) { /* Aggregate tournament counts are optional during an API outage. */ }
 
   if (currentUser) {
-    const [referralResult, tournamentResult, ticketResult, walletInfoResult, walletRequestsResult] = await Promise.allSettled([
+    const [referralResult, tournamentResult, ticketResult, walletRequestsResult] = await Promise.allSettled([
       apiRequest('/api/referrals', { method:'GET', headers:{} }),
       apiRequest('/api/tournaments/me', { method:'GET', headers:{} }),
       apiRequest('/api/tickets', { method:'GET', headers:{} }),
-      apiRequest('/api/wallet/payment-info', { method:'GET', headers:{} }),
       apiRequest('/api/wallet/requests', { method:'GET', headers:{}})
     ]);
     if (referralResult.status === 'fulfilled') {
@@ -693,7 +692,7 @@ async function loadAuthenticatedUser() {
       state.tournamentRooms = Array.isArray(data.rooms) ? data.rooms : [];
     }
     if (ticketResult.status === 'fulfilled') state.supportTickets = Array.isArray(ticketResult.value.tickets) ? ticketResult.value.tickets : [];
-    if (walletInfoResult.status === 'fulfilled') state.walletPaymentInfo = walletInfoResult.value.paymentInfo || state.walletPaymentInfo;
+    state.walletPaymentInfo = {cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
     if (walletRequestsResult.status === 'fulfilled') state.walletRequests = Array.isArray(walletRequestsResult.value.requests) ? walletRequestsResult.value.requests : [];
     try { const adminResult=await apiRequest('/api/admin/support',{method:'GET',headers:{}}); supportAdminEnabled=adminResult.isAdmin===true; supportAdminTickets=Array.isArray(adminResult.tickets)?adminResult.tickets:[]; supportAdminKnownTicketIds=new Set(supportAdminTickets.map(t=>Number(t.id))); }
     catch (_) { supportAdminEnabled=false; supportAdminTickets=[]; }
@@ -1299,15 +1298,17 @@ function walletStatusLabel(status){
 }
 function walletTypeLabel(type){return type==='deposit'?'واریز':'برداشت';}
 function walletCardNumber(value){return String(value||'').replace(/\D/g,'').replace(/(\d{4})(?=\d)/g,'$1 ').trim();}
+function walletChatMarkup(messages,admin,memberId){
+ const rows=messages.length?messages.map(m=>'<div class="wallet-chat-message '+(m.sender_type==='admin'?'from-admin':'from-user')+'"><small>'+(m.sender_type==='admin'?'مدیریت مالی':'شما')+'</small><p>'+escapeHTML(m.message)+'</p><time>'+escapeHTML(m.created_at||'')+'</time></div>').join(''):'<div class="empty">هنوز پیامی در این گفت‌وگوی مالی ثبت نشده است.</div>';
+ return '<div class="wallet-chat-thread" aria-live="polite">'+rows+'</div><form id="'+(admin?'walletAdminChatForm':'walletUserChatForm')+'" class="wallet-chat-compose">'+(admin?'<input type="hidden" name="memberId" value="'+escapeHTML(memberId||'')+'">':'')+'<textarea class="form-control" name="message" rows="2" maxlength="1000" placeholder="پیام خود را بنویسید..." required></textarea><button class="btn btn-primary" type="submit" '+(admin&&!memberId?'disabled':'')+'>ارسال پیام</button></form>';
+}
 function renderWallet(){
- const info=state.walletPaymentInfo||{};
  const rows=state.transactions.length?state.transactions.map(tx=>'<div class="transaction"><div class="transaction-icon '+(Number(tx.amount)<0?'out':'')+'">'+(Number(tx.amount)<0?'↗':'↙')+'</div><div class="transaction-info"><b>'+escapeHTML(tx.title||'تراکنش کیف پول')+'</b><small>'+escapeHTML(tx.date||'')+'</small></div><span class="transaction-amount '+(Number(tx.amount)<0?'negative':'positive')+'">'+(Number(tx.amount)>0?'+':'')+money(tx.amount)+' تومان</span></div>').join(''):'<div class="empty"><span>🪙</span>هنوز تراکنش تومانی ثبت نشده است.</div>';
  const coinRows=state.coinTransactions.length?state.coinTransactions.map(tx=>'<div class="transaction"><div class="transaction-icon coin-transaction-icon">B</div><div class="transaction-info"><b>'+escapeHTML(tx.title)+'</b><small>'+escapeHTML(tx.date)+'</small></div><span class="transaction-amount '+(tx.amount<0?'negative':'positive')+'">'+(tx.amount>0?'+':'')+tx.amount.toLocaleString('fa-IR')+' BGC</span></div>').join(''):'<div class="empty"><span>✦</span>هنوز تراکنش بینگوکوین ثبت نشده است.</div>';
- const requestRows=state.walletRequests.length?state.walletRequests.map(r=>'<article class="wallet-request-row"><div class="wallet-request-main"><b>#'+faDigits(r.id)+' · '+walletTypeLabel(r.request_type)+'</b><strong>'+money(r.amount)+' تومان</strong><small>'+escapeHTML(r.created_at||'')+'</small><span class="tag">'+walletStatusLabel(r.status)+'</span></div><div class="wallet-request-extra">'+(r.request_type==='withdraw'?'<small>کارت مقصد: '+escapeHTML(walletCardNumber(r.card_number))+'</small>':'<small>'+(r.has_receipt?'رسید ارسال شده':'رسید ارسال نشده')+'</small>')+(r.status==='awaiting_receipt'?'<button class="btn btn-outline" data-action="wallet-upload-receipt" data-request-id="'+Number(r.id)+'">ارسال رسید پرداخت</button>':'')+(r.status==='pending_transfer'?'<button class="btn btn-outline" data-action="wallet-cancel-request" data-request-id="'+Number(r.id)+'">لغو درخواست</button>':'')+(r.admin_note?'<small>یادداشت مدیر: '+escapeHTML(r.admin_note)+'</small>':'')+'</div></article>').join(''):'<div class="empty">هنوز درخواست واریز یا برداشتی ثبت نکرده‌ای.</div>';
- return heading('کیف پول من','شارژ و برداشت دستی با بررسی مدیر؛ بدون اتصال درگاه پرداخت.','MANUAL WALLET')+
+ const requestRows=state.walletRequests.length?state.walletRequests.map(r=>'<article class="wallet-request-row"><div class="wallet-request-main"><b>#'+faDigits(r.id)+' · '+walletTypeLabel(r.request_type)+'</b><strong>'+money(r.amount)+' تومان</strong><small>'+escapeHTML(r.created_at||'')+'</small><span class="tag">'+walletStatusLabel(r.status)+'</span></div><div class="wallet-request-extra">'+(r.request_type==='withdraw'?'<small>اطلاعات کارت مقصد ثبت شده است</small>':'<small>'+(r.has_receipt?'رسید ارسال شده':'رسید ارسال نشده')+'</small>')+(r.status==='awaiting_receipt'?'<button class="btn btn-outline" data-action="wallet-upload-receipt" data-request-id="'+Number(r.id)+'">ارسال رسید پرداخت</button>':'')+(r.status==='pending_transfer'?'<button class="btn btn-outline" data-action="wallet-cancel-request" data-request-id="'+Number(r.id)+'">لغو درخواست</button>':'')+(r.admin_note?'<small>یادداشت مدیر: '+escapeHTML(r.admin_note)+'</small>':'')+'</div></article>').join(''):'<div class="empty">هنوز درخواست واریز یا برداشتی ثبت نکرده‌ای.</div>';
+ return heading('کیف پول من','شارژ و برداشت دستی با بررسی مدیر؛ بدون نمایش عمومی اطلاعات کارت.','MANUAL WALLET')+
  '<div class="wallet-currency-grid"><section class="wallet-hero"><small>موجودی تومان</small><div class="wallet-balance">'+money(state.balance)+' <span>تومان</span></div><p>اعتبار قابل استفاده در بازی‌ها و خدمات دابرناز.</p><div class="wallet-actions"><button class="btn btn-outline" data-action="wallet-open-deposit">درخواست واریز</button><button class="btn btn-outline" data-action="wallet-open-withdraw">درخواست برداشت</button></div></section><section class="wallet-hero bingocoin-wallet-hero"><small>موجودی BINGO COIN</small><div class="wallet-balance">'+state.bingoCoins.toLocaleString('fa-IR')+' <img class="bingocoin-icon-img wallet-coin-img" src="./assets/bingocoin.svg" alt="بینگوکوین"></div><p>ارز مجازی اختصاصی برای ورود به تورنومنت‌ها.</p><button class="btn btn-gold btn-block" data-page="tournaments">مشاهده تورنومنت‌ها</button></section></div>'+
- '<section class="panel wallet-bank-panel"><div class="section-title"><h2>اطلاعات کارت مقصد برای واریز</h2></div>'+(info.cardNumber?'<div class="wallet-bank-details"><small>'+(escapeHTML(info.bankName||'حساب مقصد'))+'</small><strong dir="ltr">'+escapeHTML(walletCardNumber(info.cardNumber))+'</strong><b>'+escapeHTML(info.cardHolder||'')+'</b><button class="btn btn-outline" data-action="wallet-copy-card">کپی شماره کارت</button></div><p class="muted-note">'+escapeHTML(info.paymentNote||'پس از انتقال وجه، تصویر رسید را در درخواست واریز ثبت کن. شارژ پس از بررسی مدیر اعمال می‌شود.')+'</p>':'<p class="muted-note">شماره کارت مقصد هنوز توسط مدیریت ثبت نشده است. پس از تنظیم کارت، امکان ثبت درخواست واریز فعال می‌شود.</p>')+'</section>'+
-
+ '<section class="panel wallet-chat-panel"><div class="section-title"><h2>گفت‌وگوی خصوصی مالی</h2></div><p class="muted-note">برای دریافت اطلاعات واریز یا پیگیری درخواست، پیام خود را اینجا ارسال کن. اطلاعات کارت فقط توسط مدیریت و در همین گفت‌وگو برایت فرستاده می‌شود.</p>'+walletChatMarkup(walletMessages,false,'')+'</section>'+
  section('درخواست‌های واریز و برداشت')+'<section class="panel wallet-request-list">'+requestRows+'</section>'+
  section('تاریخچه کیف پول تومانی')+'<section class="panel" style="padding:2px 12px">'+rows+'</section>'+
  section('تاریخچه بینگوکوین')+'<section class="panel" style="padding:2px 12px">'+coinRows+'</section>'+
@@ -1319,7 +1320,7 @@ function renderWalletAdmin(){
  const filters=[['all','همه'],['pending_review','در انتظار بررسی'],['pending_transfer','برداشت‌های در انتظار پرداخت'],['awaiting_receipt','در انتظار رسید'],['paid','پرداخت‌شده'],['approved','تأییدشده'],['rejected','ردشده'],['cancelled','لغوشده']];
  const filtered=walletAdminRequests.filter(r=>walletAdminFilter==='all'||r.status===walletAdminFilter);
  const selected=walletAdminSelectedRequest&&walletAdminSelectedRequest.request?walletAdminSelectedRequest.request:null;
- const list=filtered.length?filtered.map(r=>'<button class="wallet-admin-request" data-action="wallet-admin-open-request" data-request-id="'+Number(r.id)+'"><span><b>#'+faDigits(r.id)+' · '+walletTypeLabel(r.request_type)+' · '+escapeHTML(r.username||'')+'</b><small>شناسه '+escapeHTML(r.member_id||'')+' · '+money(r.amount)+' تومان · '+escapeHTML(r.created_at||'')+'</small></span><span class="tag">'+walletStatusLabel(r.status)+'</span></button>').join(''):'<div class="empty">درخواستی در این وضعیت وجود ندارد.</div>';
+ const list=filtered.length?filtered.map(r=>'<div class="wallet-admin-request-wrap"><button class="wallet-admin-request" data-action="wallet-admin-open-request" data-request-id="'+Number(r.id)+'"><span><b>#'+faDigits(r.id)+' · '+walletTypeLabel(r.request_type)+' · '+escapeHTML(r.username||'')+'</b><small>شناسه '+escapeHTML(r.member_id||'')+' · '+money(r.amount)+' تومان · '+escapeHTML(r.created_at||'')+'</small></span><span class="tag">'+walletStatusLabel(r.status)+'</span></button><button class="btn btn-outline wallet-chat-shortcut" data-action="wallet-admin-open-chat" data-member-id="'+escapeHTML(r.member_id||'')+'" data-username="'+escapeHTML(r.username||'')+'">گفت‌وگو با کاربر</button></div>').join(''):'<div class="empty">درخواستی در این وضعیت وجود ندارد.</div>';
  let detail='';
  if(selected){
   detail='<section class="panel wallet-admin-detail"><div class="section-title"><h2>درخواست #'+faDigits(selected.id)+'</h2><span class="tag">'+walletStatusLabel(selected.status)+'</span></div>'+
@@ -1331,22 +1332,25 @@ function renderWalletAdmin(){
   '<p class="muted-note">یادداشت مدیر: '+escapeHTML(selected.admin_note||'—')+'</p></section>';
  }
  const info=state.walletPaymentInfo||{};
- const users=walletAdminUsers.length?walletAdminUsers.map(u=>'<button class="wallet-admin-user-result" data-action="wallet-admin-pick-user" data-member-id="'+escapeHTML(u.member_id||'')+'"><b>'+escapeHTML(u.username||'')+'</b><small>ID '+escapeHTML(u.member_id||'')+' · '+escapeHTML(u.email||'')+' · موجودی '+money(u.balance)+' تومان</small></button>').join(''):'<div class="muted-note">برای جست‌وجو، نام کاربری، ایمیل یا شناسه بازیکن را وارد کن.</div>';
- return heading('مدیریت مالی','بررسی واریزها و برداشت‌ها، تنظیم کارت مقصد و اصلاح موجودی کاربران.','SECURE WALLET ADMIN')+
+ const users=walletAdminUsers.length?walletAdminUsers.map(u=>'<button class="wallet-admin-user-result" data-action="wallet-admin-pick-user" data-member-id="'+escapeHTML(u.member_id||'')+'" data-username="'+escapeHTML(u.username||'')+'"><b>'+escapeHTML(u.username||'')+'</b><small>ID '+escapeHTML(u.member_id||'')+' · '+escapeHTML(u.email||'')+' · موجودی '+money(u.balance)+' تومان</small></button>').join(''):'<div class="muted-note">برای جست‌وجو، نام کاربری، ایمیل یا شناسه بازیکن را وارد کن.</div>';
+ const chatTitle=walletAdminConversationUser?.username||walletAdminConversationMemberId||'کاربری انتخاب نشده';
+ return heading('مدیریت مالی','بررسی درخواست‌ها و گفت‌وگوی خصوصی با کاربران؛ اطلاعات کارت فقط از این پنل ارسال می‌شود.','SECURE WALLET ADMIN')+
  '<div class="support-admin-stats"><div><b>'+faDigits(counts.all)+'</b><small>همه درخواست‌ها</small></div><div><b>'+faDigits(counts.pending_review)+'</b><small>رسیدهای آماده بررسی</small></div><div><b>'+faDigits(counts.pending_transfer)+'</b><small>برداشت‌های باز</small></div><div><b>'+faDigits(counts.awaiting_receipt)+'</b><small>منتظر رسید</small></div></div>'+
- '<section class="panel wallet-admin-settings"><div class="section-title"><h2>کارت مقصد واریز کاربران</h2></div><form id="walletAdminSettingsForm" class="form-stack"><label>شماره کارت ۱۶ رقمی<input class="form-control" name="cardNumber" inputmode="numeric" maxlength="19" value="'+escapeHTML(info.cardNumber||'')+'" placeholder="شماره کارت مقصد" required></label><label>نام صاحب کارت<input class="form-control" name="cardHolder" maxlength="80" value="'+escapeHTML(info.cardHolder||'')+'" placeholder="نام و نام خانوادگی" required></label><label>نام بانک<input class="form-control" name="bankName" maxlength="60" value="'+escapeHTML(info.bankName||'')+'" placeholder="نام بانک"></label><label>توضیحات برای کاربر<textarea class="form-control" name="paymentNote" rows="2" maxlength="400" placeholder="مثلاً مبلغ دقیق را واریز کن و رسید را بارگذاری کن.">'+escapeHTML(info.paymentNote||'')+'</textarea></label><button class="btn btn-primary btn-block" type="submit">ذخیره اطلاعات کارت مقصد</button></form></section>'+
+ '<section class="panel wallet-admin-settings"><div class="section-title"><h2>کارت مقصد واریز کاربران (فقط مدیر)</h2></div><form id="walletAdminSettingsForm" class="form-stack"><label>شماره کارت ۱۶ رقمی<input class="form-control" name="cardNumber" inputmode="numeric" maxlength="19" value="'+escapeHTML(info.cardNumber||'')+'" placeholder="شماره کارت مقصد" required></label><label>نام صاحب کارت<input class="form-control" name="cardHolder" maxlength="80" value="'+escapeHTML(info.cardHolder||'')+'" placeholder="نام و نام خانوادگی" required></label><label>نام بانک<input class="form-control" name="bankName" maxlength="60" value="'+escapeHTML(info.bankName||'')+'" placeholder="نام بانک"></label><label>توضیحات داخلی/پرداخت<textarea class="form-control" name="paymentNote" rows="2" maxlength="400" placeholder="توضیحات">'+escapeHTML(info.paymentNote||'')+'</textarea></label><button class="btn btn-primary btn-block" type="submit">ذخیره اطلاعات کارت مقصد</button></form></section>'+
  '<section class="panel wallet-admin-adjust"><div class="section-title"><h2>جست‌وجو و اصلاح موجودی کاربر</h2></div><form id="walletAdminSearchForm" class="wallet-admin-search"><input class="form-control" name="query" minlength="2" placeholder="شناسه، نام کاربری یا ایمیل"><button class="btn btn-outline" type="submit">جست‌وجو</button></form><div class="wallet-admin-user-results">'+users+'</div><form id="walletAdminAdjustForm" class="form-stack"><label>شناسه بازیکن<input class="form-control" name="memberId" inputmode="numeric" value="'+escapeHTML(walletAdminSelectedMemberId||'')+'" placeholder="شناسه دقیق کاربر" required></label><label>مبلغ تغییر موجودی (تومان)<input class="form-control" name="amount" type="number" step="1000" min="-50000000" max="50000000" placeholder="مثبت برای افزایش، منفی برای کاهش" required></label><label>علت تغییر<input class="form-control" name="reason" minlength="3" maxlength="180" placeholder="علت ثبت‌شده در سوابق مالی" required></label><button class="btn btn-primary btn-block" type="submit">ثبت تغییر موجودی</button></form><p class="muted-note">هر اصلاح، همراه با مبلغ و علت، در تاریخچه تراکنش‌های همان حساب ثبت می‌شود. موجودی منفی مجاز نیست.</p></section>'+
+ '<section class="panel wallet-admin-chat-panel"><div class="section-title"><h2>گفت‌وگوی خصوصی مالی</h2><small>'+escapeHTML(chatTitle)+'</small></div><form id="walletAdminChatSelectForm" class="wallet-admin-search"><input class="form-control" name="memberId" inputmode="numeric" placeholder="شناسه بازیکن برای باز کردن گفت‌وگو" value="'+escapeHTML(walletAdminConversationMemberId)+'" required><button class="btn btn-outline" type="submit">باز کردن گفت‌وگو</button></form>'+walletChatMarkup(walletAdminMessages,true,walletAdminConversationMemberId)+'</section>'+
  '<section class="panel wallet-admin-inbox"><div class="section-title"><h2>صندوق درخواست‌های مالی</h2></div><div class="support-admin-filters">'+filters.map(x=>'<button class="btn '+(walletAdminFilter===x[0]?'btn-primary':'btn-outline')+'" data-action="wallet-admin-filter" data-filter="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>'+detail+'<div class="wallet-admin-request-list">'+list+'</div></section>';
 }
 async function refreshWalletData(){
- const [profile,info,requests]=await Promise.all([
+ const [profile,requests,messages]=await Promise.all([
   apiRequest('/api/auth/me',{method:'GET',headers:{}}),
-  apiRequest('/api/wallet/payment-info',{method:'GET',headers:{}}),
-  apiRequest('/api/wallet/requests',{method:'GET',headers:{}})
+  apiRequest('/api/wallet/requests',{method:'GET',headers:{}}),
+  apiRequest('/api/wallet/messages',{method:'GET',headers:{}})
  ]);
  if(profile.user)applyAuthenticatedUser(profile.user);
- state.walletPaymentInfo=info.paymentInfo||state.walletPaymentInfo;
+ state.walletPaymentInfo={cardNumber:'',cardHolder:'',bankName:'',paymentNote:''};
  state.walletRequests=Array.isArray(requests.requests)?requests.requests:[];
+ walletMessages=Array.isArray(messages.messages)?messages.messages:[];
  saveState();
 }
 async function refreshWalletAdmin(){
@@ -1357,6 +1361,11 @@ async function refreshWalletAdmin(){
  if(settings.settings)state.walletPaymentInfo=settings.settings;
  if(walletAdminSelectedRequest&&walletAdminSelectedRequest.request){
   walletAdminSelectedRequest=await apiRequest('/api/admin/wallet/'+Number(walletAdminSelectedRequest.request.id),{method:'GET',headers:{}});
+ }
+ if(walletAdminConversationMemberId){
+  const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(walletAdminConversationMemberId),{method:'GET',headers:{}});
+  walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];
+  walletAdminConversationUser=chat.user||walletAdminConversationUser;
  }
 }
 
@@ -1404,7 +1413,7 @@ function renderSettings() {
   </section>
   <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
     <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
-    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.24.0</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.25.0</span></div>
   </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }
@@ -1829,8 +1838,7 @@ document.addEventListener('click', async event => {
   const action = actionEl.dataset.action;
   if(action==='wallet-open-deposit'){
     if(!requireLogin())return;
-    if(!state.walletPaymentInfo?.cardNumber){showToast('شماره کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');return;}
-    openModal('درخواست واریز', '<form id="walletDepositForm" class="form-stack"><p class="muted-note">مبلغ موردنظر را وارد کن. پس از ثبت درخواست، شماره کارت مقصد نمایش داده می‌شود و می‌توانی رسید انتقال را ارسال کنی.</p><label>مبلغ واریز (تومان)<input class="form-control" name="amount" type="number" min="10000" max="50000000" step="1000" placeholder="حداقل ۱۰٬۰۰۰ تومان" required></label><button class="btn btn-primary btn-block" type="submit">ثبت درخواست و نمایش کارت مقصد</button></form>');
+    openModal('درخواست واریز', '<form id="walletDepositForm" class="form-stack"><p class="muted-note">پس از ثبت درخواست، از بخش گفت‌وگوی خصوصی مالی در همین صفحه برای دریافت اطلاعات پرداخت به مدیریت پیام بده. شماره کارت در صفحه کیف پول نمایش داده نمی‌شود.</p><label>مبلغ واریز (تومان)<input class="form-control" name="amount" type="number" min="10000" max="50000000" step="1000" placeholder="حداقل ۱۰٬۰۰۰ تومان" required></label><button class="btn btn-primary btn-block" type="submit">ثبت درخواست واریز</button></form>');
     return;
   }
   if(action==='wallet-open-withdraw'){
@@ -1859,7 +1867,21 @@ document.addEventListener('click', async event => {
   if(action==='wallet-admin-filter'){walletAdminFilter=actionEl.dataset.filter||'all';render();return;}
   if(action==='wallet-admin-open-request'){
     if(!requireLogin())return;
-    try{walletAdminSelectedRequest=await apiRequest('/api/admin/wallet/'+Number(actionEl.dataset.requestId),{method:'GET',headers:{}});setPage('walletAdmin',{scroll:false});}
+    try{
+     walletAdminSelectedRequest=await apiRequest('/api/admin/wallet/'+Number(actionEl.dataset.requestId),{method:'GET',headers:{}});
+     walletAdminConversationMemberId=String(walletAdminSelectedRequest.request?.member_id||'');
+     const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(walletAdminConversationMemberId),{method:'GET',headers:{}});
+     walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];
+     walletAdminConversationUser=chat.user||null;
+     setPage('walletAdmin',{scroll:false});
+    }catch(error){showToast(error.message);}
+    return;
+  }
+  if(action==='wallet-admin-open-chat'||action==='wallet-admin-pick-user'){
+    walletAdminConversationMemberId=String(actionEl.dataset.memberId||'');
+    walletAdminConversationUser={memberId:walletAdminConversationMemberId,username:String(actionEl.dataset.username||'')};
+    walletAdminSelectedMemberId=walletAdminConversationMemberId;
+    try{const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(walletAdminConversationMemberId),{method:'GET',headers:{}});walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];walletAdminConversationUser=chat.user||walletAdminConversationUser;render();}
     catch(error){showToast(error.message);}
     return;
   }
@@ -2113,9 +2135,7 @@ document.addEventListener('submit', async event => {
       const result=await apiRequest('/api/wallet/requests',{method:'POST',body:JSON.stringify({type:'deposit',amount})});
       await refreshWalletData();
       closeModal();render();
-      const info=state.walletPaymentInfo||{};
-      openModal('پرداخت درخواست #'+faDigits(result.requestId),'<div class="wallet-transfer-instructions"><p>مبلغ دقیق <b>'+money(amount)+' تومان</b> را به کارت زیر انتقال بده:</p><strong dir="ltr">'+escapeHTML(walletCardNumber(info.cardNumber))+'</strong><b>'+escapeHTML(info.cardHolder||'')+'</b><small>'+escapeHTML(info.bankName||'')+'</small><p>'+escapeHTML(info.paymentNote||'پس از انتقال وجه، تصویر رسید را در همین درخواست ارسال کن.')+'</p></div><form id="walletReceiptForm" class="form-stack" data-request-id="'+Number(result.requestId)+'"><label>تصویر رسید (حداکثر ۵۱۲ کیلوبایت)<input class="form-control" type="file" name="receipt" accept="image/png,image/jpeg,image/webp" required></label><button class="btn btn-primary btn-block" type="submit">ارسال رسید برای بررسی</button></form>');
-      showToast('درخواست واریز ثبت شد؛ پس از انتقال وجه رسید را ارسال کن.');
+      showToast('درخواست واریز #'+faDigits(result.requestId)+' ثبت شد. برای دریافت شماره کارت، در گفت‌وگوی خصوصی مالی پیام بده.');
     }catch(error){showToast(error.message);}
     finally{if(button?.isConnected)button.disabled=false;}
   }
@@ -2141,6 +2161,24 @@ document.addEventListener('submit', async event => {
       await refreshWalletData();closeModal();render();showToast('رسید ارسال شد و درخواست در صف بررسی مدیر قرار گرفت.');
     }catch(error){showToast(error.message);}
     finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletUserChatForm'){
+    event.preventDefault();
+    const message=String(new FormData(event.target).get('message')||'').trim();if(!message)return;
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{await apiRequest('/api/wallet/messages',{method:'POST',body:JSON.stringify({message})});await refreshWalletData();render();}
+    catch(error){showToast(error.message);}finally{if(button?.isConnected)button.disabled=false;}
+  }
+  if(event.target.id==='walletAdminChatSelectForm'){
+    event.preventDefault();const memberId=String(new FormData(event.target).get('memberId')||'').trim();
+    try{const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(memberId),{method:'GET',headers:{}});walletAdminConversationMemberId=memberId;walletAdminConversationUser=chat.user||null;walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];render();}
+    catch(error){showToast(error.message);}
+  }
+  if(event.target.id==='walletAdminChatForm'){
+    event.preventDefault();const data=new FormData(event.target),memberId=String(data.get('memberId')||'').trim(),message=String(data.get('message')||'').trim();if(!memberId||!message)return;
+    const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
+    try{await apiRequest('/api/admin/wallet/messages',{method:'POST',body:JSON.stringify({memberId,message})});const chat=await apiRequest('/api/admin/wallet/messages?member_id='+encodeURIComponent(memberId),{method:'GET',headers:{}});walletAdminMessages=Array.isArray(chat.messages)?chat.messages:[];render();}
+    catch(error){showToast(error.message);}finally{if(button?.isConnected)button.disabled=false;}
   }
   if(event.target.id==='walletAdminSettingsForm'){
     event.preventDefault();
@@ -2235,9 +2273,9 @@ setInterval(async()=>{
       const composing=document.activeElement?.closest('#supportForm,#supportReplyForm');if(!composing)render();
     }catch(_){}
   }else if(currentPage==='wallet'){
-    try{await refreshWalletData();const composing=document.activeElement?.closest('#walletDepositForm,#walletWithdrawForm,#walletReceiptForm');if(!composing)render();}catch(_){}
+    try{await refreshWalletData();const composing=document.activeElement?.closest('#walletDepositForm,#walletWithdrawForm,#walletReceiptForm,#walletUserChatForm');if(!composing)render();}catch(_){}
   }else if(currentPage==='walletAdmin'&&walletAdminEnabled){
-    try{await refreshWalletAdmin();const composing=document.activeElement?.closest('#walletAdminSettingsForm,#walletAdminSearchForm,#walletAdminAdjustForm');if(!composing)render();}catch(_){}
+    try{await refreshWalletAdmin();const composing=document.activeElement?.closest('#walletAdminSettingsForm,#walletAdminSearchForm,#walletAdminAdjustForm,#walletAdminChatForm,#walletAdminChatSelectForm');if(!composing)render();}catch(_){}
   }
 },15000);
 

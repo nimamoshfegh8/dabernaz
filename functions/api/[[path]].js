@@ -242,6 +242,15 @@ async function ensureSchema(db) {
       payment_note TEXT NOT NULL DEFAULT '',
       updated_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS wallet_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      sender_type TEXT NOT NULL CHECK(sender_type IN ('user','admin')),
+      message TEXT NOT NULL CHECK(length(message) BETWEEN 1 AND 1000),
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wallet_messages_user ON wallet_messages(user_id,id DESC)`,
     `CREATE TABLE IF NOT EXISTS manual_wallet_requests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -1936,6 +1945,27 @@ async function routeRequest(request, env) {
         .bind(cardNumber,cardHolder,bankName,paymentNote,now).run();
       return json({ok:true,settings:{cardNumber,cardHolder,bankName,paymentNote,updatedAt:now}});
     }
+    if (request.method === 'GET' && path === '/api/admin/wallet/messages') {
+      const memberId = String(new URL(request.url).searchParams.get('member_id') || '').trim();
+      if (!/^\d{4,12}$/.test(memberId)) throw new HttpError(400, 'شناسه کاربر معتبر نیست.');
+      const target = await env.DB.prepare('SELECT id,member_id,username FROM users WHERE member_id=? LIMIT 1').bind(memberId).first();
+      if (!target) throw new HttpError(404, 'کاربر پیدا نشد.');
+      const rows = await env.DB.prepare('SELECT id,sender_type,message,created_at FROM wallet_messages WHERE user_id=? ORDER BY id ASC LIMIT 200').bind(target.id).all();
+      return json({ok:true,user:{memberId:target.member_id,username:target.username},messages:rows.results || []});
+    }
+    if (request.method === 'POST' && path === '/api/admin/wallet/messages') {
+      validateWriteOrigin(request);
+      const body = await readJson(request);
+      const memberId = String(body.memberId || '').trim();
+      const message = String(body.message || '').trim();
+      if (!/^\d{4,12}$/.test(memberId)) throw new HttpError(400, 'شناسه کاربر معتبر نیست.');
+      if (!message || message.length > 1000) throw new HttpError(400, 'پیام باید بین ۱ تا ۱۰۰۰ نویسه باشد.');
+      const target = await env.DB.prepare('SELECT id FROM users WHERE member_id=? LIMIT 1').bind(memberId).first();
+      if (!target) throw new HttpError(404, 'کاربر پیدا نشد.');
+      const now = new Date().toISOString();
+      const inserted = await env.DB.prepare("INSERT INTO wallet_messages(user_id,sender_type,message,created_at) VALUES(?,'admin',?,?)").bind(target.id,message,now).run();
+      return json({ok:true,message:{id:Number(inserted.meta?.last_row_id||0),sender_type:'admin',message,created_at:now}});
+    }
     if (request.method === 'GET' && path === '/api/admin/wallet/users') {
       const q = String(new URL(request.url).searchParams.get('q') || '').trim().slice(0,80);
       if (q.length < 2) return json({ok:true,users:[]});
@@ -2008,12 +2038,21 @@ async function routeRequest(request, env) {
     throw new HttpError(404, 'مسیر مدیریت کیف پول پیدا نشد.');
   }
 
-  if (request.method === 'GET' && path === '/api/wallet/payment-info') {
-    const row = await env.DB.prepare('SELECT card_number,card_holder,bank_name,payment_note,updated_at FROM wallet_payment_settings WHERE id=1').first();
-    return json({ok:true,paymentInfo:{cardNumber:row?.card_number || '',cardHolder:row?.card_holder || '',bankName:row?.bank_name || '',paymentNote:row?.payment_note || '',updatedAt:row?.updated_at || ''}});
+  if (request.method === 'GET' && path === '/api/wallet/messages') {
+    const rows = await env.DB.prepare('SELECT id,sender_type,message,created_at FROM wallet_messages WHERE user_id=? ORDER BY id ASC LIMIT 200').bind(user.id).all();
+    return json({ok:true,messages:rows.results || []});
+  }
+  if (request.method === 'POST' && path === '/api/wallet/messages') {
+    validateWriteOrigin(request);
+    const body = await readJson(request);
+    const message = String(body.message || '').trim();
+    if (!message || message.length > 1000) throw new HttpError(400, 'پیام باید بین ۱ تا ۱۰۰۰ نویسه باشد.');
+    const now = new Date().toISOString();
+    const inserted = await env.DB.prepare("INSERT INTO wallet_messages(user_id,sender_type,message,created_at) VALUES(?,'user',?,?)").bind(user.id,message,now).run();
+    return json({ok:true,message:{id:Number(inserted.meta?.last_row_id||0),sender_type:'user',message,created_at:now}});
   }
   if (request.method === 'GET' && path === '/api/wallet/requests') {
-    const rows = await env.DB.prepare('SELECT id,request_type,amount,status,receipt_mime,card_number,card_holder,bank_name,admin_note,handled_at,created_at,updated_at,CASE WHEN receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt FROM manual_wallet_requests WHERE user_id=? ORDER BY id DESC LIMIT 50').bind(user.id).all();
+    const rows = await env.DB.prepare('SELECT id,request_type,amount,status,admin_note,handled_at,created_at,updated_at,CASE WHEN receipt_data_url IS NULL THEN 0 ELSE 1 END AS has_receipt FROM manual_wallet_requests WHERE user_id=? ORDER BY id DESC LIMIT 50').bind(user.id).all();
     return json({ok:true,requests:rows.results || []});
   }
   if (request.method === 'POST' && path === '/api/wallet/requests') {

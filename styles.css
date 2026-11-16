@@ -885,3 +885,20 @@
  .wallet-admin-data-grid{grid-template-columns:1fr 1fr}
  .wallet-admin-search{grid-template-columns:1fr}
 }
+
+
+/* Private wallet conversations */
+.wallet-chat-panel,.wallet-admin-chat-panel{margin:18px 0;padding:18px}
+.wallet-chat-thread{display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto;padding:12px 0}
+.wallet-chat-message{max-width:min(88%,560px);padding:12px 14px;border-radius:14px;background:var(--panel-soft,rgba(127,127,127,.10));border:1px solid var(--border,rgba(127,127,127,.18));overflow-wrap:anywhere}
+.wallet-chat-message.from-admin{align-self:flex-start;border-inline-start:3px solid var(--primary,#b88a35)}
+.wallet-chat-message.from-user{align-self:flex-end;border-inline-end:3px solid var(--accent,#398b75)}
+.wallet-chat-message small,.wallet-chat-message time{display:block;color:var(--muted,#888);font-size:11px}
+.wallet-chat-message p{margin:6px 0;white-space:pre-wrap;line-height:1.8}
+.wallet-chat-compose{display:flex;gap:10px;align-items:flex-end;margin-top:10px}
+.wallet-chat-compose textarea{flex:1;min-width:0;resize:vertical}
+.wallet-chat-compose button{flex-shrink:0}
+.wallet-admin-request-wrap{display:flex;gap:8px;align-items:stretch;margin:8px 0}
+.wallet-admin-request-wrap .wallet-admin-request{flex:1;min-width:0}
+.wallet-chat-shortcut{white-space:nowrap;align-self:center}
+@media(max-width:600px){.wallet-chat-compose{flex-direction:column;align-items:stretch}.wallet-chat-compose button{width:100%}.wallet-admin-request-wrap{flex-direction:column}.wallet-chat-shortcut{width:100%}}
