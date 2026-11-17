@@ -667,7 +667,7 @@ export class RoomCoordinator extends DurableObject {
         calledJson, lineJson, fullJson, linePrize, fullPrize, commission,
         finished ? "completed" : "playing",
         finished ? null : now + DRAW_INTERVAL_MS,
-        finished ? new Date(now).toISOString() : null,
+        finished ? now : null,
         round.id, String(round.called_numbers_json || "[]"),
       ),
     ];
