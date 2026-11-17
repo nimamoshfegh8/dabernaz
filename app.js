@@ -1003,14 +1003,14 @@ function renderRoomPurchasePage() {
         : queue.status === 'playing'
           ? `<button class="btn btn-primary btn-block" data-action="room-join-next">خرید کارت و ثبت‌نام سانس بعدی</button>`
           : queue.status === 'finished'
-            ? `<button class="btn btn-primary btn-block" data-action="room-join-auto">خرید کارت و ثبت‌نام سانس بعدی</button>`
+            ? `<button class="btn btn-primary btn-block" data-action="room-next-session">ورود رایگان به سانس بعدی</button>`
             : joined && waiting
               ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER || timerExpired ? 'disabled' : ''}>${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت تکمیل شده' : timerExpired ? 'مهلت خرید پایان یافته' : 'افزودن و خرید یک کارت'}</button>`
               : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">خرید کارت و ورود به اتاق</button>`;
   const waitingMessage = queue.status === 'playing' ? (nextRound
     ? 'بازی فعلی در حال اجراست؛ ثبت‌نام سانس بعدی در جریان است و پس از پایان بازی فعلی آغاز می‌شود.'
     : 'بازی فعلی در حال اجراست؛ می‌توانی برای سانس بعدی ثبت‌نام کنی.')
-    : queue.status === 'finished' ? 'سانس قبلی پایان یافته است؛ ورود به سانس بعدی رایگان است و خرید کارت جداگانه انجام می‌شود.'
+    : queue.status === 'finished' ? 'سانس قبلی پایان یافته است؛ ورود به صفحه سانس بعدی رایگان است و هیچ مبلغی تا تأیید جداگانه خرید کارت کسر نمی‌شود.'
     : registrationStarted && playerCount < minPlayersToStart && timerExpired ? `مهلت اولیه تمام شده؛ بازی پس از رسیدن تعداد شرکت‌کنندگان به حداقل ${faDigits(minPlayersToStart)} نفر شروع می‌شود.`
     : registrationStarted ? (timerExpired ? 'مهلت خرید به پایان رسیده و حداقل شرکت‌کنندگان کامل شده؛ بازی در حال شروع است.' : `تا پایان مهلت خرید و شروع خودکار بازی با حداقل ${faDigits(minPlayersToStart)} شرکت‌کننده:`)
     : 'با اولین خرید کارت، زمان‌سنج ۲ دقیقه و ۳۰ ثانیه‌ای شروع می‌شود.';
