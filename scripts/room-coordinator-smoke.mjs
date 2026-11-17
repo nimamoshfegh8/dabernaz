@@ -330,7 +330,7 @@ async function main() {
     "The game must resume from durable state after the Worker restarts");
 
   const round1Id = queued.roundId;
-  const completed = await waitForSnapshot("room5000", 910001,
+  const completed = await waitForSnapshot("room5000", 910003,
     (room) => (room.recentSessions || []).some((session) => session.roundId === round1Id), 75_000);
   const round1 = one("SELECT id,status,gross_revenue,line_prize_paid,full_prize_paid,site_commission,called_numbers_json FROM room_rounds WHERE room_id='room5000' AND sequence=1");
   assert.equal(round1.status, "completed");
