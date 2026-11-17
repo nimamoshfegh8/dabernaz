@@ -1631,17 +1631,49 @@ async function routeRequest(request, env) {
       if (reason.length < 3 || reason.length > 180) throw new HttpError(400, 'علت اصلاح موجودی باید بین ۳ تا ۱۸۰ نویسه باشد.');
       const target = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE member_id=? LIMIT 1').bind(memberId).first();
       if (!target) throw new HttpError(404, 'کاربری با این شناسه پیدا نشد.');
+      const idempotencyKey = String(request.headers.get('idempotency-key') || '');
+      if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+        throw new HttpError(400, 'کلید یکتای اصلاح موجودی معتبر نیست؛ دوباره تلاش کن.');
+      }
+      const requestHash = await sha256Hex(JSON.stringify({targetUserId:Number(target.id),amount,reason}));
+      const prior = await env.DB.prepare(
+        'SELECT request_hash,status,target_user_id FROM wallet_adjustment_requests WHERE admin_user_id=? AND idempotency_key=?'
+      ).bind(user.id,idempotencyKey).first();
+      if (prior) {
+        if (prior.request_hash !== requestHash) throw new HttpError(409, 'این کلید برای اطلاعات اصلاح موجودی متفاوتی استفاده شده است.');
+        if (prior.status !== 'applied') throw new HttpError(409, 'درخواست قبلی اعمال نشده است؛ برای عملیات جدید کلید تازه بساز.');
+        const replayUser = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE id=?').bind(target.id).first();
+        return json({ok:true,user:replayUser,replayed:true});
+      }
+
       const now = new Date().toISOString();
       const adjustmentId = randomToken(16);
       const result = await env.DB.batch([
-        env.DB.prepare('UPDATE users SET balance=balance+? WHERE id=? AND balance+?>=0').bind(amount,target.id,amount),
-        env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'admin_adjustment',?,?,? WHERE changes()=1").bind(target.id,amount,'اصلاح موجودی توسط مدیر: '+reason,now),
-        env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'admin_adjustment','admin_adjustment',?,? WHERE changes()=1")
-          .bind(adjustmentId,target.id,amount,adjustmentId,Date.now()),
+        env.DB.prepare("INSERT INTO wallet_adjustment_requests(id,admin_user_id,idempotency_key,request_hash,target_user_id,amount,reason,status,created_at) VALUES(?,?,?,?,?,?,?,'pending',?) ON CONFLICT(admin_user_id,idempotency_key) DO NOTHING")
+          .bind(adjustmentId,user.id,idempotencyKey,requestHash,target.id,amount,reason,Date.now()),
+        env.DB.prepare('UPDATE users SET balance=balance+? WHERE id=? AND balance+?>=0 AND changes()=1')
+          .bind(amount,target.id,amount),
+        env.DB.prepare("UPDATE wallet_adjustment_requests SET status=CASE WHEN changes()=1 THEN 'applied' ELSE 'rejected' END WHERE admin_user_id=? AND idempotency_key=? AND status='pending'")
+          .bind(user.id,idempotencyKey),
+        env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?, 'admin_adjustment',?,?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM wallet_adjustment_requests WHERE admin_user_id=? AND idempotency_key=? AND status='applied')")
+          .bind(target.id,amount,'اصلاح موجودی توسط مدیر: '+reason,now,user.id,idempotencyKey),
+        env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'admin_adjustment','wallet_adjustment',?,? WHERE changes()=1")
+          .bind(randomToken(16),target.id,amount,adjustmentId,Date.now()),
       ]);
-      if (Number(result?.[0]?.meta?.changes || 0) !== 1) throw new HttpError(409, 'موجودی کافی نیست یا اصلاح موجودی انجام نشد.');
+
+      if (Number(result?.[1]?.meta?.changes || 0) !== 1) {
+        const saved = await env.DB.prepare(
+          'SELECT request_hash,status FROM wallet_adjustment_requests WHERE admin_user_id=? AND idempotency_key=?'
+        ).bind(user.id,idempotencyKey).first();
+        if (saved?.request_hash !== requestHash) throw new HttpError(409, 'درخواست اصلاح موجودی هم‌زمان با اطلاعات متفاوت ثبت شد.');
+        if (saved?.status === 'applied') {
+          const replayUser = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE id=?').bind(target.id).first();
+          return json({ok:true,user:replayUser,replayed:true});
+        }
+        throw new HttpError(409, 'موجودی کافی نیست یا درخواست اصلاح موجودی اعمال نشد.');
+      }
       const updated = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE id=?').bind(target.id).first();
-      return json({ok:true,user:updated});
+      return json({ok:true,user:updated,replayed:false});
     }
     const detailMatch = path.match(/^\/api\/admin\/wallet\/(\d+)$/);
     if (detailMatch && request.method === 'GET') {
