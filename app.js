@@ -612,9 +612,12 @@ async function apiRequest(path, options = {}) {
   }
 
   const contentType = response.headers.get('content-type') || '';
-  // PHP fallback is only for an HTTP response indicating that the pretty API route is unavailable.
-  // A transient network error must not be mislabeled as a missing PHP/Node installation.
-  if (path.startsWith('/api/') && (!contentType.includes('application/json') || response.status === 404)) {
+  // Money, authentication, room coordination and tournament routes must never
+  // fall back to the legacy PHP backend. Those fallbacks do not share the D1
+  // transaction/DO source of truth and could duplicate or mis-handle payments.
+  const criticalApiRoute = /^\/api\/(?:rooms\/|tournaments(?:\/|$)|wallet(?:\/|$)|profile$|games\/|admin\/wallet(?:\/|$))/.test(path);
+  // PHP fallback is only for non-critical HTTP routes when the Pages route is unavailable.
+  if (!criticalApiRoute && path.startsWith('/api/') && (!contentType.includes('application/json') || response.status === 404)) {
     try {
       const fallback = await fetch(`/api.php?path=${encodeURIComponent(path)}`, requestOptions);
       if ((fallback.headers.get('content-type') || '').includes('application/json')) response = fallback;
