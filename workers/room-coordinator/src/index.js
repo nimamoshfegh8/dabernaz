@@ -20,6 +20,21 @@ class RoomError extends Error {
   }
 }
 
+function configuredInterval(env, variable, fallback, minimum, maximum) {
+  if (env.DABERNAZ_TEST_DIAGNOSTICS !== "1") return fallback;
+  const value = Number(env[variable]);
+  if (!Number.isSafeInteger(value)) return fallback;
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function registrationWindowMs(env) {
+  return configuredInterval(env, "DABERNAZ_TEST_REGISTRATION_WINDOW_MS", REGISTRATION_WINDOW_MS, 100, 150_000);
+}
+
+function drawIntervalMs(env) {
+  return configuredInterval(env, "DABERNAZ_TEST_DRAW_INTERVAL_MS", DRAW_INTERVAL_MS, 10, 3_000);
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -399,7 +414,7 @@ export class RoomCoordinator extends DurableObject {
       ).bind(roomId).first()
       : null;
     const sequence = Number(sequenceRow?.sequence) || 1;
-    const deadline = now + REGISTRATION_WINDOW_MS;
+    const deadline = now + registrationWindowMs(this.env);
     const cards = Array.from({ length: cardsCount }, () => makeCard());
     const statements = [
       this.env.DB.prepare("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?")
@@ -607,7 +622,7 @@ export class RoomCoordinator extends DurableObject {
         "UPDATE room_rounds SET status='playing',started_at=?,next_draw_at=? " +
         "WHERE id=? AND status IN ('ready','waiting_for_room') " +
         "AND NOT EXISTS (SELECT 1 FROM room_rounds WHERE room_id=? AND status='playing')"
-      ).bind(now, now + DRAW_INTERVAL_MS, next.id, roomId),
+      ).bind(now, now + drawIntervalMs(this.env), next.id, roomId),
       this.env.DB.prepare(
         "INSERT INTO room_outbox(event_id,room_id,round_id,event_type,payload_json,status,attempts,next_attempt_at,created_at) " +
         "SELECT ?,room_id,id,'round.started',?,'pending',0,?,? FROM room_rounds WHERE id=? AND status='playing' " +
@@ -853,7 +868,8 @@ export class RoomCoordinator extends DurableObject {
         .bind(activeRound.id, userId).first()
       : null;
     const activeCards = await this.cardsForRound(activeRound.id);
-    const next = playing && registration ? await this.roundSummary(registration, userId) : null;
+    const nextRoundRecord = playing ? (registration || waiting) : null;
+    const next = nextRoundRecord ? await this.roundSummary(nextRoundRecord, userId) : null;
 
     const userIsPlaying = Boolean(playing && activeUser);
     const userIsRegistered = Boolean(!playing && activeUser);
