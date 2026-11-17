@@ -1019,6 +1019,24 @@ function renderRoomPurchasePage() {
   <section class="room-panel ticket-selection"><div class="room-panel-heading"><div><span class="eyebrow">YOUR TICKETS</span><h3>کارت‌های تو</h3><p>کارت‌ها هنگام خرید روی سرور ساخته و نگهداری می‌شوند.</p></div><span class="ticket-count-badge" id="roomTicketCount">${faDigits(selectedCount)} کارت</span></div><div class="room-tickets-list" id="roomTicketsList">${joined && roomCards.length ? roomCards.map(roomCardMarkup).join('') : '<div class="empty"><span>🎟️</span>کارت نهایی پس از خرید و ثبت در صف، به‌صورت تصادفی روی سرور ساخته می‌شود.</div>'}</div></section>`;
 }
 
+function renderNextRoundPanel() {
+  const next = roomServerSnapshot?.nextRound || null;
+  const joined = Boolean(next?.joined);
+  const count = Array.isArray(next?.myCards) ? next.myCards.length : 0;
+  const remaining = next?.registrationRemainingMs == null ? null : formatRoomCountdown(next.registrationRemainingMs);
+  return `<section class="room-panel room-next-round-panel">
+    <div class="room-panel-heading"><div><span class="eyebrow">NEXT SESSION QUEUE</span><h3>ثبت‌نام سانس بعدی</h3>
+      <p>${joined ? 'ثبت‌نام تو برای سانس بعدی ذخیره شده و مستقل از بازی جاری است.' : 'در حالی که این بازی ادامه دارد، می‌توانی برای سانس بعدی کارت بخری.'}</p></div>
+      <span class="ticket-count-badge">${joined ? faDigits(count) + ' از ۵ کارت' : 'هنوز ثبت‌نام نکرده‌ای'}</span></div>
+    ${next ? `<div class="wait-stats"><div><b>${faDigits(next.playerCount || 0)}</b><small>بازیکنان سانس بعدی</small></div>
+      <div><b>${faDigits(next.cardCount || 0)}</b><small>کارت‌های سانس بعدی</small></div>
+      <div><b>${remaining || '۰:۰۰'}</b><small>زمان ثبت‌نام</small></div></div>` : '<p class="muted-note">با اولین خرید، دور بعدی و مهلت مستقل ۱۵۰ ثانیه‌ای آن ایجاد می‌شود.</p>'}
+    <button class="btn btn-primary btn-block" data-action="${joined ? 'room-add-card' : 'room-join-next'}" ${joined && count >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>
+      ${joined ? (count >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت سانس بعدی تکمیل شده' : 'خرید یک کارت دیگر برای سانس بعدی') : 'خرید کارت و ثبت‌نام سانس بعدی'}
+    </button>
+  </section>`;
+}
+
 function renderRoomGame() {
   const room=currentRoomConfig();
   const isFinished=roomServerSnapshot?.status==='finished';
@@ -1031,7 +1049,7 @@ function renderRoomGame() {
       <div class="room-number-history" id="roomNumberHistory">${roomCalledMarkup()}</div>
       <small class="room-safe-caption">${isFinished?'این سانس به پایان رسیده است.':'قرعه‌کشی توسط سرور انجام می‌شود؛ نیازی به فشردن دکمه نیست.'}</small>
     </section>
-    <section class="room-game-layout"><div class="room-game-ticket"><div class="room-panel-heading"><div><span class="eyebrow">MY TICKETS</span><h3>کارت‌های من</h3></div><span class="ticket-count-badge">${faDigits(roomCards.length)} کارت</span></div><div id="roomTicketsList" class="room-tickets-list">${roomCards.map(roomCardMarkup).join('')}</div></div>
+    ${renderNextRoundPanel()}\n    <section class="room-game-layout"><div class="room-game-ticket"><div class="room-panel-heading"><div><span class="eyebrow">MY TICKETS</span><h3>کارت‌های من</h3></div><span class="ticket-count-badge">${faDigits(roomCards.length)} کارت</span></div><div id="roomTicketsList" class="room-tickets-list">${roomCards.map(roomCardMarkup).join('')}</div></div>
       <aside class="room-panel stages-panel"><div class="room-panel-heading"><div><span class="eyebrow">WINNING PATTERNS</span><h3>برندگان سانس</h3></div><span class="trophy-mark">🏆</span></div><div class="room-stages-list" id="roomStagesList">${roomStageMarkup()}</div><div class="room-rules-tip"><b>برد هم‌زمان پشتیبانی می‌شود</b><p>یک یا چند نفر می‌توانند در یک شماره هم‌زمان برنده یک خط یا دبرنای کامل شوند؛ جایزه همان مرحله بین برندگان تقسیم می‌شود.</p></div></aside>
     </section>
     <section class="room-panel"><div class="room-panel-heading"><div><span class="eyebrow">SESSION HISTORY</span><h3>برندگان سانس‌های اخیر</h3></div><span class="trophy-mark">🏆</span></div><div id="recentSessionWinners">${recentSessionWinnersMarkup()}</div></section>
