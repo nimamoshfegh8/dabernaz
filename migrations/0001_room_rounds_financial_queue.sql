@@ -161,3 +161,8 @@ CREATE TABLE IF NOT EXISTS room_outbox (
 
 CREATE INDEX IF NOT EXISTS idx_room_outbox_due
   ON room_outbox(status, next_attempt_at, lease_until);
+
+-- At most one registration window may be open in a room at a time. When it
+-- expires, the next purchase may create another independent future round.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_room_rounds_one_open_registration
+  ON room_rounds(room_id) WHERE status='registration_open';
