@@ -404,6 +404,10 @@ if ($method==='POST' && $path==='/api/games/result') {
 }
 
 if (preg_match('~^/api/rooms/(room5000|room10000|room20000|room50000)(?:/(join|leave|next))?$~',$path,$m)) {
+    if (getenv('DABERNAZ_TEST_MODE') !== '1') {
+        send_json(503,['ok'=>false,'code'=>'ROOM_COORDINATOR_UNAVAILABLE',
+            'error'=>'زیرساخت امن اتاق بازی در این Backend فعال نیست؛ خرید کارت موقتاً غیرفعال است.']);
+    }
     $roomId=$m[1]; $action=$m[2]??'';
     if ($method==='GET' && $action==='') {
         $room=store_update(function (&$db) use ($roomId,$userId) { $room=&$db['rooms'][$roomId]; advance_room($room,$db); return public_room($room,$userId,$db); });
