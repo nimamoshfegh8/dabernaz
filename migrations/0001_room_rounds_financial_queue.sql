@@ -1,8 +1,6 @@
 -- Dabernaz normalized room rounds, idempotent purchases, append-only ledger,
 -- unique refunds/payouts, and durable event outbox.
 -- Additive only. Does not rewrite or delete legacy room_states/room_finances data.
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS room_rounds (
   id TEXT PRIMARY KEY,
   room_id TEXT NOT NULL CHECK (room_id IN ('room5000','room10000','room20000','room50000')),
