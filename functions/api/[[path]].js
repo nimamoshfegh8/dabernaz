@@ -13,6 +13,7 @@ const ROOM_ECONOMICS = Object.freeze({
 const DRAW_INTERVAL_MS = 3000;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const PASSWORD_ITERATIONS = 600000;
+const DUMMY_PASSWORD_HASH = 'pbkdf2$600000$00112233445566778899aabbccddeeff$488c95bb261cd14fae230743a6f0fe216edec7423d168135a783ce15c653ace8';
 const ROOM_IDS = ['room5000', 'room10000', 'room20000', 'room50000'];
 const encoder = new TextEncoder();
 const bootstrappedBindings = new WeakSet();
@@ -535,7 +536,7 @@ async function handleAuth(db, request, path) {
       const nameLength = [...name].length;
       if (nameLength < 2 || nameLength > 32) throw new HttpError(400, 'نام نمایشی باید بین ۲ تا ۳۲ نویسه باشد.');
       const existing = await db.prepare('SELECT id FROM users WHERE email = ? LIMIT 1').bind(email).first();
-      if (existing) throw new HttpError(409, 'با این ایمیل قبلاً حساب ساخته شده است.');
+      if (existing) throw new HttpError(409, 'با این اطلاعات امکان ساخت حساب وجود ندارد.');
       let memberId;
       for (let attempt = 0; attempt < 30; attempt++) {
         memberId = String(100000 + randomInt(900000));
@@ -560,7 +561,7 @@ async function handleAuth(db, request, path) {
       } catch (error) {
         const message = String(error?.message || error);
         if (/unique constraint failed|constraint failed/i.test(message)) {
-          throw new HttpError(409, 'این ایمیل، نام نمایشی یا شناسه قبلاً ثبت شده است.');
+          throw new HttpError(409, 'با این اطلاعات امکان ساخت حساب وجود ندارد.');
         }
         throw error;
       }
@@ -599,7 +600,9 @@ async function handleAuth(db, request, path) {
       }
     } else {
       userRow = await db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
-      const valid = userRow ? await verifyPassword(password, userRow.password_hash) : false;
+      const valid = userRow
+        ? await verifyPassword(password, userRow.password_hash)
+        : await verifyPassword(password, DUMMY_PASSWORD_HASH).then(() => false);
       if (!valid) throw new HttpError(401, 'ایمیل یا رمز عبور اشتباه است.');
 
       // Opportunistically upgrade legacy hashes after a valid login. New
