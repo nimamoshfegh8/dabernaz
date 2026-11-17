@@ -207,6 +207,35 @@ for (const colorScheme of colorSchemes) {
   }
 }
 
+test('API health accurately reports D1 schema and room coordinator readiness', async ({ page }, testInfo) => {
+  const diagnostics = await observePage(page);
+  const response = await page.request.get('/api/health');
+  const body = await response.json();
+  await testInfo.attach('api-health.json', {
+    body: Buffer.from(JSON.stringify({ status: response.status(), body }, null, 2)),
+    contentType: 'application/json'
+  });
+
+  expect(response.status(), 'API health endpoint should be observable').toBeLessThan(500);
+  expect(body.service).toBe('dabernaz');
+  if (body.backend === 'cloudflare-pages-functions') {
+    expect(body.database).toBe('D1');
+    expect(body.schema).toBe('v1');
+    expect(typeof body.roomCoordinator?.available).toBe('boolean');
+    expect(['ready', 'degraded']).toContain(body.readiness);
+    if (!body.roomCoordinator.available) {
+      expect(body.readiness).toBe('degraded');
+      expect(body.unavailableFeatures).toContain('paid_rooms');
+    }
+  } else {
+    expect(body.backend).toBe('node');
+    expect(body.mode).toBe('isolated-test-only');
+  }
+  await attachDiagnostics(testInfo, diagnostics);
+  expect(diagnostics.pageErrors).toEqual([]);
+  expect(diagnostics.mutatingRequests).toEqual([]);
+});
+
 test('public pages render without submitting forms or changing account state', async ({ page }, testInfo) => {
   const diagnostics = await observePage(page);
   const routes = [
