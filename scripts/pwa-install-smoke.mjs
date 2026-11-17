@@ -28,7 +28,7 @@ assert.match(index, /rel="manifest"/);
 assert.match(index, /apple-touch-icon/);
 assert.match(index, /pwa-entry\.js/);
 assert.match(index, /pwa-install\.css/);
-assert.match(sw, /dabernaz-shell-v31/);
+assert.match(sw, /dabernaz-shell-v32/);
 for (const asset of ['./install.html', './install.js', './pwa-entry.js', './pwa-install.css', './icon-192.png', './icon-512.png', './icon-maskable-512.png']) {
   assert.ok(sw.includes(asset), 'service worker must precache ' + asset);
   assert.ok(build.includes("'" + asset.slice(2) + "'") || build.includes("'" + asset + "'"), 'Pages build must copy ' + asset);
