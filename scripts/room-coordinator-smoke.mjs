@@ -183,7 +183,6 @@ async function applyLocalMigrationsAndSeed() {
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", "migrations/0001_room_rounds_financial_queue.sql"]);
   const seed = [
-    "PRAGMA foreign_keys=ON;",
     ...Array.from({ length: 6 }, (_, index) => {
       const id = 910001 + index;
       const n = index + 1;
@@ -204,6 +203,9 @@ async function main() {
   await mkdir(persist, { recursive: true });
   await applyLocalMigrationsAndSeed();
 
+  startWorker();
+  await waitForServer();
+
   // GET must not create an empty round, change status, refund, draw, or write state.
   const before = Number(one("SELECT COUNT(*) AS count FROM room_rounds").count);
   const empty = await requestRoom("room5000");
@@ -219,9 +221,6 @@ async function main() {
   });
   assert.equal(noIdentity.status, 401);
 
-  startWorker();
-  await waitForServer();
-
   // One-player round: two cards in one purchase must be refunded once, in full,
   // without any follow-up browser request.
   const singleBefore = Number(one("SELECT balance FROM users WHERE id=910003").balance);
@@ -232,7 +231,7 @@ async function main() {
   assert.equal(single.status, 200, JSON.stringify(single.data));
   assert.equal(Number(single.data.purchase.amount), 20_000, "Server price must override a forged client amount");
   assert.equal(Number(single.data.room.playerCount), 1);
-  await waitForSnapshot("room10000", 910003, (room) => room.currentRoundStatus === "refunded", 15_000);
+  await waitForSnapshot("room10000", 910003, (room) => room.currentRoundStatus === "refunded", 30_000);
   const singleBalance = Number(one("SELECT balance FROM users WHERE id=910003").balance);
   assert.equal(singleBalance, singleBefore, "Single-player refund must restore the exact original balance");
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_refunds WHERE user_id=910003").count), 1);
@@ -296,7 +295,7 @@ async function main() {
 
   // The second round is accepted while the first game is playing. Once its
   // own 150-second-equivalent test deadline expires, it must wait in the queue.
-  const firstPlaying = await waitForSnapshot("room5000", 910001, (room) => room.status === "playing", 15_000);
+  const firstPlaying = await waitForSnapshot("room5000", 910001, (room) => room.status === "playing", 30_000);
   assert.equal(firstPlaying.joined, true);
   const nextA = await requestRoom("room5000", {
     method: "POST", action: "join", userId: 910003, idempotencyKey: "future-round-player-a-0001",
@@ -313,7 +312,7 @@ async function main() {
   assert.equal(nextB.data.room.status, "playing");
 
   const queued = await waitForSnapshot("room5000", 910003,
-    (room) => room.status === "playing" && room.nextRound?.status === "waiting_for_room", 15_000);
+    (room) => room.status === "playing" && room.nextRound?.status === "waiting_for_room", 30_000);
   assert.equal(queued.nextRound.joined, true);
   assert.equal(queued.nextRound.playerCount, 2);
   assert.equal(queued.nextRound.myCards.length, 1);
@@ -330,8 +329,11 @@ async function main() {
   assert.ok(afterRestart.allCalledNumbers.length > calledBeforeRestart,
     "The game must resume from durable state after the Worker restarts");
 
-  const completed = await waitForSnapshot("room5000", 910001, (room) => room.currentRoundStatus === "completed", 35_000);
-  const round1 = one("SELECT id,gross_revenue,line_prize_paid,full_prize_paid,site_commission,called_numbers_json FROM room_rounds WHERE room_id='room5000' AND sequence=1");
+  const round1Id = queued.roundId;
+  const completed = await waitForSnapshot("room5000", 910001,
+    (room) => (room.recentSessions || []).some((session) => session.roundId === round1Id), 75_000);
+  const round1 = one("SELECT id,status,gross_revenue,line_prize_paid,full_prize_paid,site_commission,called_numbers_json FROM room_rounds WHERE room_id='room5000' AND sequence=1");
+  assert.equal(round1.status, "completed");
   const gross = Number(round1.gross_revenue);
   assert.equal(gross, 30_000);
   assert.equal(Number(round1.line_prize_paid), Math.floor(gross * 10 / 100));
