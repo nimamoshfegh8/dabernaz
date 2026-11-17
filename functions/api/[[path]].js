@@ -1869,7 +1869,7 @@ async function routeRequest(request, env) {
 
       const settings = await env.DB.prepare('SELECT card_number,card_holder,bank_name,payment_note FROM wallet_payment_settings WHERE id=1').first();
       if (!settings?.card_number) throw new HttpError(409, 'اطلاعات کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');
-      await env.DB.batch([
+      const depositBatch = await env.DB.batch([
         env.DB.prepare(
           'INSERT INTO wallet_request_idempotency(user_id,idempotency_key,request_hash,request_id,created_at) ' +
           'VALUES(?,?,?,NULL,?) ON CONFLICT(user_id,idempotency_key) DO NOTHING'
@@ -1884,7 +1884,12 @@ async function routeRequest(request, env) {
       ]);
       const result = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
       if (!result) throw new HttpError(409, 'درخواست واریز ثبت نشد؛ اطلاعات را بررسی و دوباره تلاش کن.');
-      return json({ok:true,requestId:Number(result.id),status:result.status,replayed:result.status!=='awaiting_receipt' || false});
+      return json({
+        ok:true,
+        requestId:Number(result.id),
+        status:result.status,
+        replayed:Number(depositBatch?.[0]?.meta?.changes || 0) !== 1
+      });
     }
 
     const cardNumber = String(body.cardNumber || '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g, '');
@@ -1898,7 +1903,7 @@ async function routeRequest(request, env) {
     const replay = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
     if (replay) return json({ok:true,requestId:Number(replay.id),status:replay.status,replayed:true});
 
-    await env.DB.batch([
+    const withdrawalBatch = await env.DB.batch([
       env.DB.prepare(
         'INSERT INTO wallet_request_idempotency(user_id,idempotency_key,request_hash,request_id,created_at) ' +
         'SELECT ?,?,?,NULL,? FROM users WHERE id=? AND balance>=? ' +
@@ -1923,7 +1928,12 @@ async function routeRequest(request, env) {
     ]);
     const result = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
     if (!result) throw new HttpError(409, 'موجودی کیف پول برای این برداشت کافی نیست یا درخواست ثبت نشد.');
-    return json({ok:true,requestId:Number(result.id),status:result.status,replayed:true});
+    return json({
+      ok:true,
+      requestId:Number(result.id),
+      status:result.status,
+      replayed:Number(withdrawalBatch?.[0]?.meta?.changes || 0) !== 1
+    });
   }
   const receiptMatch = path.match(/^\/api\/wallet\/requests\/(\d+)\/receipt$/);
   if (receiptMatch && request.method === 'POST') {
