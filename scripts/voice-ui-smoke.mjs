@@ -48,7 +48,7 @@ assert.match(android, /setOnUtteranceProgressListener/);
 
 assert.match(index, /styles\.css\?v=4\.8\.0/);
 assert.match(index, /app\.js\?v=4\.28\.0/);
-assert.match(sw, /dabernaz-shell-v31/);
+assert.match(sw, /dabernaz-shell-v32/);
 assert.match(sw, /styles\.css\?v=4\.8\.0/);
 assert.match(sw, /app\.js\?v=4\.28\.0/);
 assert.match(swRegister, /sw\.js\?v=20/);
