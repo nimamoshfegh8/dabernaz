@@ -957,112 +957,46 @@ async function publicRoom(db, room, userId) {
   };
 }
 
-async function handleRoom(db, request, user, path) {
+async function handleRoom(db, request, user, path, env) {
   const match = path.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave|next))?$/);
   if (!match) return null;
-  const [, roomId, action = ''] = match;
-  const userId = Number(user.id);
 
-  if (request.method === 'GET' && !action) {
-    let room = await loadRoom(db, roomId);
-    const expired = room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now();
-    const drawDue = room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now();
-    if (expired || drawDue) {
-      await withRoomLock(db, roomId, async () => {
-        room = await loadRoom(db, roomId);
-        let started = false;
-        if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
-          started = await startRoom(db, room);
-          if (!started) room = await cancelExpiredWaitingRoom(db, room);
-        }
-        if (room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now()) {
-          const advanced = advanceRoom(room);
-          if (advanced.changed) await saveRoom(db, room, advanced.awards);
-          else if (started) await saveRoom(db, room);
-        } else if (started) await saveRoom(db, room);
-      }).catch(error => { if (!(error instanceof HttpError && error.status === 409)) throw error; });
-      room = await loadRoom(db, roomId);
-    }
-    return json({ok:true,room:await publicRoom(db,room,userId)});
+  // All room reads and mutations are delegated to the private, per-room
+  // Durable Object coordinator. Never fall back to the legacy JSON room state:
+  // doing so could create a second source of truth and an unsafe financial path.
+  if (!env?.ROOM_COORDINATOR || typeof env.ROOM_COORDINATOR.fetch !== 'function') {
+    return json({
+      ok: false,
+      code: 'ROOM_COORDINATOR_UNAVAILABLE',
+      error: 'زیرساخت امن اتاق بازی هنوز در محیط Preview متصل نشده است. خرید کارت موقتاً غیرفعال است.',
+    }, 503);
   }
 
-  if (request.method === 'POST' && action === 'next') {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
     validateWriteOrigin(request);
-    const result = await withRoomLock(db,roomId,async()=>{
-      let room = await loadRoom(db,roomId);
-      if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
-        const started = await startRoom(db,room);
-        if (started) await saveRoom(db,room);
-        else room = await cancelExpiredWaitingRoom(db,room);
-      }
-      if (room.status === 'playing') return {conflict:true,room:await publicRoom(db,room,userId)};
-      if (room.status === 'finished') {
-        room = newRoom(roomId);
-        await saveRoom(db,room);
-      }
-      return {room:await publicRoom(db,room,userId)};
-    });
-    if (result.conflict) return json({error:'این سانس هنوز در حال اجراست و امکان باز کردن سانس بعدی وجود ندارد.',room:result.room},409);
-    return json({ok:true,room:result.room});
   }
 
-  if (request.method === 'POST' && action === 'join') {
-    validateWriteOrigin(request);
-    const body = await readJson(request);
-    if (body.purchaseConfirmed !== true) throw new HttpError(400,'برای خرید کارت باید خرید را جداگانه تأیید کنی.');
-    const requested = Math.max(1,Math.min(MAX_CARDS_PER_PLAYER,Math.floor(Number(body.cardsCount)||1)));
-    const result = await withRoomLock(db,roomId,async()=>{
-      let room = await loadRoom(db,roomId);
-      const economics = ROOM_ECONOMICS[roomId];
-      if (!economics) throw new HttpError(500,'تنظیمات مالی این اتاق پیدا نشد.');
-      if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
-        const started = await startRoom(db,room);
-        if (started) await saveRoom(db,room);
-        else room = await cancelExpiredWaitingRoom(db, room);
-      }
-      if (room.status === 'playing' || room.status === 'finished') return {conflict:true,room:await publicRoom(db,room,userId)};
-      const key = String(userId);
-      const alreadyQueued = room.queue.some(id=>Number(id)===userId);
-      const owned = alreadyQueued ? Math.max(0,Number(room.cardCounts?.[key])||room.queuedCards?.[key]?.length||0) : 0;
-      const available = Math.max(0,MAX_CARDS_PER_PLAYER-owned);
-      if (!available) throw new HttpError(409,'هر حساب در هر سانس حداکثر ۵ کارت می‌تواند بخرد.');
-      const cardsCount = Math.min(requested,available);
-      const totalPrice = economics.price * cardsCount;
-      const debit = await db.prepare('UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?').bind(totalPrice,userId,totalPrice).run();
-      if (!Number(debit.meta?.changes||0)) throw new HttpError(400,'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
-      const oldCards = Array.isArray(room.queuedCards?.[key]) ? room.queuedCards[key] : [];
-      room.cardCounts[key] = owned + cardsCount;
-      room.queuedCards[key] = [...oldCards,...Array.from({length:cardsCount},()=>makeCard())];
-      room.queuedNames[key] = String(user.username || 'بازیکن');
-      room.entryPayments[key] = (Math.max(0,Number(room.entryPayments?.[key])||0))+totalPrice;
-      if (!alreadyQueued) room.queue.push(userId);
-      if (!room.registrationDeadline) {
-        room.registrationStartedAt = Date.now();
-        room.registrationDeadline = room.registrationStartedAt + REGISTRATION_WINDOW_MS;
-      }
-      room.updatedAt = Date.now();
-      try {
-        await db.batch([
-          db.prepare(`INSERT INTO transactions (user_id,type,amount,description,created_at) VALUES (?, 'room_entry', ?, ?, ?)`)
-            .bind(userId,-totalPrice,alreadyQueued ? `خرید ${cardsCount} کارت اضافی دبرنا` : `خرید ${cardsCount} کارت دبرنا`,new Date().toISOString()),
-          db.prepare(`INSERT INTO room_states (room_id,payload,updated_at) VALUES (?,?,?)
-            ON CONFLICT(room_id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`)
-            .bind(room.id,JSON.stringify(room),room.updatedAt),
-        ]);
-      } catch(error) {
-        await db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(totalPrice,userId).run();
-        throw error;
-      }
-      return {room:await publicRoom(db,room,userId)};
-    });
-    if (result.conflict) return json({error:'این سانس در حال اجراست؛ بعد از پایان وارد سانس بعدی شو.',room:result.room},409);
-    return json({ok:true,room:result.room});
+  const [, roomId] = match;
+  const forwardedPath = path.replace(/^\/api/, '');
+  const target = 'https://dabernaz-room-coordinator.internal' + forwardedPath + new URL(request.url).search;
+  const headers = new Headers(request.headers);
+
+  // Never accept an identity header supplied by the browser. The Pages API
+  // overwrites it only after authenticatedUser() has validated the session.
+  headers.delete('x-dabernaz-user-id');
+  if (user?.id) headers.set('x-dabernaz-user-id', String(user.id));
+  headers.set('x-dabernaz-room-id', roomId);
+
+  const init = {
+    method: request.method,
+    headers,
+  };
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    init.body = await request.clone().arrayBuffer();
   }
-  if (request.method === 'POST' && action === 'leave') {
-    validateWriteOrigin(request);
-    throw new HttpError(409,'پس از خرید کارت، امکان لغو خرید یا خروج از صف وجود ندارد.');
-  }
-  return json({error:'روش درخواست برای این مسیر پشتیبانی نمی‌شود.'},405);
+
+  const forwardedRequest = new Request(target, init);
+  return env.ROOM_COORDINATOR.fetch(forwardedRequest);
 }
 
 async function referralSummary(db, userId) {
@@ -2324,7 +2258,7 @@ async function routeRequest(request, env) {
     return registerRecurringTournament(env.DB,user,request);
   }
 
-  const roomResponse = await handleRoom(env.DB, request, user, path);
+  const roomResponse = await handleRoom(env.DB, request, user, path, env);
   if (roomResponse) return roomResponse;
   return json({ error: 'روش درخواست برای این مسیر پشتیبانی نمی‌شود.' }, 405);
 }
