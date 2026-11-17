@@ -209,8 +209,9 @@ for (const colorScheme of colorSchemes) {
 
 test('API health accurately reports D1 schema and room coordinator readiness', async ({ page }, testInfo) => {
   const diagnostics = await observePage(page);
-  const response = await page.request.get('/api/health');
-  const body = await response.json();
+  const response = await page.goto('/api/health', { waitUntil: 'domcontentloaded' });
+  expect(response, 'API health navigation should return a response').not.toBeNull();
+  const body = JSON.parse((await page.locator('body').textContent()) || '{}');
   await testInfo.attach('api-health.json', {
     body: Buffer.from(JSON.stringify({ status: response.status(), body }, null, 2)),
     contentType: 'application/json'
