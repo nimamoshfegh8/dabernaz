@@ -2,7 +2,7 @@ const { defineConfig } = require('@playwright/test');
 
 const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'https://dabernaz.pages.dev';
 
-if (!/^https?:\\/\\//i.test(baseURL)) {
+if (!baseURL.startsWith('http://') && !baseURL.startsWith('https://')) {
   throw new Error('PLAYWRIGHT_BASE_URL must be an http(s) URL.');
 }
 
