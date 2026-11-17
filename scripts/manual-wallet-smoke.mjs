@@ -51,8 +51,8 @@ assert.equal(String((await me(admin)).memberId),'999999');
 assert.equal(Number((await me(customer)).balance),200000);
 
 await expectStatus('/api/admin/wallet',403,{account:customer});
-await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',body:{type:'deposit',amount:104}});
-await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',body:{type:'withdraw',amount:204,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
+await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{type:'deposit',amount:104}});
+await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{type:'withdraw',amount:204,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
 const inbox=await request('/api/admin/wallet',{account:admin});
 assert.equal(inbox.isAdmin,true);
 assert.deepEqual(inbox.requests,[]);
