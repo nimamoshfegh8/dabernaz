@@ -45,6 +45,7 @@ jobs:
           npm run check
           for script in \
             scripts/room-coordinator-smoke.mjs \
+            scripts/api-readonly-contract-smoke.mjs \
             scripts/node-fallback-guard-smoke.mjs \
             scripts/node-fallback-room-smoke.mjs \
             scripts/php-fallback-smoke.mjs \
@@ -63,6 +64,9 @@ jobs:
           set -euo pipefail
           mkdir -p test-artifacts
           node scripts/room-coordinator-smoke.mjs 2>&1 | tee test-artifacts/room-coordinator-smoke.log
+
+      - name: Assert GET APIs are strictly read-only
+        run: node scripts/api-readonly-contract-smoke.mjs 2>&1 | tee test-artifacts/api-readonly-contract.log
 
       - name: Verify Node JSON fallback is disabled outside test mode
         shell: bash
