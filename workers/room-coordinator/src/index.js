@@ -681,7 +681,7 @@ export class RoomCoordinator extends DurableObject {
       ).bind(
         calledJson, lineJson, fullJson, linePrize, fullPrize, commission,
         finished ? "completed" : "playing",
-        finished ? null : now + DRAW_INTERVAL_MS,
+        finished ? null : now + drawIntervalMs(this.env),
         finished ? now : null,
         round.id, String(round.called_numbers_json || "[]"),
       ),
