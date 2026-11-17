@@ -1490,7 +1490,8 @@ function renderAccount() {
     ${section('مدیریت حساب')}
     ${accountRow('✎','اطلاعات شخصی','نام نمایشی و مشخصات حساب','edit-profile')}
     ${accountRow('🛡','امنیت حساب','ورود با رمز عبور رمزنگاری‌شده','security')}
-    ${accountRow('⇥','خروج از حساب','خروج امن از حساب کاربری','logout')}`;
+    ${accountRow('⇥','خروج از حساب','خروج امن از این دستگاه','logout')}
+    ${accountRow('⛨','خروج از همه دستگاه‌ها','ابطال تمام نشست‌های فعال حساب','logout-all')}`;
 }
 function renderAuthPage() {
   const register=authMode==='register';
@@ -2164,9 +2165,10 @@ document.addEventListener('click', async event => {
   else if (action === 'memory-card') revealMemory(actionEl);
   else if (action === 'edit-profile') editProfile();
   else if (action === 'settings') setPage('settings');
-  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه فعلی Cloudflare رمز عبور با PBKDF2-SHA256 و salt اختصاصی هش می‌شود. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
+  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه Cloudflare رمز عبور با PBKDF2-HMAC-SHA256، ۶۰۰٬۰۰۰ تکرار و salt اختصاصی هش می‌شود. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; walletActivePaymentInfo=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
+  else if (action === 'logout-all') { try { await apiRequest('/api/auth/logout-all',{method:'POST',body:'{}'}); currentUser=null; walletActivePaymentInfo=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('تمام نشست‌های فعال حساب باطل شدند.'); } catch(error){showToast(error.message);} }
   else if (action === 'test-number-voice') {
     voicePlaybackErrorShown = false;
     const ok = await PersianAudioManager.speak(42, { fromGesture: true });
