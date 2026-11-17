@@ -562,6 +562,15 @@ let roomCalledNumbers = [];
 let roomStages = { one:false, full:false };
 
 const $ = (selector, root = document) => root.querySelector(selector);
+const roomMarkupCache = new WeakMap();
+function setHtmlIfChanged(element, markup) {
+  if (!element || typeof markup !== 'string' || roomMarkupCache.get(element) === markup) return;
+  element.innerHTML = markup;
+  roomMarkupCache.set(element, markup);
+}
+function setTextIfChanged(element, value) {
+  if (element && element.textContent !== value) element.textContent = value;
+}
 const money = value => Number(value).toLocaleString('en-US');
 const faDigits = value => Number(value).toLocaleString('fa-IR');
 const escapeHTML = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -1027,36 +1036,35 @@ async function pollCurrentRoom() {
     else if (currentPage==='roomGame' && result.room.status==='finished') render();
     else if (currentPage===roomId) render();
     if (currentPage==='roomGame') {
-      const mount=$('#roomWinnerBannerMount'); if(mount) mount.innerHTML=roomWinnerBanner();
+      const mount=$('#roomWinnerBannerMount'); setHtmlIfChanged(mount, roomWinnerBanner());
       updateRoomDrawDisplay();
-      const recent=$('#recentSessionWinners'); if(recent) recent.innerHTML=recentSessionWinnersMarkup();
+      const recent=$('#recentSessionWinners'); setHtmlIfChanged(recent, recentSessionWinnersMarkup());
     }
   } catch(error) { if (error.message.includes('وارد حساب')) { currentUser=null; setPage('account'); } else showToast(error.message); }
   finally { roomPollBusy=false; }
 }
 function updateRoomCardDisplay() {
   const list=$('#roomTicketsList');
-  if(list) list.innerHTML=roomServerSnapshot?.joined && roomCards.length ? roomCards.map(roomCardMarkup).join('') : '<div class="empty"><span>🎟️</span>کارت نهایی پس از ورود به صف، به‌صورت تصادفی و روی سرور ساخته می‌شود.</div>';
-  if($('#roomQty')) $('#roomQty').textContent=faDigits(roomCardCount);
-  if($('#roomTicketCount')) $('#roomTicketCount').textContent=`${faDigits(roomServerSnapshot?.joined ? roomCards.length : roomCardCount)} کارت`;
+  setHtmlIfChanged(list, roomServerSnapshot?.joined && roomCards.length ? roomCards.map(roomCardMarkup).join('') : '<div class="empty"><span>🎟️</span>کارت نهایی پس از ورود به صف، به‌صورت تصادفی و روی سرور ساخته می‌شود.</div>');
+  setTextIfChanged($('#roomQty'), faDigits(roomCardCount));
+  setTextIfChanged($('#roomTicketCount'), `${faDigits(roomServerSnapshot?.joined ? roomCards.length : roomCardCount)} کارت`);
   detectRoomStages();
 }
 function detectRoomStages() {
   const winners=roomServerSnapshot?.winners||{};
   roomStages={one:roomHasWinner(winners.line),full:roomHasWinner(winners.full)};
-  const stages=$('#roomStagesList'); if(stages) stages.innerHTML=roomStageMarkup();
+  const stages=$('#roomStagesList'); setHtmlIfChanged(stages, roomStageMarkup());
 }
 function updateRoomAllCardDisplay() {
   const list = $('#roomAllTicketsList');
-  if (list) list.innerHTML = roomAllCardsMarkup();
-  const count = $('#roomAllTicketCount');
-  if (count) count.textContent = `${faDigits(Array.isArray(roomAllCards) ? roomAllCards.length : 0)} کارت`;
+  setHtmlIfChanged(list, roomAllCardsMarkup());
+  setTextIfChanged($('#roomAllTicketCount'), `${faDigits(Array.isArray(roomAllCards) ? roomAllCards.length : 0)} کارت`);
 }
 function updateRoomDrawDisplay() {
   const room=roomServerSnapshot||{}; const last=room.latestNumber;
-  if($('#roomLatestNumber')) $('#roomLatestNumber').textContent=last?faDigits(last):'—';
-  if($('#roomDrawCount')) $('#roomDrawCount').textContent=`${faDigits(room.drawCount||0)} / ۹۰`;
-  if($('#roomNumberHistory')) $('#roomNumberHistory').innerHTML=roomCalledMarkup();
+  setTextIfChanged($('#roomLatestNumber'), last ? faDigits(last) : '—');
+  setTextIfChanged($('#roomDrawCount'), `${faDigits(room.drawCount||0)} / ۹۰`);
+  setHtmlIfChanged($('#roomNumberHistory'), roomCalledMarkup());
   updateRoomCardDisplay();
   updateRoomAllCardDisplay();
 }
@@ -1438,7 +1446,7 @@ function renderSettings() {
   </section>
   <section class="setting-group"><h3 class="settings-title">درباره برنامه</h3>
     <div class="setting-row"><div class="setting-copy"><b>زبان برنامه</b><small>فارسی</small></div><span class="tag">FA</span></div>
-    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.29.0</span></div>
+    <div class="setting-row"><div class="setting-copy"><b>نسخه دابرناز</b><small>حساب سروری و اتاق‌های دبرنا</small></div><span class="muted-note">4.30.0</span></div>
   </section>
   <button class="btn btn-outline btn-block" type="button" data-action="reset-settings">بازنشانی تنظیمات</button>`;
 }

@@ -91,3 +91,13 @@ assert.match(app, /!currentUser \|\| document\.hidden \|\| navigator\.onLine ===
   'support and wallet refresh polling must pause while hidden or offline');
 assert.match(worker, /\.catch\(\(\) => cached \|\| Response\.error\(\)\)/,
   'failed background image/font refreshes must not become unhandled promise rejections');
+
+
+assert.match(app, /const roomMarkupCache = new WeakMap\(\)/,
+  'room polling must cache the previous markup per live DOM element');
+assert.match(app, /function setHtmlIfChanged\(element, markup\)/,
+  'unchanged room markup must not recreate all card elements');
+assert.match(app, /setHtmlIfChanged\(list, roomAllCardsMarkup\(\)\)/,
+  'shared room tickets must update only when their rendered markup changes');
+assert.match(app, /setTextIfChanged\(\$\('#roomLatestNumber'\)/,
+  'the latest draw number should not trigger redundant text mutations');

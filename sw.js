@@ -1,14 +1,14 @@
 'use strict';
 
 // App shell assets are cached for first-load/offline recovery. Live app code remains network-first.
-const CACHE_NAME = 'dabernaz-shell-v33';
+const CACHE_NAME = 'dabernaz-shell-v34';
 const CORE_ASSETS = [
   './',
   './index.html',
   './install.html',
   './styles.css?v=4.8.0',
   './pwa-install.css?v=1',
-  './app.js?v=4.29.0',
+  './app.js?v=4.30.0',
   './install.js?v=1',
   './pwa-entry.js?v=1',
   './icon.svg',
