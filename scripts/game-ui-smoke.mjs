@@ -32,7 +32,14 @@ assert.match(app, /id="homePoints"/,
 assert.match(app, /function updateHomeMiniStats\(\)[\s\S]*?homeGamesPlayed[\s\S]*?homeWins[\s\S]*?homePoints/,
   'all three homepage account counters must refresh from the same authenticated stats snapshot');
 assert.match(app, /queue\.status === 'finished'[\s\S]*?data-action="room-next-session"/,
-  'a finished room must offer a separate next-session action, not a purchase action');
+  'a finished room must open the next session without buying a card');
+assert.match(app, /queue\.status === 'finished'[\s\S]*?ورود رایگان به سانس بعدی/,
+  'the finished-room action must be clearly described as free entry');
+assert.doesNotMatch(
+  app.match(/const purchaseAction =([\s\S]*?)const waitingMessage =/)?.[1] || '',
+  /queue\.status === 'finished'[\s\S]*?room-join-auto/,
+  'a finished room must not use the purchase endpoint to open the next session'
+);
 const nextSessionHandler = app.match(/if \(action === 'room-next-session'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-join-auto'\)/)?.[1] || '';
 assert.match(nextSessionHandler, /\/api\/rooms\/\$\{activeRoomId\}\/next/,
   'opening the next session must call the no-purchase endpoint');
