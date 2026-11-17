@@ -2006,19 +2006,21 @@ document.addEventListener('click', async event => {
     finally { roomJoinBusy = false; if (actionEl.isConnected) actionEl.disabled = false; }
     return;
   }
-  if (action === 'room-join-auto') {
+  if (action === 'room-join-auto' || action === 'room-join-next') {
     if(!requireLogin() || roomJoinBusy || actionEl.disabled) return;
     roomJoinBusy = true;
     actionEl.disabled = true;
     unlockPersianAudio();
+    const requestedCardCount = Math.max(1, Math.min(MAX_ROOM_CARDS_PER_PLAYER, Number(roomCardCount) || 1));
+    const purchaseAttempt = getRoomPurchaseAttempt(activeRoomId, requestedCardCount);
     try {
       let result;
-      // A short retry makes simultaneous joins resilient to a temporary D1 room lock.
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           result = await apiRequest(`/api/rooms/${activeRoomId}/join`, {
             method:'POST',
-            body:JSON.stringify({cardsCount:roomCardCount,purchaseConfirmed:true})
+            headers:{'Idempotency-Key':purchaseAttempt.key},
+            body:JSON.stringify({cardsCount:requestedCardCount,purchaseConfirmed:true})
           });
           break;
         } catch (error) {
@@ -2027,65 +2029,78 @@ document.addEventListener('click', async event => {
           await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
         }
       }
-      const requestedCardCount=roomCardCount;
-      roomServerSnapshot=result.room;
-      roomCards=result.room.myCards||[];
-      roomAllCards=Array.isArray(result.room.allPlayerCards)?result.room.allPlayerCards:[];
-      roomCardCount=roomCards.length||roomCardCount;
-      if(result.room.status==='playing'){
-        activeRoomId=result.room.id;
-        roomCalledNumbers=result.room.allCalledNumbers||[];
-        currentPage='roomGame';
+      purchaseAttempt.clear();
+      roomServerSnapshot = result.room;
+      roomCards = Array.isArray(result.room.myCards) ? result.room.myCards : [];
+      roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
+      roomCardCount = roomCards.length || requestedCardCount;
+      if (result.room.status === 'playing' && result.room.joined) {
+        activeRoomId = result.room.id;
+        roomCalledNumbers = result.room.allCalledNumbers || [];
+        currentPage = 'roomGame';
       }
-      // Refresh the authenticated profile from D1 immediately after payment.
       await loadAuthenticatedUser();
-      if(roomCards.length < requestedCardCount) {
-        showToast(`فقط ${faDigits(roomCards.length)} کارت ثبت شد.`);
+      if (result.room.status === 'playing' && !result.room.joined) {
+        showToast('ثبت‌نام سانس بعدی ثبت شد؛ پس از پایان بازی جاری نوبت آن می‌رسد.');
+      } else if (result.room.status === 'playing') {
+        showToast('کارت‌های سانس بعدی ثبت شد؛ بازی فعلی ادامه دارد.');
       } else {
-        showToast(result.room.status==='playing'?'بازی آغاز شد.':'کارت‌ها خریداری شدند؛ مهلت ۲:۳۰ دقیقه‌ای از اولین خرید محاسبه می‌شود.');
+        showToast('کارت‌ها خریداری شدند؛ مهلت ۲:۳۰ دقیقه‌ای از اولین خرید این سانس محاسبه می‌شود.');
       }
       render();
-    } catch(error) { showToast(error.message); }
-    finally { roomJoinBusy = false; if (actionEl.isConnected) actionEl.disabled = false; }
+    } catch(error) {
+      // Keep the same idempotency key on ambiguous network/server failures.
+      showToast(error.message);
+    } finally {
+      roomJoinBusy = false;
+      if (actionEl.isConnected) actionEl.disabled = false;
+    }
     return;
   }
   if (action === 'room-add-card') {
-    if(!requireLogin() || actionEl.disabled) return;
+    if(!requireLogin() || roomJoinBusy || actionEl.disabled) return;
+    roomJoinBusy = true;
     unlockPersianAudio();
-    actionEl.disabled=true;
+    actionEl.disabled = true;
+    const purchaseAttempt = getRoomPurchaseAttempt(activeRoomId, 1);
     try {
       let result;
-      for (let attempt=0; attempt<3; attempt++) {
+      for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          result=await apiRequest(`/api/rooms/${activeRoomId}/join`, {
+          result = await apiRequest(`/api/rooms/${activeRoomId}/join`, {
             method:'POST',
+            headers:{'Idempotency-Key':purchaseAttempt.key},
             body:JSON.stringify({cardsCount:1,purchaseConfirmed:true})
           });
           break;
         } catch(error) {
-          const temporaryLock=error.message.includes('اتاق در حال به‌روزرسانی است');
-          if(!temporaryLock || attempt===2) throw error;
-          await new Promise(resolve=>setTimeout(resolve,250*(attempt+1)));
+          const temporaryLock = error.message.includes('اتاق در حال به‌روزرسانی است');
+          if (!temporaryLock || attempt === 2) throw error;
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
         }
       }
-      roomServerSnapshot=result.room;
-      roomCards=Array.isArray(result.room.myCards)?result.room.myCards:[];
-      roomAllCards=Array.isArray(result.room.allPlayerCards)?result.room.allPlayerCards:[];
-      roomCardCount=roomCards.length;
-      if(result.room.status==='playing') {
-        activeRoomId=result.room.id;
-        roomCalledNumbers=result.room.allCalledNumbers||[];
-        currentPage='roomGame';
+      purchaseAttempt.clear();
+      roomServerSnapshot = result.room;
+      roomCards = Array.isArray(result.room.myCards) ? result.room.myCards : [];
+      roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
+      roomCardCount = roomCards.length || roomCardCount;
+      if (result.room.status === 'playing' && result.room.joined) {
+        activeRoomId = result.room.id;
+        roomCalledNumbers = result.room.allCalledNumbers || [];
+        currentPage = 'roomGame';
       }
       await loadAuthenticatedUser();
-      showToast(result.room.status==='playing'
-        ? 'کارت خریداری شد و بازی در حال اجراست.'
-        : 'یک کارت جدید خریداری و به کارت‌های تو اضافه شد.');
+      showToast(result.room.status === 'playing' && !result.room.joined
+        ? 'یک کارت برای سانس بعدی خریداری شد.'
+        : result.room.status === 'playing'
+          ? 'کارت سانس بعدی ثبت شد؛ بازی جاری ادامه دارد.'
+          : 'یک کارت جدید خریداری و به کارت‌های تو اضافه شد.');
       render();
     } catch(error) {
       showToast(error.message);
     } finally {
-      if(actionEl.isConnected) actionEl.disabled=false;
+      roomJoinBusy = false;
+      if (actionEl.isConnected) actionEl.disabled = false;
     }
     return;
   }
