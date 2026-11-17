@@ -48,6 +48,12 @@ assert.doesNotMatch(nextSessionHandler, /\/join|cardsCount|loadAuthenticatedUser
 const explicitPurchaseHandler = app.match(/if \(action === 'room-join-auto'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-add-card'\)/)?.[1] || '';
 assert.match(explicitPurchaseHandler, /purchaseConfirmed\s*:\s*true/,
   'a new room card may be purchased only through the explicit purchase action');
+assert.match(app, /getWalletRequestIdempotencyKey\(\)/,
+  'wallet request forms must retain a stable idempotency key for retries');
+assert.match(app, /Idempotency-Key['"]\s*:\s*idempotencyKey/,
+  'wallet requests must send their idempotency key to the backend');
+assert.match(app, /clearWalletRequestIdempotencyKey\(\)/,
+  'wallet request idempotency state must clear after success or changed input');
 
 assert.match(app,/supportAdmin:renderSupportAdmin/,'the administrator support inbox must remain a registered app page');
 assert.match(app,/walletAdmin:renderWalletAdmin/,'the finance admin panel must remain a registered app page');
