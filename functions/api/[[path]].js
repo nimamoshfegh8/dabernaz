@@ -1632,9 +1632,12 @@ async function routeRequest(request, env) {
       const target = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE member_id=? LIMIT 1').bind(memberId).first();
       if (!target) throw new HttpError(404, 'کاربری با این شناسه پیدا نشد.');
       const now = new Date().toISOString();
+      const adjustmentId = randomToken(16);
       const result = await env.DB.batch([
         env.DB.prepare('UPDATE users SET balance=balance+? WHERE id=? AND balance+?>=0').bind(amount,target.id,amount),
         env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'admin_adjustment',?,?,? WHERE changes()=1").bind(target.id,amount,'اصلاح موجودی توسط مدیر: '+reason,now),
+        env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'admin_adjustment','admin_adjustment',?,? WHERE changes()=1")
+          .bind(adjustmentId,target.id,amount,adjustmentId,Date.now()),
       ]);
       if (Number(result?.[0]?.meta?.changes || 0) !== 1) throw new HttpError(409, 'موجودی کافی نیست یا اصلاح موجودی انجام نشد.');
       const updated = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE id=?').bind(target.id).first();
@@ -1668,6 +1671,8 @@ async function routeRequest(request, env) {
             .bind(decision === 'approve' ? 'approved' : 'rejected',note,user.id,now,now,id),
           env.DB.prepare("UPDATE users SET balance=balance+? WHERE id=? AND changes()=1 AND ?='approve'").bind(Number(current.amount),Number(current.user_id),decision),
           env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'manual_deposit',?,?,? WHERE changes()=1").bind(Number(current.user_id),Number(current.amount),'شارژ دستی کیف پول · درخواست '+id,now),
+          env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'manual_deposit','manual_wallet_request',?,? WHERE changes()=1")
+            .bind(randomToken(16),Number(current.user_id),Number(current.amount),'deposit:'+String(id),Date.now()),
         ]);
       } else {
         if (!['paid','reject'].includes(decision)) throw new HttpError(400, 'برای برداشت فقط ثبت واریز یا رد درخواست مجاز است.');
@@ -1676,6 +1681,8 @@ async function routeRequest(request, env) {
             .bind(decision === 'paid' ? 'paid' : 'rejected',note,user.id,now,now,id),
           env.DB.prepare("UPDATE users SET balance=balance+? WHERE id=? AND changes()=1 AND ?='reject'").bind(Number(current.amount),Number(current.user_id),decision),
           env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_refund',?,?,? WHERE changes()=1").bind(Number(current.user_id),Number(current.amount),'بازگشت وجه برداشت ردشده · درخواست '+id,now),
+          env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'withdrawal_refund','manual_wallet_request',?,? WHERE changes()=1")
+            .bind(randomToken(16),Number(current.user_id),Number(current.amount),'withdraw:'+String(id),Date.now()),
         ]);
       }
       if (Number(batch?.[0]?.meta?.changes || 0) !== 1) throw new HttpError(409, 'این درخواست قبلاً بررسی شده یا در وضعیت قابل بررسی نیست.');
@@ -1759,6 +1766,8 @@ async function routeRequest(request, env) {
       env.DB.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=?').bind(amount,user.id,amount),
       env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,card_number,card_holder,bank_name,user_note,created_at,updated_at) SELECT ?,'withdraw',?,'pending_transfer',?,?,?,?,?,? WHERE changes()=1")
         .bind(user.id,amount,cardNumber,cardHolder,bankName,userNote,now,now),
+      env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'withdrawal_reserved','manual_wallet_request','withdraw:'||CAST(last_insert_rowid() AS TEXT),? WHERE changes()=1")
+        .bind(randomToken(16),user.id,-amount,Date.now()),
       env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_reserved',?,?,? WHERE changes()=1")
         .bind(user.id,-amount,'رزرو موجودی برای درخواست برداشت',now),
     ]);
@@ -1809,6 +1818,8 @@ async function routeRequest(request, env) {
       env.DB.prepare("UPDATE manual_wallet_requests SET status='cancelled',updated_at=? WHERE id=? AND user_id=? AND status='pending_transfer'").bind(now,id,user.id),
       env.DB.prepare('UPDATE users SET balance=balance+? WHERE id=? AND changes()=1').bind(Number(item.amount),user.id),
       env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_cancel_refund',?,?,? WHERE changes()=1").bind(user.id,Number(item.amount),'بازگشت وجه با لغو درخواست برداشت · درخواست '+id,now),
+      env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'withdrawal_cancel_refund','manual_wallet_request',?,? WHERE changes()=1")
+        .bind(randomToken(16),user.id,Number(item.amount),'withdraw:'+String(id),Date.now()),
     ]);
     if (Number(batch?.[0]?.meta?.changes || 0) !== 1) throw new HttpError(409, 'درخواست برداشت قبلاً پردازش شده است.');
     return json({ok:true,status:'cancelled'});
