@@ -183,7 +183,7 @@ async function applyLocalMigrationsAndSeed() {
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", "migrations/0001_room_rounds_financial_queue.sql"]);
   const seed = [
-    ...Array.from({ length: 6 }, (_, index) => {
+    ...Array.from({ length: 21 }, (_, index) => {
       const id = 910001 + index;
       const n = index + 1;
       return `INSERT INTO users(id,username,password_hash,balance,bingo_coins,created_at,email,member_id,games_played,wins,points) VALUES(${id},'ci-room-user-${n}','test-only-not-a-real-credential',1000000,500,'2026-11-17T00:00:00.000Z','room-user-${n}@example.invalid','CIROOM${n}',0,0,0);`;
@@ -193,8 +193,8 @@ async function applyLocalMigrationsAndSeed() {
   await writeFile(tempSql, seed, "utf8");
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", tempSql]);
-  const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910006");
-  assert.equal(Number(users.count), 6, "Six isolated synthetic test users must be seeded");
+  const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910021");
+  assert.equal(Number(users.count), 21, "Twenty-one isolated synthetic test users must be seeded");
   const schema = one("SELECT MAX(version) AS version FROM schema_migrations");
   assert.equal(Number(schema.version), 1, "Both versioned D1 migrations must be applied locally");
 }
@@ -220,6 +220,39 @@ async function main() {
     body: { cardsCount: 1, purchaseConfirmed: true },
   });
   assert.equal(noIdentity.status, 401);
+
+  // Exactly 20 distinct accounts may join one round. Account 21 must be
+  // rejected without a debit or a purchase row.
+  for (let index = 1; index <= 20; index += 1) {
+    const response = await requestRoom("room50000", {
+      method: "POST", action: "join", userId: 910000 + index,
+      idempotencyKey: "capacity-user-" + String(index).padStart(2, "0") + "-room50000",
+      body: { cardsCount: 1, purchaseConfirmed: true },
+    });
+    assert.equal(response.status, 200, "Capacity join " + index + " must succeed: " + JSON.stringify(response.data));
+  }
+  const capacityRound = one("SELECT id,status FROM room_rounds WHERE room_id='room50000' ORDER BY sequence DESC LIMIT 1");
+  assert.equal(capacityRound.status, "registration_open");
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_round_players WHERE round_id='" + capacityRound.id + "'").count), 20);
+  const twentyFirstBalance = Number(one("SELECT balance FROM users WHERE id=910021").balance);
+  const twentyFirst = await requestRoom("room50000", {
+    method: "POST", action: "join", userId: 910021,
+    idempotencyKey: "capacity-user-21-room50000",
+    body: { cardsCount: 1, purchaseConfirmed: true },
+  });
+  assert.equal(twentyFirst.status, 409, "Player 21 must be rejected when the room is full");
+  assert.equal(Number(one("SELECT balance FROM users WHERE id=910021").balance), twentyFirstBalance,
+    "A player rejected by capacity must not be charged");
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_round_players WHERE round_id='" + capacityRound.id + "'").count), 20);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE round_id='" + capacityRound.id + "'").count), 20);
+
+  // GET action URLs are invalid and must not initialize or mutate DO state.
+  const invalidGetBefore = one("SELECT COUNT(*) AS count FROM room_rounds WHERE room_id='room20000'");
+  const invalidJoinGet = await requestRoom("room20000", { method: "GET", action: "join", userId: 910001 });
+  const invalidReconcileGet = await requestRoom("room20000", { method: "GET", action: "reconcile", userId: 910001 });
+  assert.equal(invalidJoinGet.status, 405);
+  assert.equal(invalidReconcileGet.status, 405);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_rounds WHERE room_id='room20000'").count), Number(invalidGetBefore.count));
 
   // One-player round: two cards in one purchase must be refunded once, in full,
   // without any follow-up browser request.
@@ -365,7 +398,7 @@ async function main() {
   }
   assert.equal(updateBlocked, true, "Financial ledger UPDATE must be rejected by the database trigger");
 
-  console.log("Room coordinator integration checks passed: GET read-only, server pricing, one-time refund, idempotent and concurrent purchase, five-card cap, independent queue, worker restart, payouts and append-only ledger.");
+  console.log("Room coordinator integration checks passed: GET read-only (including mutation paths), server pricing, one-time refund, idempotent and concurrent purchase, 20-player capacity, five-card cap, independent queue, worker restart, payouts and append-only ledger.");
 }
 
 try {
