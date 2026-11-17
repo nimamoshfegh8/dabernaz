@@ -1,0 +1,56 @@
+name: Dabernaz isolated Room Worker and D1 audit
+
+on:
+  push:
+    branches:
+      - test/playwright-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dabernaz-room-coordinator-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  room-coordinator:
+    name: Durable Object, local D1 and financial invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out isolated audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install Wrangler v4 for local-only Cloudflare emulation
+        run: npm install --no-save --package-lock=false wrangler@4
+
+      - name: Check Worker and integration test syntax
+        run: |
+          npm run check
+          node --check scripts/room-coordinator-smoke.mjs
+
+      - name: Run isolated D1 and Durable Object integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-artifacts
+          node scripts/room-coordinator-smoke.mjs 2>&1 | tee test-artifacts/room-coordinator-smoke.log
+
+      - name: Upload integration evidence and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-room-coordinator-audit
+          path: test-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
