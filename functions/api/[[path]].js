@@ -1857,7 +1857,8 @@ async function routeRequest(request, env) {
   }
 
   if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
-  if (env.DABERNAZ_TEST_DIAGNOSTICS === '1') await ensureSchema(env.DB);\n  else await assertSchemaReady(env.DB);
+  if (env.DABERNAZ_TEST_DIAGNOSTICS === '1') await ensureSchema(env.DB);
+  else await assertSchemaReady(env.DB);
 
   if (request.method === 'GET' && path === '/api/rooms/history') {
     return json({ ok: true, rounds: await recentWinners(env.DB) });
