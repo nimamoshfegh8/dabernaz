@@ -68,9 +68,6 @@ jobs:
       - name: Assert GET APIs are strictly read-only
         run: node scripts/api-readonly-contract-smoke.mjs 2>&1 | tee test-artifacts/api-readonly-contract.log
 
-      - name: Assert GET APIs are strictly read-only
-        run: node scripts/api-readonly-contract-smoke.mjs 2>&1 | tee test-artifacts/api-readonly-contract.log
-
       - name: Verify Node JSON fallback is disabled outside test mode
         shell: bash
         run: |
