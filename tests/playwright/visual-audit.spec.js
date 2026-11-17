@@ -1,0 +1,261 @@
+const { test, expect } = require('@playwright/test');
+
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'https://dabernaz.pages.dev';
+const targetOrigin = new URL(baseURL).origin;
+
+const viewports = [
+  { width: 320, height: 800, label: 'mobile-320' },
+  { width: 360, height: 800, label: 'mobile-360' },
+  { width: 375, height: 812, label: 'mobile-375' },
+  { width: 390, height: 844, label: 'mobile-390' },
+  { width: 430, height: 932, label: 'mobile-430' },
+  { width: 768, height: 1024, label: 'tablet-portrait-768' },
+  { width: 1024, height: 768, label: 'tablet-landscape-1024' },
+  { width: 1366, height: 900, label: 'desktop-1366' },
+  { width: 1920, height: 1080, label: 'desktop-1920' },
+  { width: 844, height: 390, label: 'mobile-landscape-844' },
+  { width: 932, height: 430, label: 'mobile-landscape-932' }
+];
+
+const colorSchemes = ['light', 'dark'];
+
+function observePage(page) {
+  const diagnostics = {
+    pageErrors: [],
+    consoleErrors: [],
+    failedRequests: [],
+    httpErrors: [],
+    mutatingRequests: []
+  };
+
+  page.on('pageerror', error => diagnostics.pageErrors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error') diagnostics.consoleErrors.push(message.text());
+  });
+  page.on('request', request => {
+    const method = request.method().toUpperCase();
+    if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return;
+    let url;
+    try { url = new URL(request.url()); } catch (_) { return; }
+    if (url.origin === targetOrigin) {
+      diagnostics.mutatingRequests.push({ method, path: url.pathname });
+    }
+  });
+  page.on('requestfailed', request => {
+    diagnostics.failedRequests.push({
+      method: request.method(),
+      url: request.url(),
+      error: request.failure()?.errorText || 'unknown'
+    });
+  });
+  page.on('response', response => {
+    if (response.status() >= 400) {
+      diagnostics.httpErrors.push({
+        status: response.status(),
+        url: response.url()
+      });
+    }
+  });
+
+  return diagnostics;
+}
+
+async function openHome(page) {
+  await page.goto('/#page=home', { waitUntil: 'domcontentloaded' });
+  await page.locator('#appView').waitFor({ state: 'visible' });
+  await page.waitForFunction(() => {
+    const root = document.querySelector('#appView');
+    return !!root && root.children.length > 0 && root.textContent.trim().length > 0;
+  }, null, { timeout: 20_000 });
+}
+
+async function attachDiagnostics(testInfo, diagnostics, layout = null) {
+  const report = { ...diagnostics, layout };
+  await testInfo.attach('browser-diagnostics.json', {
+    body: Buffer.from(JSON.stringify(report, null, 2)),
+    contentType: 'application/json'
+  });
+}
+
+for (const colorScheme of colorSchemes) {
+  for (const viewport of viewports) {
+    test('homepage layout ' + colorScheme + ' ' + viewport.width + 'x' + viewport.height, async ({ page }, testInfo) => {
+      const diagnostics = observePage(page);
+      await page.emulateMedia({ colorScheme });
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await openHome(page);
+
+      const layout = await page.evaluate(() => {
+        const visible = element => {
+          const rect = element.getBoundingClientRect();
+          const style = getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 &&
+            style.display !== 'none' && style.visibility !== 'hidden';
+        };
+
+        const root = document.documentElement;
+        const body = document.body;
+        const documentWidth = Math.max(root.scrollWidth, body.scrollWidth);
+        const overflowElements = Array.from(body.querySelectorAll('*'))
+          .filter(element => {
+            if (!visible(element)) return false;
+            const rect = element.getBoundingClientRect();
+            return rect.left < -1 || rect.right > window.innerWidth + 1;
+          })
+          .slice(0, 25)
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            className: String(element.className?.baseVal || element.className || '').slice(0, 100),
+            id: element.id || '',
+            left: Math.round(element.getBoundingClientRect().left),
+            right: Math.round(element.getBoundingClientRect().right),
+            width: Math.round(element.getBoundingClientRect().width)
+          }));
+
+        const smallTargets = Array.from(document.querySelectorAll(
+          'button, a, input, select, textarea, [role="button"], [role="switch"]'
+        )).filter(visible).map(element => {
+          const rect = element.getBoundingClientRect();
+          return {
+            tag: element.tagName.toLowerCase(),
+            text: (element.innerText || element.getAttribute('aria-label') || element.getAttribute('placeholder') || '').trim().slice(0, 70),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          };
+        }).filter(target => target.width < 44 || target.height < 44).slice(0, 40);
+
+        const smallText = Array.from(body.querySelectorAll('*'))
+          .filter(element => element.children.length === 0 && visible(element))
+          .map(element => ({
+            tag: element.tagName.toLowerCase(),
+            className: String(element.className?.baseVal || element.className || '').slice(0, 80),
+            text: (element.textContent || '').trim().slice(0, 50),
+            fontSize: Math.round(parseFloat(getComputedStyle(element).fontSize) * 10) / 10
+          }))
+          .filter(item => item.text && item.fontSize < 12)
+          .slice(0, 40);
+
+        return {
+          viewportWidth: window.innerWidth,
+          documentWidth,
+          documentHeight: Math.max(root.scrollHeight, body.scrollHeight),
+          hasMainContent: !!document.querySelector('main#appView') && body.innerText.trim().length > 0,
+          language: root.lang,
+          direction: root.dir,
+          overflowElements,
+          smallTargets,
+          smallText
+        };
+      });
+
+      const screenshotPath = testInfo.outputPath(
+        'home-' + colorScheme + '-' + viewport.width + 'x' + viewport.height + '.png'
+      );
+      await page.screenshot({ path: screenshotPath, fullPage: true, animations: 'disabled' });
+      await testInfo.attach('homepage-' + colorScheme + '-' + viewport.label, {
+        path: screenshotPath,
+        contentType: 'image/png'
+      });
+      await attachDiagnostics(testInfo, diagnostics, layout);
+
+      expect(layout.hasMainContent, 'homepage must render main content').toBe(true);
+      expect(layout.language, 'document language should be Persian').toBe('fa');
+      expect(layout.direction, 'document direction should be RTL').toBe('rtl');
+      expect(
+        layout.documentWidth,
+        'horizontal overflow at ' + viewport.width + 'px in ' + colorScheme + ' mode'
+      ).toBeLessThanOrEqual(viewport.width + 1);
+      expect(diagnostics.pageErrors, 'uncaught browser errors').toEqual([]);
+      expect(diagnostics.mutatingRequests, 'this audit must not send write requests').toEqual([]);
+      expect(
+        diagnostics.httpErrors.filter(item => item.status >= 500),
+        'server errors while loading the homepage'
+      ).toEqual([]);
+    });
+  }
+}
+
+test('public pages render without submitting forms or changing account state', async ({ page }, testInfo) => {
+  const diagnostics = observePage(page);
+  const routes = [
+    { id: 'home', hash: '/#page=home' },
+    { id: 'games', hash: '/#page=games' },
+    { id: 'room5000', hash: '/#page=room5000' },
+    { id: 'room10000', hash: '/#page=room10000' },
+    { id: 'room20000', hash: '/#page=room20000' },
+    { id: 'room50000', hash: '/#page=room50000' },
+    { id: 'roomGame', hash: '/#page=roomGame&room=room5000' },
+    { id: 'tournaments', hash: '/#page=tournaments' },
+    { id: 'tournamentRoom', hash: '/#page=tournamentRoom' },
+    { id: 'bingoTournament', hash: '/#page=bingoTournament' },
+    { id: 'invite', hash: '/#page=invite' },
+    { id: 'wallet', hash: '/#page=wallet' },
+    { id: 'account', hash: '/#page=account' },
+    { id: 'settings', hash: '/#page=settings' },
+    { id: 'support', hash: '/#page=support' }
+  ];
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const routeResults = [];
+
+  for (const route of routes) {
+    await page.goto(route.hash, { waitUntil: 'domcontentloaded' });
+    await page.locator('#appView').waitFor({ state: 'visible' });
+    await page.waitForFunction(() => {
+      const root = document.querySelector('#appView');
+      return !!root && root.children.length > 0 && root.textContent.trim().length > 0;
+    }, null, { timeout: 20_000 });
+
+    const state = await page.evaluate(() => ({
+      page: new URLSearchParams(location.hash.replace(/^#/, '')).get('page'),
+      textLength: (document.querySelector('#appView')?.innerText || '').trim().length,
+      title: document.title
+    }));
+
+    routeResults.push({ route: route.id, ...state });
+    const screenshotPath = testInfo.outputPath('route-' + route.id + '.png');
+    await page.screenshot({ path: screenshotPath, fullPage: true, animations: 'disabled' });
+    await testInfo.attach('route-' + route.id, { path: screenshotPath, contentType: 'image/png' });
+
+    expect(state.page, 'requested route should remain selected: ' + route.id).toBe(route.id);
+    expect(state.textLength, 'route should render visible content: ' + route.id).toBeGreaterThan(0);
+  }
+
+  await attachDiagnostics(testInfo, { ...diagnostics, routeResults });
+  expect(diagnostics.pageErrors, 'uncaught browser errors while visiting public routes').toEqual([]);
+  expect(diagnostics.mutatingRequests, 'page visits must not send write requests').toEqual([]);
+  expect(
+    diagnostics.httpErrors.filter(item => item.status >= 500),
+    'server errors while visiting public routes'
+  ).toEqual([]);
+});
+
+test('bottom navigation opens the expected public sections', async ({ page }, testInfo) => {
+  const diagnostics = observePage(page);
+  const navPages = ['home', 'games', 'tournaments', 'support', 'invite', 'wallet', 'account', 'settings'];
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openHome(page);
+
+  const visited = [];
+  for (const route of navPages) {
+    await page.locator('.bottom-nav [data-page="' + route + '"]').click();
+    await expect.poll(async () => page.evaluate(() => (
+      new URLSearchParams(location.hash.replace(/^#/, '')).get('page')
+    ))).toBe(route);
+    await expect(page.locator('#appView')).not.toBeEmpty();
+    visited.push(route);
+  }
+
+  await attachDiagnostics(testInfo, { ...diagnostics, visited });
+  expect(diagnostics.pageErrors, 'navigation must not produce uncaught browser errors').toEqual([]);
+  expect(diagnostics.mutatingRequests, 'navigation must not send write requests').toEqual([]);
+});
+
+test('document exposes Persian RTL and primary navigation landmarks', async ({ page }) => {
+  await openHome(page);
+  await expect(page.locator('html')).toHaveAttribute('lang', 'fa');
+  await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+  await expect(page.locator('main#appView')).toBeVisible();
+  await expect(page.locator('nav.bottom-nav')).toHaveAttribute('aria-label', /ناوبری اصلی/);
+  await expect(page.locator('.bottom-nav button[data-page="home"]')).toBeVisible();
+});
