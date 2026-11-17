@@ -89,7 +89,8 @@ async function join(account, roomId, cardsCount, key = randomUUID()) {
   });
   assert.equal(result.response.status, 200,
     roomId + ' join must succeed: ' + (result.data.error || ''));
-  assert.equal(Number(result.data.purchase?.amount), cardsCount * Number(result.data.room?.economics?.price || 0) || Number(result.data.purchase?.amount));
+  assert.ok(Number.isSafeInteger(Number(result.data.purchase?.amount)) && Number(result.data.purchase.amount) > 0,
+    roomId + ' purchase amount must be a positive server-calculated integer');
   return { ...result.data, key };
 }
 
@@ -131,8 +132,10 @@ assert.equal(Number((await me(accounts[1])).balance), startingBalance,
   'a forged identity header must not debit another account');
 
 const second = await join(accounts[1], 'room5000', 1);
+assert.equal(second.purchase.amount, 5000);
 assert.equal(second.room.playerCount, 2);
 const addFour = await join(accounts[0], 'room5000', 4);
+assert.equal(addFour.purchase.amount, 20000);
 assert.equal(addFour.room.playerCount, 2);
 assert.equal(addFour.room.cardCount, 6);
 assert.equal(addFour.room.myCards.length, 5);
@@ -161,8 +164,10 @@ await waitFor(async () => {
 
 // Two other independent sessions register while the first game is playing.
 const queuedOne = await join(accounts[2], 'room5000', 1);
+assert.equal(queuedOne.purchase.amount, 5000);
 assert.equal(queuedOne.room.status, 'playing');
 const queuedTwo = await join(accounts[3], 'room5000', 1);
+assert.equal(queuedTwo.purchase.amount, 5000);
 assert.equal(queuedTwo.room.status, 'playing');
 const roundRows = d1("SELECT id,sequence,status,registration_deadline FROM room_rounds WHERE room_id='room5000' ORDER BY sequence");
 assert.equal(roundRows.length, 2);
@@ -207,6 +212,7 @@ assert.equal(d1("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id=" + s
 // The separate one-player room must be fully refunded, exactly once, by its alarm.
 const refundBefore = Number((await me(accounts[0])).balance);
 const singlePurchase = await join(accounts[0], 'room10000', 1);
+assert.equal(singlePurchase.purchase.amount, 10000);
 assert.equal(singlePurchase.purchase.amount, 10000);
 const refundRound = d1("SELECT id FROM room_rounds WHERE room_id='room10000' ORDER BY sequence DESC LIMIT 1")[0].id;
 await waitFor(async () => {
