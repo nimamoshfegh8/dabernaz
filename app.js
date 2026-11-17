@@ -581,6 +581,24 @@ function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(safeState));
   } catch (_) { showToast('فضای ذخیره‌سازی مرورگر در دسترس نیست'); }
 }
+const WALLET_REQUEST_KEY_STORAGE = 'dabernaz_wallet_request_idempotency_v1';
+let walletRequestKeyFallback = '';
+function getWalletRequestIdempotencyKey() {
+  try {
+    const existing = window.sessionStorage.getItem(WALLET_REQUEST_KEY_STORAGE);
+    if (/^[A-Za-z0-9._:-]{16,128}$/.test(existing || '')) return existing;
+  } catch (_) {}
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const key = 'wallet.' + Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  walletRequestKeyFallback = key;
+  try { window.sessionStorage.setItem(WALLET_REQUEST_KEY_STORAGE, key); } catch (_) {}
+  return key;
+}
+function clearWalletRequestIdempotencyKey() {
+  walletRequestKeyFallback = '';
+  try { window.sessionStorage.removeItem(WALLET_REQUEST_KEY_STORAGE); } catch (_) {}
+}
 async function apiRequest(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const requestOptions = {
@@ -2264,8 +2282,14 @@ function updateWalletRequestType(type){
  if(rule)rule.textContent=withdraw?'مبلغ برداشت پس از ثبت از موجودی رزرو می‌شود. شماره کارت و نام صاحب کارت باید دقیق باشد؛ در صورت رد درخواست، مبلغ به کیف پول برمی‌گردد.':'پس از ثبت واریز، اطلاعات کارت مقصد فقط برای همین حساب و همین درخواست نمایش داده می‌شود. رسید را برای بررسی مدیریت ارسال کن.';
  if(submit)submit.textContent=withdraw?'ثبت درخواست برداشت':'ثبت درخواست واریز';
 }
+document.addEventListener('input', event => {
+  if (event.target.closest?.('#walletRequestForm')) clearWalletRequestIdempotencyKey();
+});
 document.addEventListener('change',event=>{
- if(event.target.matches('#walletRequestForm input[name="type"]'))updateWalletRequestType(event.target.value);
+ if(event.target.matches('#walletRequestForm input[name="type"]')) {
+   clearWalletRequestIdempotencyKey();
+   updateWalletRequestType(event.target.value);
+ }
 });
 document.addEventListener('submit', async event => {
 
@@ -2282,7 +2306,13 @@ document.addEventListener('submit', async event => {
     }
     const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
     try{
-      const result=await apiRequest('/api/wallet/requests',{method:'POST',body:JSON.stringify(payload)});
+      const idempotencyKey = getWalletRequestIdempotencyKey();
+      const result=await apiRequest('/api/wallet/requests',{
+        method:'POST',
+        headers:{'Idempotency-Key':idempotencyKey},
+        body:JSON.stringify(payload)
+      });
+      clearWalletRequestIdempotencyKey();
       await refreshWalletData();
       render();
       if(type==='deposit'){
