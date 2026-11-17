@@ -86,3 +86,55 @@ jobs:
             test-results/
           if-no-files-found: warn
           retention-days: 14
+
+  preview-browser-audit:
+    name: Chromium visual and route audit (live Preview, read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BASE_URL: https://test-playwright-audit.dabernaz.pages.dev
+    steps:
+      - name: Check out audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run source syntax checks
+        run: npm run check
+
+      - name: Install pinned Playwright Test without changing project manifests
+        run: npm install --no-save --package-lock=false @playwright/test@1.65.1
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for the matching Preview deployment to become healthy
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent "$PLAYWRIGHT_BASE_URL/api/health" > /dev/null; then
+              echo "Live Preview API health check succeeded."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Preview did not become healthy within 240 seconds."
+          exit 1
+
+      - name: Run read-only Chromium audit against live Preview
+        run: npx playwright test --config=playwright.config.js
+
+      - name: Upload live Preview screenshots, report, traces, and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-preview-playwright-audit
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 14
