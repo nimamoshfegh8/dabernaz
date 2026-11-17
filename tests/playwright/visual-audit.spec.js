@@ -263,7 +263,7 @@ test('public pages render without submitting forms or changing account state', a
 });
 
 test('bottom navigation opens the expected public sections', async ({ page }, testInfo) => {
-  const diagnostics = observePage(page);
+  const diagnostics = await observePage(page);
   const navPages = ['home', 'games', 'tournaments', 'support', 'invite', 'wallet', 'account', 'settings'];
   await page.setViewportSize({ width: 390, height: 844 });
   await openHome(page);
