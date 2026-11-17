@@ -345,8 +345,21 @@ function get_user_index(array $db, string $userId): int {
 $method=$_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path=$_GET['path'] ?? parse_url($_SERVER['REQUEST_URI'] ?? '/',PHP_URL_PATH);
 $path='/'.trim((string)$path,'/');
+$testMode = getenv('DABERNAZ_TEST_MODE') === '1';
+
+// This JSON-file PHP backend is not financially or operationally equivalent to
+// Cloudflare Pages Functions + D1 + the room coordinator. Keep it disabled in
+// every normal deployment; test mode is only for isolated, disposable CI data.
+if (!$testMode) {
+    if ($path === '/api/health') {
+        send_json(503, ['ok'=>false,'service'=>'dabernaz','backend'=>'php','mode'=>'disabled',
+            'code'=>'PHP_FALLBACK_DISABLED']);
+    }
+    send_json(503, ['ok'=>false,'code'=>'PHP_FALLBACK_DISABLED',
+        'error'=>'این API جایگزین امنی برای Cloudflare Pages و D1 نیست؛ عملیات از این مسیر غیرفعال است.']);
+}
 if (in_array($method, ['POST','PATCH','PUT','DELETE'], true)) validate_write_origin();
-if ($path==='/api/health') send_json(200,['ok'=>true,'service'=>'dabernaz','backend'=>'php','mode'=>'ready']);
+if ($path==='/api/health') send_json(200,['ok'=>true,'service'=>'dabernaz','backend'=>'php','mode'=>'isolated-test-only']);
 
 if ($method==='POST' && ($path==='/api/auth/register' || $path==='/api/auth/login')) {
     $body=request_body(); $email=strtolower(trim((string)($body['email']??''))); $password=(string)($body['password']??'');
