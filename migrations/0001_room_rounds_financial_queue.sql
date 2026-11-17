@@ -167,6 +167,9 @@ CREATE INDEX IF NOT EXISTS idx_room_outbox_due
 CREATE UNIQUE INDEX IF NOT EXISTS idx_room_rounds_one_open_registration
   ON room_rounds(room_id) WHERE status='registration_open';
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_room_rounds_one_playing
+  ON room_rounds(room_id) WHERE status='playing';
+
 -- Protect the ledger from mutation and record the completed schema version.
 CREATE TRIGGER IF NOT EXISTS financial_ledger_no_update
 BEFORE UPDATE ON financial_ledger
