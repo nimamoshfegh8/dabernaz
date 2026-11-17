@@ -1534,6 +1534,7 @@ async function routeRequest(request, env) {
         database: 'missing',
         schema: 'unknown',
         roomCoordinator: { available: false },
+        walletRequests: { idempotency: false },
         readiness: 'misconfigured',
         mode: 'misconfigured',
       }, 503);
@@ -1542,22 +1543,36 @@ async function routeRequest(request, env) {
       const row = await env.DB.prepare('SELECT 1 AS ok').first();
       if (Number(row?.ok) !== 1) throw new Error('D1 health query returned an unexpected result.');
       await assertSchemaReady(env.DB);
+      const version = await env.DB.prepare('SELECT MAX(version) AS version FROM schema_migrations').first();
+      const schemaVersion = Number(version?.version) || 0;
       const roomCoordinatorAvailable = typeof env.ROOM_COORDINATOR?.fetch === 'function';
-      const readiness = roomCoordinatorAvailable ? 'ready' : 'degraded';
+      let walletIdempotencyAvailable = false;
+      try {
+        await env.DB.prepare('SELECT 1 FROM wallet_request_idempotency LIMIT 1').first();
+        walletIdempotencyAvailable = true;
+      } catch (_) {}
+      const readiness = roomCoordinatorAvailable && walletIdempotencyAvailable ? 'ready' : 'degraded';
+      const unavailableFeatures = [];
+      if (!roomCoordinatorAvailable) unavailableFeatures.push('paid_rooms');
+      if (!walletIdempotencyAvailable) unavailableFeatures.push('wallet_request_submission');
       return json({
         ok: true,
         service: 'dabernaz',
         backend: 'cloudflare-pages-functions',
         database: 'D1',
-        schema: 'v1',
+        schema: 'v' + schemaVersion,
         binding: 'bound',
         roomCoordinator: {
           available: roomCoordinatorAvailable,
           binding: 'ROOM_COORDINATOR',
         },
+        walletRequests: {
+          idempotency: walletIdempotencyAvailable,
+          migration: walletIdempotencyAvailable ? 2 : null,
+        },
         readiness,
         mode: readiness,
-        unavailableFeatures: roomCoordinatorAvailable ? [] : ['paid_rooms'],
+        unavailableFeatures,
       });
     } catch (error) {
       const message = error instanceof HttpError ? error.message : 'D1 is unreachable or the required schema is unavailable.';
@@ -1568,6 +1583,7 @@ async function routeRequest(request, env) {
         database: 'unreachable_or_unready',
         schema: 'unknown',
         roomCoordinator: { available: typeof env.ROOM_COORDINATOR?.fetch === 'function' },
+        walletRequests: { idempotency: false },
         readiness: 'degraded',
         mode: 'degraded',
         error: message,
