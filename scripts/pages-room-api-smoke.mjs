@@ -114,7 +114,10 @@ assert.equal(Number((await me(accounts[0])).balance), before);
 accounts[0].extraHeaders = { 'x-dabernaz-user-id': String(accounts[1].id) };
 const firstKey = randomUUID();
 const firstBody = { cardsCount: 1, purchaseConfirmed: true };
-const first = await raw('/api/rooms/room5000/join', { account: accounts[0], method: 'POST', key: firstKey, body: firstBody });
+const first = await raw('/api/rooms/room5000/join', {
+  account: accounts[0], method: 'POST', key: firstKey,
+  headers: accounts[0].extraHeaders, body: firstBody
+});
 assert.equal(first.response.status, 200, 'first room purchase: ' + (first.data.error || ''));
 assert.equal(first.data.purchase.amount, 5000);
 assert.equal(first.data.purchase.replayed, false);
