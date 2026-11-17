@@ -571,15 +571,28 @@ async function handleAuth(db, request, path) {
           .bind(inviter.id, userRow.id, new Date().toISOString()).run();
         const referralCount = await db.prepare('SELECT COUNT(*) AS n FROM referrals WHERE inviter_id = ?').bind(inviter.id).first();
         const milestones = Math.floor(Number(referralCount?.n || 0) / 5);
-        const rewarded = await db.prepare(`SELECT COUNT(*) AS n FROM transactions WHERE user_id = ? AND type = 'referral_reward'`).bind(inviter.id).first();
-        const alreadyRewarded = Number(rewarded?.n || 0);
+        const [legacyRewards, claimState] = await Promise.all([
+          db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE user_id=? AND type='referral_reward'").bind(inviter.id).first(),
+          db.prepare('SELECT COALESCE(MAX(milestone),0) AS n FROM referral_reward_claims WHERE inviter_id=?').bind(inviter.id).first(),
+        ]);
+        const alreadyRewarded = Math.max(Number(legacyRewards?.n || 0), Number(claimState?.n || 0));
         if (milestones > alreadyRewarded) {
           const nowText = new Date().toISOString();
           for (let milestone = alreadyRewarded + 1; milestone <= milestones; milestone++) {
+            const referenceId = String(inviter.id) + ':' + String(milestone);
             await db.batch([
-              db.prepare('UPDATE users SET balance = balance + 20000, bingo_coins = bingo_coins + 5 WHERE id = ?').bind(inviter.id),
-              db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, 'referral_reward', 20000, ?, ?)`).bind(inviter.id, `پاداش ${milestone * 5} دعوت موفق`, nowText),
-              db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, 'bingo_coin', 5, ?, ?)`).bind(inviter.id, `۵ بینگوکوین پاداش ${milestone * 5} دعوت موفق`, nowText),
+              db.prepare('INSERT INTO referral_reward_claims(inviter_id,milestone,referral_count,created_at) VALUES(?,?,?,?) ON CONFLICT(inviter_id,milestone) DO NOTHING')
+                .bind(inviter.id, milestone, Number(referralCount?.n || 0), nowText),
+              db.prepare('UPDATE users SET balance=balance+20000,bingo_coins=bingo_coins+5 WHERE id=? AND changes()=1')
+                .bind(inviter.id),
+              db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'referral_reward',20000,?,? WHERE changes()=1")
+                .bind(inviter.id, 'پاداش ' + String(milestone * 5) + ' دعوت موفق', nowText),
+              db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',5,?,? WHERE changes()=1")
+                .bind(inviter.id, '۵ بینگوکوین پاداش ' + String(milestone * 5) + ' دعوت موفق', nowText),
+              db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',20000,'referral_reward','referral_milestone',?,? WHERE changes()=1")
+                .bind(randomToken(16), inviter.id, referenceId, Date.now()),
+              db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',5,'referral_reward','referral_milestone',?,? WHERE changes()=1")
+                .bind(randomToken(16), inviter.id, referenceId, Date.now()),
             ]);
           }
         }
@@ -1303,7 +1316,9 @@ async function refundTournamentEvent(db, event, nowMs) {
         db.prepare("UPDATE users SET bingo_coins=bingo_coins+? WHERE id=? AND changes()=1")
           .bind(row.entry_cost, row.user_id),
         db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
-          .bind(row.user_id, row.entry_cost, "بازگشت ورودی " + tournamentTitle(event.tournament_type), nowText)
+          .bind(row.user_id, row.entry_cost, "بازگشت ورودی " + tournamentTitle(event.tournament_type), nowText),
+        db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',?,'tournament_refund','tournament_entry',?,? WHERE changes()=1")
+          .bind(randomToken(16), row.user_id, row.entry_cost, String(event.id) + ':' + String(row.user_id), Date.now())
       );
     }
     if (statements.length) await db.batch(statements);
@@ -1437,6 +1452,8 @@ async function payTournamentPrizes(db, event) {
         .bind(amount, player.user_id),
       db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
         .bind(player.user_id, amount, "جایزه رتبه " + String(index + 1) + " تورنومنت دابرناز", nowText),
+      db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',?,'tournament_prize','tournament_prize',?,? WHERE changes()=1")
+        .bind(randomToken(16), player.user_id, amount, String(event.id) + ':rank:' + String(index + 1) + ':user:' + String(player.user_id), Date.now()),
       db.prepare("UPDATE tournament_event_entries SET status=? WHERE event_id=? AND user_id=? AND EXISTS (SELECT 1 FROM tournament_prize_payouts WHERE event_id=? AND user_id=?)")
         .bind("winner_" + String(index + 1), event.id, player.user_id, event.id, player.user_id)
     );
@@ -1675,7 +1692,9 @@ async function registerRecurringTournament(db, user, request) {
     db.prepare("INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,created_at) SELECT ?,?,?,'registered',? WHERE changes()=1")
       .bind(event.id, user.id, cost, nowText),
     db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
-      .bind(user.id, -cost, "ورود به " + tournamentTitle(type), nowText)
+      .bind(user.id, -cost, "ورود به " + tournamentTitle(type), nowText),
+    db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',?,'tournament_entry','tournament_entry',?,? WHERE changes()=1")
+      .bind(randomToken(16), user.id, -cost, String(event.id) + ':' + String(user.id), Date.now())
   ]);
 
   if (!Number(result[0] && result[0].meta && result[0].meta.changes || 0)) {
