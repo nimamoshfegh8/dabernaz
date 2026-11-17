@@ -1488,16 +1488,56 @@ async function routeRequest(request, env) {
     'cache-control': 'no-store',
   } });
 
-  // Keep a lightweight health probe independent from schema initialization so the
-  // frontend can distinguish "API route is alive" from a D1/migration failure.
+  // Health reports both the Pages/D1 API and the independent room-coordinator
+  // binding. A healthy D1 alone must never make an unconnected game engine look
+  // ready. The route is read-only and intentionally does not advance any state.
   if (request.method === 'GET' && path === '/api/health') {
-    if (!env.DB) return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'missing', binding: 'missing', mode: 'misconfigured' }, 503);
+    if (!env.DB) {
+      return json({
+        ok: false,
+        service: 'dabernaz',
+        backend: 'cloudflare-pages-functions',
+        database: 'missing',
+        schema: 'unknown',
+        roomCoordinator: { available: false },
+        readiness: 'misconfigured',
+        mode: 'misconfigured',
+      }, 503);
+    }
     try {
       const row = await env.DB.prepare('SELECT 1 AS ok').first();
       if (Number(row?.ok) !== 1) throw new Error('D1 health query returned an unexpected result.');
-      return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', binding: 'bound', mode: 'ready' });
-    } catch (_) {
-      return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'unreachable', binding: 'bound', mode: 'degraded' }, 503);
+      await assertSchemaReady(env.DB);
+      const roomCoordinatorAvailable = typeof env.ROOM_COORDINATOR?.fetch === 'function';
+      const readiness = roomCoordinatorAvailable ? 'ready' : 'degraded';
+      return json({
+        ok: true,
+        service: 'dabernaz',
+        backend: 'cloudflare-pages-functions',
+        database: 'D1',
+        schema: 'v1',
+        binding: 'bound',
+        roomCoordinator: {
+          available: roomCoordinatorAvailable,
+          binding: 'ROOM_COORDINATOR',
+        },
+        readiness,
+        mode: readiness,
+        unavailableFeatures: roomCoordinatorAvailable ? [] : ['paid_rooms'],
+      });
+    } catch (error) {
+      const message = error instanceof HttpError ? error.message : 'D1 is unreachable or the required schema is unavailable.';
+      return json({
+        ok: false,
+        service: 'dabernaz',
+        backend: 'cloudflare-pages-functions',
+        database: 'unreachable_or_unready',
+        schema: 'unknown',
+        roomCoordinator: { available: typeof env.ROOM_COORDINATOR?.fetch === 'function' },
+        readiness: 'degraded',
+        mode: 'degraded',
+        error: message,
+      }, 503);
     }
   }
 
