@@ -676,6 +676,38 @@ async function handleRoom(db, request, user, path, env) {
   return env.ROOM_COORDINATOR.fetch(forwardedRequest);
 }
 
+async function ensureWalletRequestIdempotencySchema(db) {
+  try {
+    await db.prepare('SELECT 1 FROM wallet_request_idempotency LIMIT 1').first();
+  } catch (_) {
+    throw new HttpError(503, 'ثبت امن درخواست‌های کیف پول تا اجرای Migration شماره ۲ موقتاً غیرفعال است.');
+  }
+}
+
+async function findWalletRequestReplay(db, userId, idempotencyKey, requestHash) {
+  let claim;
+  try {
+    claim = await db.prepare(
+      'SELECT request_hash,request_id FROM wallet_request_idempotency WHERE user_id=? AND idempotency_key=?'
+    ).bind(userId, idempotencyKey).first();
+  } catch (_) {
+    throw new HttpError(503, 'ساختار Idempotency کیف پول آماده نیست؛ Migration شماره ۲ لازم است.');
+  }
+  if (!claim) return null;
+  if (String(claim.request_hash) !== requestHash) {
+    throw new HttpError(409, 'این کلید یکتا قبلاً با اطلاعات متفاوتی استفاده شده است.');
+  }
+  const requestId = Number(claim.request_id);
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    throw new HttpError(503, 'نتیجه درخواست مالی در وضعیت بازیابی است؛ دوباره وضعیت کیف پول را دریافت کن.');
+  }
+  const existing = await db.prepare(
+    'SELECT id,request_type,amount,status FROM manual_wallet_requests WHERE id=? AND user_id=?'
+  ).bind(requestId, userId).first();
+  if (!existing) throw new HttpError(503, 'مرجع درخواست مالی با رکورد پایدار آن تطبیق ندارد.');
+  return existing;
+}
+
 async function referralSummary(db, userId) {
   const countRow = await db.prepare('SELECT COUNT(*) AS n FROM referrals WHERE inviter_id = ?').bind(userId).first();
   const count = Number(countRow?.n || 0);
@@ -1809,6 +1841,12 @@ async function routeRequest(request, env) {
   }
   if (request.method === 'POST' && path === '/api/wallet/requests') {
     validateWriteOrigin(request);
+    await ensureWalletRequestIdempotencySchema(env.DB);
+    const idempotencyKey = String(request.headers.get('idempotency-key') || '');
+    if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+      throw new HttpError(400, 'کلید یکتای درخواست مالی معتبر نیست؛ دوباره تلاش کن.');
+    }
+
     const body = await readJson(request);
     const requestType = String(body.type || '');
     const amount = Number(body.amount);
@@ -1822,33 +1860,70 @@ async function routeRequest(request, env) {
     const userNote = String(body.userNote || '').trim();
     if (userNote.length > 300) throw new HttpError(400, 'توضیحات درخواست حداکثر ۳۰۰ نویسه است.');
     const now = new Date().toISOString();
+    const createdAt = Date.now();
+
     if (requestType === 'deposit') {
+      const requestHash = await sha256Hex(JSON.stringify({type:requestType,amount,userNote}));
+      const replay = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+      if (replay) return json({ok:true,requestId:Number(replay.id),status:replay.status,replayed:true});
+
       const settings = await env.DB.prepare('SELECT card_number,card_holder,bank_name,payment_note FROM wallet_payment_settings WHERE id=1').first();
       if (!settings?.card_number) throw new HttpError(409, 'اطلاعات کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');
-      const inserted = await env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,user_note,payment_card_number,payment_card_holder,payment_bank_name,payment_note,created_at,updated_at) VALUES(?,'deposit',?,'awaiting_receipt',?,?,?,?,?,?,?)")
-        .bind(user.id,amount,userNote,settings.card_number,settings.card_holder || '',settings.bank_name || '',settings.payment_note || '',now,now).run();
-      const id = Number(inserted.meta?.last_row_id || 0);
-      if (!id) throw new HttpError(500, 'ثبت درخواست واریز انجام نشد.');
-      return json({ok:true,requestId:id,status:'awaiting_receipt'});
+      await env.DB.batch([
+        env.DB.prepare(
+          'INSERT INTO wallet_request_idempotency(user_id,idempotency_key,request_hash,request_id,created_at) ' +
+          'VALUES(?,?,?,NULL,?) ON CONFLICT(user_id,idempotency_key) DO NOTHING'
+        ).bind(user.id,idempotencyKey,requestHash,createdAt),
+        env.DB.prepare(
+          "INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,user_note,payment_card_number,payment_card_holder,payment_bank_name,payment_note,created_at,updated_at) " +
+          "SELECT ?,'deposit',?,'awaiting_receipt',?,?,?,?,?,?,? WHERE changes()=1"
+        ).bind(user.id,amount,userNote,settings.card_number,settings.card_holder || '',settings.bank_name || '',settings.payment_note || '',now,now),
+        env.DB.prepare(
+          'UPDATE wallet_request_idempotency SET request_id=last_insert_rowid() WHERE user_id=? AND idempotency_key=? AND request_id IS NULL AND changes()=1'
+        ).bind(user.id,idempotencyKey),
+      ]);
+      const result = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+      if (!result) throw new HttpError(409, 'درخواست واریز ثبت نشد؛ اطلاعات را بررسی و دوباره تلاش کن.');
+      return json({ok:true,requestId:Number(result.id),status:result.status,replayed:result.status!=='awaiting_receipt' || false});
     }
+
     const cardNumber = String(body.cardNumber || '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g, '');
     const cardHolder = String(body.cardHolder || '').trim();
     const bankName = String(body.bankName || '').trim();
     if (!/^\d{16}$/.test(cardNumber)) throw new HttpError(400, 'شماره کارت مقصد برای برداشت باید ۱۶ رقم باشد.');
     if (cardHolder.length < 2 || cardHolder.length > 80 || bankName.length > 60) throw new HttpError(400, 'مشخصات صاحب کارت معتبر نیست.');
-    const batch = await env.DB.batch([
-      env.DB.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=?').bind(amount,user.id,amount),
-      env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,card_number,card_holder,bank_name,user_note,created_at,updated_at) SELECT ?,'withdraw',?,'pending_transfer',?,?,?,?,?,? WHERE changes()=1")
-        .bind(user.id,amount,cardNumber,cardHolder,bankName,userNote,now,now),
-      env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'withdrawal_reserved','manual_wallet_request','withdraw:'||CAST(last_insert_rowid() AS TEXT),? WHERE changes()=1")
-        .bind(randomToken(16),user.id,-amount,Date.now()),
-      env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_reserved',?,?,? WHERE changes()=1")
-        .bind(user.id,-amount,'رزرو موجودی برای درخواست برداشت',now),
+    const requestHash = await sha256Hex(JSON.stringify({
+      type:requestType,amount,userNote,cardNumber,cardHolder,bankName
+    }));
+    const replay = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+    if (replay) return json({ok:true,requestId:Number(replay.id),status:replay.status,replayed:true});
+
+    await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO wallet_request_idempotency(user_id,idempotency_key,request_hash,request_id,created_at) ' +
+        'SELECT ?,?,?,NULL,? FROM users WHERE id=? AND balance>=? ' +
+        'ON CONFLICT(user_id,idempotency_key) DO NOTHING'
+      ).bind(user.id,idempotencyKey,requestHash,createdAt,user.id,amount),
+      env.DB.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=? AND changes()=1')
+        .bind(amount,user.id,amount),
+      env.DB.prepare(
+        "INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,card_number,card_holder,bank_name,user_note,created_at,updated_at) " +
+        "SELECT ?,'withdraw',?,'pending_transfer',?,?,?,?,?,? WHERE changes()=1"
+      ).bind(user.id,amount,cardNumber,cardHolder,bankName,userNote,now,now),
+      env.DB.prepare(
+        'UPDATE wallet_request_idempotency SET request_id=last_insert_rowid() WHERE user_id=? AND idempotency_key=? AND request_id IS NULL AND changes()=1'
+      ).bind(user.id,idempotencyKey),
+      env.DB.prepare(
+        "INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) " +
+        "SELECT ?,?,'toman',?,'withdrawal_reserved','manual_wallet_request','withdraw:'||CAST(last_insert_rowid() AS TEXT),? WHERE changes()=1"
+      ).bind(randomToken(16),user.id,-amount,createdAt),
+      env.DB.prepare(
+        "INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_reserved',?,?,? WHERE changes()=1"
+      ).bind(user.id,-amount,'رزرو موجودی برای درخواست برداشت',now),
     ]);
-    if (Number(batch?.[0]?.meta?.changes || 0) !== 1 || Number(batch?.[1]?.meta?.changes || 0) !== 1) {
-      throw new HttpError(409, 'موجودی کیف پول برای این برداشت کافی نیست.');
-    }
-    return json({ok:true,requestId:Number(batch[1].meta?.last_row_id || 0),status:'pending_transfer'});
+    const result = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+    if (!result) throw new HttpError(409, 'موجودی کیف پول برای این برداشت کافی نیست یا درخواست ثبت نشد.');
+    return json({ok:true,requestId:Number(result.id),status:result.status,replayed:true});
   }
   const receiptMatch = path.match(/^\/api\/wallet\/requests\/(\d+)\/receipt$/);
   if (receiptMatch && request.method === 'POST') {
