@@ -39,6 +39,7 @@ try {
   phpServer = spawn('php', ['-S', `127.0.0.1:${port}`, '-t', tempDir], {
     cwd: tempDir,
     stdio: 'ignore',
+    env: { ...process.env, DABERNAZ_TEST_MODE: '1' },
   });
 
   const apiUrl = path => {
