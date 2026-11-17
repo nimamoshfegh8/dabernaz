@@ -223,10 +223,15 @@ test('API health accurately reports D1 schema and room coordinator readiness', a
     expect(body.database).toBe('D1');
     expect(body.schema).toBe('v1');
     expect(typeof body.roomCoordinator?.available).toBe('boolean');
+    expect(typeof body.walletRequests?.idempotency).toBe('boolean');
     expect(['ready', 'degraded']).toContain(body.readiness);
     if (!body.roomCoordinator.available) {
       expect(body.readiness).toBe('degraded');
       expect(body.unavailableFeatures).toContain('paid_rooms');
+    }
+    if (!body.walletRequests.idempotency) {
+      expect(body.readiness).toBe('degraded');
+      expect(body.unavailableFeatures).toContain('wallet_request_submission');
     }
   } else {
     expect(body.backend).toBe('node');
