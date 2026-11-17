@@ -138,7 +138,7 @@ jobs:
       ROOM_WORKER_URL: http://127.0.0.1:8791
       D1_DATABASE: dabernaz-local-ci
       WRANGLER_CONFIG: wrangler.pages.ci.toml
-      WRANGLER_PERSIST: ${{ runner.temp }}/dabernaz-pages-shared-state
+      WRANGLER_PERSIST: .wrangler/pages-shared-state
     steps:
       - name: Check out isolated audit branch
         uses: actions/checkout@v4
