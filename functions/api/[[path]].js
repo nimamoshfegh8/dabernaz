@@ -868,39 +868,24 @@ async function advanceServerGame(db,user,request,path) {
 }
 
 
-async function ensureRecurringTournamentTables(db) {
-  const sqls = [
-    "CREATE TABLE IF NOT EXISTS tournament_events (id TEXT PRIMARY KEY, tournament_type TEXT NOT NULL, scheduled_at TEXT NOT NULL, registration_opens_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'scheduled', registered_count INTEGER NOT NULL DEFAULT 0, capacity INTEGER NOT NULL DEFAULT 30, prize_pool INTEGER NOT NULL DEFAULT 0, min_players INTEGER NOT NULL DEFAULT 5, stage TEXT NOT NULL DEFAULT 'registration', stages_json TEXT NOT NULL DEFAULT '[]', stage_round INTEGER NOT NULL DEFAULT 1, stage_rounds INTEGER NOT NULL DEFAULT 1, current_round_id TEXT, started_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT, UNIQUE(tournament_type, scheduled_at))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_events_schedule ON tournament_events(tournament_type, scheduled_at)",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_events_status ON tournament_events(status, scheduled_at)",
-    "CREATE TABLE IF NOT EXISTS tournament_event_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, user_id INTEGER NOT NULL, entry_cost INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'registered', total_points INTEGER NOT NULL DEFAULT 0, line_wins INTEGER NOT NULL DEFAULT 0, full_wins INTEGER NOT NULL DEFAULT 0, rounds_played INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(event_id, user_id))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_event_entries_event ON tournament_event_entries(event_id, status, total_points DESC)",
-    "CREATE TABLE IF NOT EXISTS tournament_rounds (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, stage TEXT NOT NULL, round_number INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'playing', called_numbers_json TEXT NOT NULL DEFAULT '[]', line_winner_ids_json TEXT NOT NULL DEFAULT '[]', full_winner_ids_json TEXT NOT NULL DEFAULT '[]', next_draw_at INTEGER, started_at INTEGER NOT NULL, finished_at TEXT, UNIQUE(event_id, stage, round_number))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_rounds_event ON tournament_rounds(event_id, started_at)",
-    "CREATE TABLE IF NOT EXISTS tournament_round_players (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, round_id TEXT NOT NULL, user_id INTEGER NOT NULL, card_json TEXT NOT NULL, matched_count INTEGER NOT NULL DEFAULT 0, line_hit INTEGER NOT NULL DEFAULT 0, full_hit INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0, scored_at TEXT, UNIQUE(round_id, user_id))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_round_players_round ON tournament_round_players(round_id, user_id)",
-    "CREATE TABLE IF NOT EXISTS tournament_prize_payouts (event_id TEXT NOT NULL, user_id INTEGER NOT NULL, rank INTEGER NOT NULL, amount INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(event_id, user_id), UNIQUE(event_id, rank))"
-  ];
-  for (const sql of sqls) await db.prepare(sql).run();
+async function assertRecurringTournamentSchema(db) {
+  const tables = await db.prepare(
+    "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN " +
+    "('tournament_events','tournament_event_entries','tournament_rounds','tournament_round_players','tournament_prize_payouts')"
+  ).first();
+  if (Number(tables?.total) !== 5) {
+    throw new HttpError(503, "ساختار تورنومنت کامل نیست؛ Migration نسخه پایه لازم است.");
+  }
 
-  const migrations = [
-    ["tournament_events", "capacity", "INTEGER NOT NULL DEFAULT 30"],
-    ["tournament_events", "stage_round", "INTEGER NOT NULL DEFAULT 1"],
-    ["tournament_events", "stage_rounds", "INTEGER NOT NULL DEFAULT 1"],
-    ["tournament_events", "current_round_id", "TEXT"],
-    ["tournament_events", "started_at", "TEXT"],
-    ["tournament_event_entries", "rounds_played", "INTEGER NOT NULL DEFAULT 0"]
-  ];
-  for (const item of migrations) {
-    const info = await db.prepare("PRAGMA table_info(" + item[0] + ")").all();
-    const columns = new Set((info.results || []).map((row) => row.name));
-    if (!columns.has(item[1])) {
-      try {
-        await db.prepare("ALTER TABLE " + item[0] + " ADD COLUMN " + item[1] + " " + item[2]).run();
-      } catch (error) {
-        if (!String(error && error.message || error).toLowerCase().includes("duplicate column")) throw error;
-      }
-    }
+  const [events, entries] = await Promise.all([
+    db.prepare("PRAGMA table_info(tournament_events)").all(),
+    db.prepare("PRAGMA table_info(tournament_event_entries)").all()
+  ]);
+  const eventColumns = new Set((events.results || []).map((row) => row.name));
+  const entryColumns = new Set((entries.results || []).map((row) => row.name));
+  const requiredEventColumns = ["capacity","stage_round","stage_rounds","current_round_id","started_at"];
+  if (requiredEventColumns.some((column) => !eventColumns.has(column)) || !entryColumns.has("rounds_played")) {
+    throw new HttpError(503, "ستون‌های موردنیاز تورنومنت نصب نشده‌اند؛ Migration لازم است.");
   }
 }
 
@@ -936,7 +921,8 @@ function tournamentStageLabel(stage) {
 
 async function ensureRecurringTournamentSchedule(db, nowMs) {
   const current = Number.isFinite(nowMs) ? nowMs : Date.now();
-  await ensureRecurringTournamentTables(db);
+  // DDL belongs in versioned migrations, never in a request or scheduler tick.
+  await assertRecurringTournamentSchema(db);
   for (const type of ["simple", "bingo"]) {
     const startMs = nextTournamentStartAt(type, current);
     const scheduledAt = new Date(startMs).toISOString();
