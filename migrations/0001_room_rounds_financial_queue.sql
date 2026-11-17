@@ -137,6 +137,23 @@ CREATE TABLE IF NOT EXISTS referral_reward_claims (
   FOREIGN KEY (inviter_id) REFERENCES users(id) ON DELETE RESTRICT
 );
 
+CREATE TABLE IF NOT EXISTS wallet_adjustment_requests (
+  id TEXT PRIMARY KEY,
+  admin_user_id INTEGER NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  target_user_id INTEGER NOT NULL,
+  amount INTEGER NOT NULL CHECK (amount <> 0),
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending','applied','rejected')),
+  created_at INTEGER NOT NULL,
+  UNIQUE (admin_user_id, idempotency_key),
+  FOREIGN KEY (admin_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS idx_wallet_adjustment_target
+  ON wallet_adjustment_requests(target_user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS financial_ledger (
   id TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL,
