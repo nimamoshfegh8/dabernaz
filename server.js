@@ -436,8 +436,22 @@ async function handleServerMiniGame(req,res,url,user) {
 }
 
 async function routeApi(req,res,url) {
+  if (req.method==='GET' && url.pathname==='/api/health') {
+    if (process.env.NODE_ENV === 'test') {
+      return json(res,200,{ok:true,service:'dabernaz',backend:'node',mode:'isolated-test-only'});
+    }
+    return json(res,503,{ok:false,service:'dabernaz',backend:'node',mode:'disabled',code:'NODE_FALLBACK_DISABLED'});
+  }
+  // The JSON-file Node backend has no D1 transaction, append-only financial
+  // ledger, or Durable Object room coordinator. Fail closed outside isolated CI.
+  if (process.env.NODE_ENV !== 'test') {
+    return json(res,503,{
+      ok:false,
+      code:'NODE_FALLBACK_DISABLED',
+      error:'این API جایگزین امنی برای Cloudflare Pages و D1 نیست؛ عملیات از این مسیر غیرفعال است.'
+    });
+  }
   if (['POST','PATCH','PUT','DELETE'].includes(req.method)) validateWriteOrigin(req,url);
-  if (req.method==='GET' && url.pathname==='/api/health') return json(res,200,{ok:true,service:'dabernaz',backend:'node',mode:'accounts-and-automatic-rooms-ready'});
   if (req.method==='POST' && (url.pathname==='/api/auth/register' || url.pathname==='/api/auth/login')) {
     if (rateLimited(req)) return json(res,429,{error:'تعداد درخواست‌ها زیاد است. کمی بعد دوباره تلاش کن.'});
     const body=await readBody(req);
