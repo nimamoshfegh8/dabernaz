@@ -9,6 +9,7 @@ const ROOM_CONFIG = Object.freeze({
 const REGISTRATION_WINDOW_MS = 150_000;
 const MIN_PLAYERS = 2;
 const MAX_CARDS_PER_PLAYER = 5;
+const MAX_PLAYERS_PER_ROUND = 20;
 const DRAW_INTERVAL_MS = 3_000;
 const OUTBOX_LEASE_MS = 30_000;
 const OUTBOX_MAX_ATTEMPTS = 20;
@@ -256,8 +257,9 @@ export class RoomCoordinator extends DurableObject {
         if (!match) return json({ error: "مسیر اتاق پیدا نشد." }, 404);
         const [, roomId, action] = match;
         if (!ROOM_CONFIG[roomId]) return json({ error: "اتاق معتبر نیست." }, 404);
-        this.roomId = roomId;
-        if (action === "join" || action === "reconcile") {
+        // A GET to a mutation-only path must not touch Durable Object storage.
+        // Persist the room ID only for actual POSTs which schedule reconciliation.
+        if ((action === "join" || action === "reconcile") && request.method === "POST") {
           await this.ctx.storage.put("roomId", roomId);
         }
 
@@ -319,7 +321,7 @@ export class RoomCoordinator extends DurableObject {
       playerCount: 0,
       queueCount: 0,
       cardCount: 0,
-      capacity: null,
+      capacity: MAX_PLAYERS_PER_ROUND,
       minPlayersToStart: MIN_PLAYERS,
       maxCardsPerPlayer: MAX_CARDS_PER_PLAYER,
       registrationStartedAt: null,
@@ -407,6 +409,15 @@ export class RoomCoordinator extends DurableObject {
     if (existingCards + cardsCount > MAX_CARDS_PER_PLAYER) {
       throw new RoomError(409, "هر کاربر در هر دور حداکثر ۵ کارت می‌تواند داشته باشد.");
     }
+    const playerCountRow = round
+      ? await this.env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM room_round_players WHERE round_id=?"
+      ).bind(round.id).first()
+      : { count: 0 };
+    const playerCount = Number(playerCountRow?.count) || 0;
+    if (existingCards === 0 && playerCount >= MAX_PLAYERS_PER_ROUND) {
+      throw new RoomError(409, "ظرفیت ۲۰ بازیکن این دور تکمیل شده است.");
+    }
 
     const sequenceRow = isNewRound
       ? await this.env.DB.prepare(
@@ -416,10 +427,22 @@ export class RoomCoordinator extends DurableObject {
     const sequence = Number(sequenceRow?.sequence) || 1;
     const deadline = now + registrationWindowMs(this.env);
     const cards = Array.from({ length: cardsCount }, () => makeCard());
-    const statements = [
-      this.env.DB.prepare("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?")
-        .bind(amount, userId, amount),
-    ];
+    // Debit only while the same registration window still accepts a
+    // purchase. A deadline/capacity race must not leave money debited without
+    // a corresponding durable purchase.
+    const debit = isNewRound
+      ? this.env.DB.prepare(
+        "UPDATE users SET balance=balance-? WHERE id=? AND balance>=? " +
+        "AND NOT EXISTS (SELECT 1 FROM room_rounds WHERE room_id=? AND status='registration_open')"
+      ).bind(amount, userId, amount, roomId)
+      : this.env.DB.prepare(
+        "UPDATE users SET balance=balance-? WHERE id=? AND balance>=? " +
+        "AND EXISTS (SELECT 1 FROM room_rounds r WHERE r.id=? AND r.room_id=? " +
+        "AND r.status='registration_open' AND r.registration_deadline>? " +
+        "AND (EXISTS (SELECT 1 FROM room_round_players p WHERE p.round_id=r.id AND p.user_id=?) " +
+        "OR (SELECT COUNT(*) FROM room_round_players p WHERE p.round_id=r.id)<?))"
+      ).bind(amount, userId, amount, roundId, roomId, now, userId, MAX_PLAYERS_PER_ROUND);
+    const statements = [debit];
 
     if (isNewRound) {
       statements.push(
@@ -918,7 +941,7 @@ export class RoomCoordinator extends DurableObject {
       playerCount,
       queueCount: playerCount,
       cardCount,
-      capacity: null,
+      capacity: MAX_PLAYERS_PER_ROUND,
       minPlayersToStart: MIN_PLAYERS,
       maxCardsPerPlayer: MAX_CARDS_PER_PLAYER,
       registrationStartedAt: registrationRound ? Number(registrationRound.registration_started_at) : null,
