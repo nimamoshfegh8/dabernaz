@@ -191,7 +191,9 @@ export default {
     if (!match) return json({ error: "مسیر اتاق پیدا نشد." }, 404);
     const [, roomId] = match;
     const object = env.ROOMS.getByName(roomId);
-    return object.fetch(request);
+    const headers = new Headers(request.headers);
+    headers.set("x-dabernaz-room-id", roomId);
+    return object.fetch(new Request(request, { headers }));
   },
 
   async scheduled(_controller, env, ctx) {
@@ -239,8 +241,12 @@ export class RoomCoordinator extends DurableObject {
         if (!match) return json({ error: "مسیر اتاق پیدا نشد." }, 404);
         const [, roomId, action] = match;
         if (!ROOM_CONFIG[roomId]) return json({ error: "اتاق معتبر نیست." }, 404);
+        this.roomId = roomId;
+        if (action === "join" || action === "reconcile") {
+          await this.ctx.storage.put("roomId", roomId);
+        }
 
-        if (!action && request.method === "GET") {
+        if (!action && request.method === "GET")
           const userId = Number(request.headers.get("x-dabernaz-user-id") || 0);
           return json({ ok: true, room: await this.snapshot(roomId, userId) });
         }
@@ -805,14 +811,8 @@ export class RoomCoordinator extends DurableObject {
   async alarm() {
     await this.runExclusive(async () => {
       try {
-        const active = await this.env.DB.prepare(
-          "SELECT DISTINCT room_id FROM room_rounds WHERE status IN ('registration_open','ready','waiting_for_room','playing','refund_pending')"
-        ).all();
-        const roomIds = (active.results || []).map((row) => String(row.room_id));
-        // A Durable Object is named for one room. The query is intentionally
-        // defensive in case a misconfigured caller writes another room's rows.
-        const ownRoom = roomIds.length ? roomIds.filter((roomId) => roomId === this.roomIdFromStorage()) : [];
-        for (const roomId of ownRoom) {
+        const roomId = await this.ctx.storage.get("roomId");
+        if (typeof roomId === "string" && ROOM_CONFIG[roomId]) {
           await this.reconcileAndSchedule(roomId);
         }
       } catch (error) {
@@ -823,11 +823,7 @@ export class RoomCoordinator extends DurableObject {
       }
     });
   }
-
-  roomIdFromStorage() {
-    return this.ctx.id.toString();
-  }
-
+\n
   async snapshot(roomId, userId) {
     const [playing, registration, waiting, latest] = await Promise.all([
       this.env.DB.prepare("SELECT * FROM room_rounds WHERE room_id=? AND status='playing' LIMIT 1").bind(roomId).first(),
