@@ -98,7 +98,25 @@ try {
   assert.equal(after.user.stats.points, 0,
     'rejected self-reported results must not increment points');
 
-  console.log('PHP fallback smoke test passed: account session works and forged mini-game results are rejected.');
+  // Each request deliberately omits the PHP session cookie. The limiter must
+  // therefore be enforced by the server using the client IP + normalized email,
+  // not by a browser session that an attacker can rotate.
+  const bruteForceEmail = 'php-rate-limit@example.test';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const failedLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: bruteForceEmail, password: 'wrong-password-2026!' },
+    });
+    assert.equal(failedLogin.status, 401, 'the first ten login attempts should reach credential verification');
+  }
+  const blockedLogin = await request('/api/auth/login', {
+    method: 'POST',
+    body: { email: bruteForceEmail, password: 'wrong-password-2026!' },
+  });
+  assert.equal(blockedLogin.status, 429,
+    'PHP fallback must rate limit repeated login attempts even when the caller rotates sessions');
+
+  console.log('PHP fallback smoke test passed: sessions work, forged game results are rejected, and IP/email login throttling is enforced.');
 } finally {
   if (phpServer && !phpServer.killed) phpServer.kill('SIGTERM');
   await rm(tempDir, { recursive: true, force: true });
