@@ -489,6 +489,15 @@ async function routeApi(req,res,url) {
     user.name=name; await persist(); return json(res,200,{ok:true,user:publicUser(user)});
   }
   const roomMatch=url.pathname.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave|next))?$/);
+  if (roomMatch && process.env.NODE_ENV !== 'test') {
+    // JSON-file fallback has no shared D1 transaction or durable room
+    // coordinator. Paid-room operations must fail closed outside isolated tests.
+    return json(res,503,{
+      ok:false,
+      code:'ROOM_COORDINATOR_UNAVAILABLE',
+      error:'زیرساخت امن اتاق بازی در این Backend فعال نیست؛ خرید کارت موقتاً غیرفعال است.'
+    });
+  }
   if (roomMatch) {
     const [,roomId,action]=roomMatch; const room=db.rooms[roomId];
     if (req.method==='GET' && !action) { const changed=advanceWaitingRoom(room); if(changed) await persist(); return json(res,200,{ok:true,room:publicRoom(room,user.id)}); }
