@@ -307,6 +307,36 @@ function store_update(callable $callback): mixed {
         flock($guard,LOCK_UN); fclose($guard); throw $e;
     }
 }
+function allow_auth_attempt(string $email): bool {
+    $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+    if ($ip === '') $ip = 'unknown';
+    $ipKey = hash('sha256', "ip\\0" . $ip);
+    $emailKey = hash('sha256', "email\\0" . $ip . "\\0" . strtolower($email));
+    $now = time();
+
+    return store_update(function (&$db) use ($ipKey, $emailKey, $now): bool {
+        $db['authAttempts'] = is_array($db['authAttempts'] ?? null) ? $db['authAttempts'] : [];
+        foreach ($db['authAttempts'] as $key => $timestamps) {
+            if (!is_array($timestamps)) { unset($db['authAttempts'][$key]); continue; }
+            $fresh = array_values(array_filter($timestamps, fn($value) => is_numeric($value) && (int)$value > $now - 3600));
+            if ($fresh) $db['authAttempts'][$key] = $fresh;
+            else unset($db['authAttempts'][$key]);
+        }
+
+        $limits = [$ipKey => 60, $emailKey => 10];
+        foreach ($limits as $key => $limit) {
+            $recent = array_values(array_filter($db['authAttempts'][$key] ?? [], fn($value) => is_numeric($value) && (int)$value > $now - 600));
+            if (count($recent) >= $limit) return false;
+            $recent[] = $now;
+            $db['authAttempts'][$key] = $recent;
+        }
+        if (count($db['authAttempts']) > 5000) {
+            $db['authAttempts'] = array_slice($db['authAttempts'], -5000, null, true);
+        }
+        return true;
+    });
+}
+
 function get_user_index(array $db, string $userId): int {
     foreach ($db['users'] as $i=>$user) if (($user['id']??'')===$userId) return $i;
     return -1;
@@ -319,13 +349,10 @@ if (in_array($method, ['POST','PATCH','PUT','DELETE'], true)) validate_write_ori
 if ($path==='/api/health') send_json(200,['ok'=>true,'service'=>'dabernaz','backend'=>'php','mode'=>'ready']);
 
 if ($method==='POST' && ($path==='/api/auth/register' || $path==='/api/auth/login')) {
-    $attempts=$_SESSION['auth_attempts']??['count'=>0,'until'=>time()+600];
-    if (time()>$attempts['until']) $attempts=['count'=>0,'until'=>time()+600];
-    $attempts['count']++; $_SESSION['auth_attempts']=$attempts;
-    if ($attempts['count']>20) send_json(429,['error'=>'تعداد تلاش‌ها زیاد است. ده دقیقه بعد دوباره تلاش کن.']);
     $body=request_body(); $email=strtolower(trim((string)($body['email']??''))); $password=(string)($body['password']??'');
     if (!filter_var($email,FILTER_VALIDATE_EMAIL) || strlen($email)>190) send_json(400,['error'=>'ایمیل معتبر وارد کن.']);
     if (strlen($password)<8 || strlen($password)>128) send_json(400,['error'=>'رمز عبور باید بین ۸ تا ۱۲۸ نویسه باشد.']);
+    if (!allow_auth_attempt($email)) send_json(429,['error'=>'تعداد تلاش‌ها زیاد است. ده دقیقه بعد دوباره تلاش کن.']);
     $result=store_update(function (&$db) use ($path,$email,$password,$body) {
         if ($path==='/api/auth/register') {
             $name=trim((string)($body['name']??''));
