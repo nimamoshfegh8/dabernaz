@@ -25,6 +25,8 @@ for (const name of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png']) {
   assert.ok((await stat(path)).size > 1000, name + ' must not be empty');
 }
 assert.match(index, /rel="manifest"/);
+assert.doesNotMatch(index, /<main\b[^>]*aria-live=/,
+  'the entire application view must not be a live region because it is frequently refreshed');
 assert.match(index, /apple-touch-icon/);
 assert.match(index, /pwa-entry\.js/);
 assert.match(index, /pwa-install\.css/);

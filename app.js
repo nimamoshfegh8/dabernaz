@@ -944,7 +944,7 @@ function renderRoomPurchasePage() {
     : registrationStarted ? (timerExpired ? 'مهلت خرید به پایان رسیده و حداقل شرکت‌کنندگان کامل شده؛ بازی در حال شروع است.' : `تا پایان مهلت خرید و شروع خودکار بازی با حداقل ${faDigits(minPlayersToStart)} شرکت‌کننده:`)
     : 'با اولین خرید کارت، زمان‌سنج ۲ دقیقه و ۳۰ ثانیه‌ای شروع می‌شود.';
   return `${heading(`اتاق دبرنا · سطح ${ROOM_CONFIGS.findIndex(x => x.id === room.id) + 1}`, 'بدون محدودیت تعداد بازیکن و کارت در کل اتاق؛ هر حساب حداکثر ۵ کارت و شروع بازی با حداقل ۲ شرکت‌کننده.', 'DABERNAZ · LIVE ROOM')}
-  <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
+  <div id="roomWinnerBannerMount" aria-live="polite" aria-atomic="true">${roomWinnerBanner()}</div>
   <section class="room-info-strip room-prize-strip">
     <div><b>🎟️ کارت ${faDigits(room.price)} تومان</b><small>قیمت هر کارت</small></div>
     <div><b>🏅 ${faDigits(lineEstimate)} تومان</b><small>مبلغ جایزه یک خط</small></div>
@@ -978,10 +978,10 @@ function renderRoomGame() {
   const room=currentRoomConfig();
   const isFinished=roomServerSnapshot?.status==='finished';
   return `${heading(`بازی زنده دبرنا · سطح ${ROOM_CONFIGS.findIndex(x=>x.id===room.id)+1}`, 'شماره‌ها به‌صورت خودکار اعلام و نتیجه روی سرور ثبت می‌شود.', 'LIVE DABERNA ROOM')}
-    <div id="roomWinnerBannerMount">${roomWinnerBanner()}</div>
+    <div id="roomWinnerBannerMount" aria-live="polite" aria-atomic="true">${roomWinnerBanner()}</div>
     <div class="room-game-live-banner"><span class="live-dot"></span><b>${isFinished?'سانس پایان یافته':'بازی در حال اجرا'}</b><span>${room.code}</span><strong>${isFinished?'نتیجه نهایی':'قرعه‌کشی خودکار'}</strong></div>
     <section class="room-panel live-preview-panel"><div class="room-panel-heading"><div><span class="eyebrow">LIVE DRAW</span><h3>تابلوی اعلام شماره‌ها</h3><p>هر شماره فقط یک بار و به ترتیب تصادفی اعلام می‌شود.</p></div><span class="tag">${isFinished?'پایان':'زنده'}</span></div>
-      <div class="room-current-number"><div><small>آخرین شماره اعلام‌شده</small><b id="roomLatestNumber">${roomServerSnapshot?.latestNumber??'—'}</b></div><div class="room-draw-count"><strong id="roomDrawCount">${faDigits(roomServerSnapshot?.drawCount||0)} / ۹۰</strong><small>شماره اعلام‌شده</small></div></div>
+      <div class="room-current-number"><div><small>آخرین شماره اعلام‌شده</small><b id="roomLatestNumber" aria-live="polite" aria-atomic="true">${roomServerSnapshot?.latestNumber??'—'}</b></div><div class="room-draw-count"><strong id="roomDrawCount">${faDigits(roomServerSnapshot?.drawCount||0)} / ۹۰</strong><small>شماره اعلام‌شده</small></div></div>
       <button class="btn btn-outline btn-block" type="button" data-action="enable-room-audio">فعال‌سازی صدای فارسی شماره‌ها</button>
       <div class="room-number-history" id="roomNumberHistory">${roomCalledMarkup()}</div>
       <small class="room-safe-caption">${isFinished?'این سانس به پایان رسیده است.':'قرعه‌کشی توسط سرور انجام می‌شود؛ نیازی به فشردن دکمه نیست.'}</small>

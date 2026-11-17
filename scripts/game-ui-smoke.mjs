@@ -77,3 +77,17 @@ assert.match(app,/walletPaymentInfo: \{cardNumber:'',cardHolder:'',bankName:'',p
 assert.doesNotMatch(app,/شارژ آنلاین و برداشت پول تا اتصال درگاه پرداخت غیرفعال است|شارژ و برداشت واقعی کیف پول تا اتصال درگاه پرداخت فعال نیست/,'help text must not contradict the manual wallet request workflow');
 assert.match(app,/واریز و برداشت تومانی کیف پول به‌صورت دستی و با بررسی مدیریت انجام می‌شود/,'help text must describe the current manual deposit and withdrawal process');
 console.log('Game-room, mini-game, support, admin portal and wallet request center UI smoke tests passed.');
+
+
+assert.match(app, /id="roomWinnerBannerMount" aria-live="polite" aria-atomic="true"/,
+  'winner announcements must have a focused live region');
+assert.match(app, /id="roomLatestNumber" aria-live="polite" aria-atomic="true"/,
+  'the live number must be announced without making the full page a live region');
+assert.match(app, /if \(document\.hidden \|\| navigator\.onLine === false \|\|/,
+  'tournament refreshes must pause while the app is hidden or offline');
+assert.match(app, /!document\.hidden && navigator\.onLine !== false && currentUser/,
+  'room polling must pause while the app is hidden or offline');
+assert.match(app, /!currentUser \|\| document\.hidden \|\| navigator\.onLine === false/,
+  'support and wallet refresh polling must pause while hidden or offline');
+assert.match(worker, /\.catch\(\(\) => cached \|\| Response\.error\(\)\)/,
+  'failed background image/font refreshes must not become unhandled promise rejections');
