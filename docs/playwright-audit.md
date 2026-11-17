@@ -1,31 +1,35 @@
-# Dabernaz Playwright audit
+# ممیزی Playwright دابرناز
 
-This branch contains a **read-only Chromium UI and route audit** for the code checked out from `test/playwright-audit`.
+این سند دو اجرای جداگانه را توصیف می‌کند: مرورگر Chromium روی نسخه محلی ایزوله و مرورگر Chromium روی Preview واقعی Cloudflare Pages.
 
-## Target and safety boundary
+## مرز ایمنی
 
-GitHub Actions starts the repository's Node fallback server locally at `http://127.0.0.1:8788`. Its JSON store is placed under the GitHub runner's temporary directory (`DABERNAZ_DATA_DIR`) and is discarded with the job. The workflow does not contact `dabernaz.pages.dev`, deploy a preview, or modify the production site.
+- شاخه هدف فقط `test/playwright-audit` است.
+- اجرای محلی از Node fallback در حالت تست و پوشه داده موقت استفاده می‌کند.
+- اجرای Preview مستقیماً آدرس `https://test-playwright-audit.dabernaz.pages.dev` را باز می‌کند.
+- در هر دو اجرا، درخواست‌های هم‌مبدأ با روش‌هایی غیر از `GET`، `HEAD` و `OPTIONS` پیش از ارسال به سرور مسدود می‌شوند.
+- هیچ ثبت‌نام، ورود، خرید کارت، ثبت‌نام تورنومنت، تغییر کیف پول یا عملیات مدیریتی توسط این ممیزی مرورگر انجام نمی‌شود.
+- این آزمون مرورگر، جایگزین تست اتمیک D1/Worker، احراز هویت چندکاربره یا آزمون مالی نیست.
 
-Browser visits and navigation are used only to render pages. The Playwright request guard blocks same-origin methods other than `GET`, `HEAD`, and `OPTIONS` before they reach the local server. The audit does not create accounts, submit forms, buy cards, enter tournaments, change wallet balances, or call administrative write APIs. Server startup initializes only an empty temporary local data store.
+## پوشش رابط کاربری
 
-Authenticated-only admin pages and workflows that require a test account are deliberately excluded. The local Node fallback is used for UI rendering and route checks; this suite is not a substitute for Cloudflare Pages/D1 integration tests.
+- صفحه اصلی در عرض‌های 320، 360، 375، 390، 430، 768، 1024، 1366 و 1920 پیکسل.
+- اندازه‌های موبایل افقی 844x390 و 932x430.
+- شبیه‌سازی حالت روشن و تاریک.
+- بررسی RTL، متادیتای فارسی، landmark اصلی و منوی پایین.
+- 15 مسیر عمومی SPA شامل صفحه خانه، لابی بازی، چهار اتاق قیمتی، نمای بازی اتاق، صفحات تورنومنت، دعوت، کیف پول، حساب، تنظیمات و پشتیبانی.
+- تغییر مسیر با منوی پایین، محل ورودی PWA و هندسه ناوبری در موبایل افقی.
+- جمع‌آوری خطاهای JavaScript، درخواست‌های ناموفق، HTTP errorها، overflow افقی، اندازه متن و اهداف لمسی کوچک، و تلاش برای درخواست نوشتنی.
 
-## What is covered
+اندازه‌های متن و دکمه‌ها فقط شاخص تشخیصی هستند و گواهی انطباق WCAG محسوب نمی‌شوند. اسکرین‌شات، وضعیت رندرشده را ثابت می‌کند نه صحت همه مسیرهای Backend را.
 
-- Home-page layout at 320, 360, 375, 390, 430, 768, 1024, 1366, and 1920 CSS-pixel widths.
-- Additional mobile landscape sizes (844x390 and 932x430).
-- Light and dark browser color-scheme emulation.
-- RTL and Persian document metadata, main landmark, and bottom navigation.
-- Public SPA routes: home, game lobby, four room-price pages, room game view, tournament pages, invite, wallet, account, settings, and support.
-- Bottom navigation route changes.
-- PWA install placement and short-landscape navigation geometry at 320x720, 360x800, 375x812, 390x844, 430x932, 768x1024, 844x390, and 932x430.
-- Screenshots and diagnostics for horizontal overflow, small touch targets, small text, browser exceptions, failed requests, HTTP errors, and unexpected write-method requests.
+## بررسی سلامت Preview
 
-The touch-target and small-text measurements are diagnostic heuristics, not a formal WCAG conformance claim. A screenshot is evidence of the rendered state, not proof that every backend workflow works.
+تست `API health` پاسخ `/api/health` را ذخیره و بررسی می‌کند. در Pages، سلامت D1 به‌تنهایی به معنی آماده‌بودن موتور اتاق نیست؛ پاسخ باید وضعیت Schema و وجود یا نبود Binding با نام `ROOM_COORDINATOR` را جداگانه نشان دهد. نبود Worker/Binding باید `readiness=degraded` و قابلیت غیرفعال اتاق پولی را نشان دهد.
 
-## Run locally
+## اجرای محلی
 
-Use Node.js 22 or later. Start the isolated local server in one terminal:
+با Node.js 22 یا جدیدتر:
 
 ```bash
 mkdir -p /tmp/dabernaz-playwright-data
@@ -33,7 +37,7 @@ NODE_ENV=test COOKIE_SECURE=false HOST=127.0.0.1 PORT=8788 \
   DABERNAZ_DATA_DIR=/tmp/dabernaz-playwright-data node server.js
 ```
 
-In a second terminal, install and run Playwright against that local server:
+در ترمینال دوم:
 
 ```bash
 npm install --no-save --package-lock=false @playwright/test@1.65.1
@@ -41,15 +45,22 @@ npx playwright install chromium
 PLAYWRIGHT_BASE_URL=http://127.0.0.1:8788 npx playwright test --config=playwright.config.js
 ```
 
-Use a disposable data directory. Do not point mutation tests at production.
+برای اجرای همین مجموعه روی Preview:
 
-## Output
+```bash
+PLAYWRIGHT_BASE_URL=https://test-playwright-audit.dabernaz.pages.dev \
+  npx playwright test --config=playwright.config.js
+```
 
-- `playwright-report/`: browsable HTML report.
-- `test-results/`: screenshots, traces on failure, and test attachments/diagnostics.
+در اجرای Preview نیز همه درخواست‌های نوشتنی هم‌مبدأ مسدود می‌شوند.
 
-The GitHub Actions workflow uploads these as the `dabernaz-playwright-audit` artifact for 14 days.
+## خروجی
 
-## Current execution status
+- `playwright-report/`: گزارش HTML.
+- `test-results/`: اسکرین‌شات‌ها، Trace هنگام شکست و پیوست‌های تشخیصی از جمله وضعیت Health API.
 
-The workflow and test definitions are committed on the separate audit branch. Test results are **not claimed until the GitHub Actions run completes**. A green result means only that the defined local, read-only browser checks passed for the checked target and run; it is not a full security audit, load test, financial-flow test, or authenticated end-to-end test.
+GitHub Actions این خروجی‌ها را به‌صورت Artifact به مدت 14 روز نگه می‌دارد.
+
+## محدودیت‌های شناخته‌شده
+
+این مجموعه صفحات عمومی و رندر رابط کاربری را بررسی می‌کند. فرم‌های احراز هویت، ورود به حساب، پرداخت، تورنومنت و خرید اتاق را عمداً ارسال نمی‌کند. برای آن‌ها باید Integration Test جداگانه با حساب‌های ساختگی مستقل، D1 محلی/Preview و Worker ایزوله اجرا شود. موفقیت این Workflow به‌تنهایی به معنی آماده‌بودن نسخه برای پول واقعی یا انتشار عمومی نیست.
