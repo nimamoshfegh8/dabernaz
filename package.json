@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "build:pages": "node build-pages.mjs",
-    "check": "node --check server.js && node --check app.js && node --check build-pages.mjs && node --check --input-type=module < 'functions/api/[[path]].js' && node --check sw.js && node --check sw-register.js && node --check install.js && node --check pwa-entry.js && node --check --input-type=module < 'workers/room-coordinator/src/index.js'",
+    "check": "node --check server.js && node --check app.js && node --check build-pages.mjs && node --check --input-type=module < 'functions/api/[[path]].js' && node --check --input-type=module < 'functions/api/health.js' && node --check sw.js && node --check sw-register.js && node --check install.js && node --check pwa-entry.js && node --check --input-type=module < 'workers/room-coordinator/src/index.js'",
     "test": "npm run check && node scripts/pwa-install-smoke.mjs"
   },
   "engines": {
