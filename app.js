@@ -633,6 +633,29 @@ async function apiRequest(path, options = {}) {
   return data;
 }
 const pendingRoomPurchaseMemory = new Map();
+function getAdminAdjustmentAttempt(payload) {
+  const owner = String(currentUser?.memberId || state.memberId || 'admin');
+  const keyName = 'dabernaz:wallet-adjustment:' + owner;
+  const payloadText = JSON.stringify(payload);
+  let current = null;
+  try { current = JSON.parse(sessionStorage.getItem(keyName) || 'null'); } catch (_) {}
+  if (!current || current.payload !== payloadText ||
+      typeof current.key !== 'string' || Date.now() - Number(current.createdAt || 0) > 86400000) {
+    current = {
+      key: globalThis.crypto?.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : 'wallet-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2),
+      payload: payloadText,
+      createdAt: Date.now()
+    };
+    try { sessionStorage.setItem(keyName, JSON.stringify(current)); } catch (_) {}
+  }
+  return {
+    key: current.key,
+    clear() { try { sessionStorage.removeItem(keyName); } catch (_) {} }
+  };
+}
+
 function getRoomPurchaseAttempt(roomId, cardsCount) {
   const owner = String(currentUser?.memberId || state.memberId || 'account');
   const storageKey = 'dabernaz:pending-room-purchase:' + owner + ':' + roomId;
@@ -2302,8 +2325,9 @@ document.addEventListener('submit', async event => {
     event.preventDefault();
     const data=new FormData(event.target);
     const payload={memberId:String(data.get('memberId')||'').trim(),amount:Number(data.get('amount')),reason:String(data.get('reason')||'').trim()};
+    const attempt=getAdminAdjustmentAttempt(payload);
     const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
-    try{const result=await apiRequest('/api/admin/wallet/adjust',{method:'POST',body:JSON.stringify(payload)});await refreshWalletAdmin();await refreshWalletData();walletAdminSelectedMemberId=String(result.user?.member_id||payload.memberId);walletAdminUsers=[result.user,...walletAdminUsers.filter(u=>String(u.member_id)!==String(result.user?.member_id))].filter(Boolean);render();showToast('موجودی '+escapeHTML(result.user?.username||'کاربر')+' به اندازه '+money(payload.amount)+' تومان اصلاح شد.');}
+    try{const result=await apiRequest('/api/admin/wallet/adjust',{method:'POST',headers:{'Idempotency-Key':attempt.key},body:JSON.stringify(payload)});attempt.clear();await refreshWalletAdmin();await refreshWalletData();walletAdminSelectedMemberId=String(result.user?.member_id||payload.memberId);walletAdminUsers=[result.user,...walletAdminUsers.filter(u=>String(u.member_id)!==String(result.user?.member_id))].filter(Boolean);render();showToast((result.replayed?'درخواست قبلی تأیید شد. ':'')+'موجودی '+escapeHTML(result.user?.username||'کاربر')+' به اندازه '+money(payload.amount)+' تومان اصلاح شد.');}
     catch(error){showToast(error.message);}
     finally{if(button?.isConnected)button.disabled=false;}
   }
