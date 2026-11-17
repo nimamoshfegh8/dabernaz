@@ -584,6 +584,7 @@ function saveState() {
 const WALLET_REQUEST_KEY_STORAGE = 'dabernaz_wallet_request_idempotency_v1';
 let walletRequestKeyFallback = '';
 function getWalletRequestIdempotencyKey() {
+  if (walletRequestKeyFallback) return walletRequestKeyFallback;
   try {
     const existing = window.sessionStorage.getItem(WALLET_REQUEST_KEY_STORAGE);
     if (/^[A-Za-z0-9._:-]{16,128}$/.test(existing || '')) return existing;
