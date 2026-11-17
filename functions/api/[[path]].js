@@ -1329,7 +1329,9 @@ async function registerRecurringTournament(db, user, request) {
 }
 
 async function myRecurringTournamentData(db, userId) {
-  const events = await recurringTournamentSnapshots(db);
+  // GET /api/tournaments/me must be read-only. The authenticated scheduler
+  // endpoint is the sole entry point that advances tournament state and draws.
+  const events = await recurringTournamentSnapshots(db, false);
   const entries = await db.prepare("SELECT e.event_id,e.entry_cost,e.status,e.total_points,e.line_wins,e.full_wins,e.rounds_played,e.created_at,t.tournament_type,t.scheduled_at,t.status AS event_status,t.stage,t.prize_pool FROM tournament_event_entries e JOIN tournament_events t ON t.id=e.event_id WHERE e.user_id=? ORDER BY t.scheduled_at DESC LIMIT 30")
     .bind(userId).all();
   const ownedEntries = entries.results || [];
