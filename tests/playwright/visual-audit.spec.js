@@ -21,17 +21,9 @@ const colorSchemes = ['light', 'dark'];
 
 function redactErrorMessage(message) {
   return String(message)
-    .replace(/https?:\\/\\/[^\\s)"']+/g, value => {
-      try {
-        const url = new URL(value);
-        return url.origin + url.pathname;
-      } catch (_) {
-        return '[url]';
-      }
-    })
-    .replace(/\\b(password|token|secret|authorization|api[_-]?key)(\\s*[:=]\\s*)[^\\s,;]+/ig, '$1$2[REDACTED]');
+    .replace(/https?:\/\/[^\s)"']+/g, '[redacted-url]')
+    .replace(/\b(password|token|secret|authorization|api[_-]?key)(\s*[:=]\s*)[^\s,;]+/ig, '$1$2[REDACTED]');
 }
-
 async function observePage(page) {
   const diagnostics = {
     pageErrors: [],
@@ -216,7 +208,7 @@ for (const colorScheme of colorSchemes) {
 }
 
 test('public pages render without submitting forms or changing account state', async ({ page }, testInfo) => {
-  const diagnostics = observePage(page);
+  const diagnostics = await observePage(page);
   const routes = [
     { id: 'home', hash: '/#page=home' },
     { id: 'games', hash: '/#page=games' },
