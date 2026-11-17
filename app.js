@@ -629,6 +629,31 @@ async function apiRequest(path, options = {}) {
   apiErrorMessage = '';
   return data;
 }
+const pendingRoomPurchaseMemory = new Map();
+function getRoomPurchaseAttempt(roomId, cardsCount) {
+  const owner = String(currentUser?.memberId || state.memberId || 'account');
+  const storageKey = 'dabernaz:pending-room-purchase:' + owner + ':' + roomId;
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); }
+  catch (_) { pending = pendingRoomPurchaseMemory.get(storageKey) || null; }
+  if (!pending || Number(pending.cardsCount) !== Number(cardsCount) ||
+      typeof pending.key !== 'string' || Date.now() - Number(pending.createdAt || 0) > 86400000) {
+    const key = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : 'room-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
+    pending = { key, cardsCount:Number(cardsCount), createdAt:Date.now() };
+    try { sessionStorage.setItem(storageKey, JSON.stringify(pending)); }
+    catch (_) { pendingRoomPurchaseMemory.set(storageKey, pending); }
+  }
+  return {
+    key:pending.key,
+    clear() {
+      try { sessionStorage.removeItem(storageKey); } catch (_) {}
+      pendingRoomPurchaseMemory.delete(storageKey);
+    }
+  };
+}
+
 function applyAuthenticatedUser(user) {
   currentUser = user;
   state.username = user.name; state.memberId = user.memberId;
@@ -928,26 +953,37 @@ function renderRoomPurchasePage() {
   const lineEstimate = Math.max(0, Number(queue.estimatedPrizes?.line ?? Math.floor(collected * 0.10)) || 0);
   const fullEstimate = Math.max(0, Number(queue.estimatedPrizes?.full ?? Math.floor(collected * 0.75)) || 0);
   const minPlayersToStart = Math.max(2, Number(queue.minPlayersToStart) || 2);
+  const nextRound = queue.status === 'playing' ? queue.nextRound : null;
+  const nextRoundJoined = Boolean(nextRound?.joined);
+  const nextRoundCardCount = Array.isArray(nextRound?.myCards) ? nextRound.myCards.length : 0;
   const purchaseControls = joined && waiting
     ? `<small>کارت‌های خریداری‌شده</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(ownedCardCount)} از ۵ کارت</b></div>`
-    : `<small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${selectedCount <= 1 ? 'disabled' : ''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${selectedCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>+</button></div>`;
-  const purchaseTotal = queue.status === 'finished'
-    ? `<div class="purchase-total"><span>ورود به سانس بعدی</span><b>بدون برداشت وجه</b></div>`
-    : joined && waiting
-      ? `<div class="purchase-total"><span>هزینه ۱ کارت اضافی</span><b>${faDigits(room.price)} تومان</b></div>`
-      : `<div class="purchase-total"><span>هزینه کل ${faDigits(selectedCount)} کارت</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>`;
+    : queue.status === 'playing' && nextRoundJoined
+      ? `<small>کارت‌های ثبت‌شده برای سانس بعدی</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(nextRoundCardCount)} از ۵ کارت</b></div>`
+      : `<small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${selectedCount <= 1 ? 'disabled' : ''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${selectedCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>+</button></div>`;
+  const purchaseTotal = queue.status === 'playing' && nextRoundJoined
+    ? `<div class="purchase-total"><span>هزینه هر کارت اضافی برای سانس بعدی</span><b>${faDigits(room.price)} تومان</b></div>`
+    : queue.status === 'finished'
+      ? `<div class="purchase-total"><span>هزینه کارت سانس بعدی</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>`
+      : joined && waiting
+        ? `<div class="purchase-total"><span>هزینه ۱ کارت اضافی</span><b>${faDigits(room.price)} تومان</b></div>`
+        : `<div class="purchase-total"><span>هزینه کل ${faDigits(selectedCount)} کارت</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>`;
   const purchaseAction = !currentUser
     ? `<button class="btn btn-primary btn-block" data-page="account">ورود / ثبت‌نام برای بازی</button>`
     : queue.status === 'playing' && joined
       ? `<button class="btn btn-primary btn-block" data-action="room-open-game">ورود به بازی زنده</button>`
-      : queue.status === 'playing'
-        ? `<button class="btn btn-muted btn-block" disabled>سانس در حال اجراست</button>`
-        : queue.status === 'finished'
-          ? `<button class="btn btn-primary btn-block" data-action="room-next-session">ورود به سانس بعدی · بدون خرید کارت</button>`
-          : joined && waiting
-            ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER || timerExpired ? 'disabled' : ''}>${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت تکمیل شده' : timerExpired ? 'مهلت خرید پایان یافته' : 'افزودن و خرید یک کارت'}</button>`
-            : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">خرید کارت و ورود به اتاق</button>`;
-  const waitingMessage = queue.status === 'playing' ? 'بازی در حال اجراست و قرعه‌کشی خودکار انجام می‌شود.'
+      : queue.status === 'playing' && nextRoundJoined
+        ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${nextRoundCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>${nextRoundCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت سانس بعدی تکمیل شده' : 'افزودن یک کارت به سانس بعدی'}</button>`
+        : queue.status === 'playing'
+          ? `<button class="btn btn-primary btn-block" data-action="room-join-next">خرید کارت و ثبت‌نام سانس بعدی</button>`
+          : queue.status === 'finished'
+            ? `<button class="btn btn-primary btn-block" data-action="room-join-auto">خرید کارت و ثبت‌نام سانس بعدی</button>`
+            : joined && waiting
+              ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER || timerExpired ? 'disabled' : ''}>${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت تکمیل شده' : timerExpired ? 'مهلت خرید پایان یافته' : 'افزودن و خرید یک کارت'}</button>`
+              : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">خرید کارت و ورود به اتاق</button>`;
+  const waitingMessage = queue.status === 'playing' ? (nextRound
+    ? 'بازی فعلی در حال اجراست؛ ثبت‌نام سانس بعدی در جریان است و پس از پایان بازی فعلی آغاز می‌شود.'
+    : 'بازی فعلی در حال اجراست؛ می‌توانی برای سانس بعدی ثبت‌نام کنی.')
     : queue.status === 'finished' ? 'سانس قبلی پایان یافته است؛ ورود به سانس بعدی رایگان است و خرید کارت جداگانه انجام می‌شود.'
     : registrationStarted && playerCount < minPlayersToStart && timerExpired ? `مهلت اولیه تمام شده؛ بازی پس از رسیدن تعداد شرکت‌کنندگان به حداقل ${faDigits(minPlayersToStart)} نفر شروع می‌شود.`
     : registrationStarted ? (timerExpired ? 'مهلت خرید به پایان رسیده و حداقل شرکت‌کنندگان کامل شده؛ بازی در حال شروع است.' : `تا پایان مهلت خرید و شروع خودکار بازی با حداقل ${faDigits(minPlayersToStart)} شرکت‌کننده:`)
