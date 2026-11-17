@@ -283,6 +283,80 @@ test('bottom navigation opens the expected public sections', async ({ page }, te
   expect(diagnostics.mutatingRequests, 'navigation must not send write requests').toEqual([]);
 });
 
+
+test('PWA install action and short-landscape navigation do not cover page content', async ({ page }, testInfo) => {
+  const diagnostics = await observePage(page);
+  await page.emulateMedia({ colorScheme: 'dark' });
+
+  const viewports = [
+    { width: 320, height: 720 },
+    { width: 360, height: 800 },
+    { width: 375, height: 812 },
+    { width: 390, height: 844 },
+    { width: 430, height: 932 },
+    { width: 768, height: 1024 },
+    { width: 844, height: 390 },
+    { width: 932, height: 430 }
+  ];
+  const checks = [];
+
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await openHome(page);
+
+    const layout = await page.evaluate(() => {
+      const topbar = document.querySelector('.topbar');
+      const install = document.querySelector('.pwa-install-entry');
+      const main = document.querySelector('main#appView');
+      const nav = document.querySelector('nav.bottom-nav');
+      const box = element => {
+        const rect = element.getBoundingClientRect();
+        return { top: Math.round(rect.top), bottom: Math.round(rect.bottom), height: Math.round(rect.height) };
+      };
+      const installStyle = install ? getComputedStyle(install) : null;
+      const navStyle = nav ? getComputedStyle(nav) : null;
+      const mainStyle = main ? getComputedStyle(main) : null;
+      const installBox = install ? box(install) : null;
+      const mainBox = main ? box(main) : null;
+      const navBox = nav ? box(nav) : null;
+      const shortLandscape = matchMedia('(orientation: landscape) and (max-height: 520px)').matches;
+
+      return {
+        installVisible: !!install && installBox.height > 0 && installStyle.display !== 'none',
+        installPosition: installStyle?.position || null,
+        installAfterHeader: !!topbar && topbar.nextElementSibling === install,
+        installBeforeMain: !!installBox && !!mainBox && installBox.bottom <= mainBox.top + 1,
+        navPosition: navStyle?.position || null,
+        navAfterMain: !!navBox && !!mainBox && navBox.top >= mainBox.bottom - 1,
+        navHeight: navBox?.height || 0,
+        mainBottomPadding: mainStyle ? parseFloat(mainStyle.paddingBottom) : 0,
+        shortLandscape
+      };
+    });
+
+    checks.push({ viewport: viewport.width + 'x' + viewport.height, ...layout });
+    expect(layout.installVisible, 'install action visible at ' + viewport.width + 'x' + viewport.height).toBe(true);
+    expect(layout.installPosition, 'install action remains in normal flow').toBe('relative');
+    expect(layout.installAfterHeader, 'install action follows the header').toBe(true);
+    expect(layout.installBeforeMain, 'install action must not overlap main content').toBe(true);
+
+    if (layout.shortLandscape) {
+      expect(layout.navPosition, 'short-landscape navigation must be in normal flow').toBe('static');
+      expect(layout.navAfterMain, 'short-landscape navigation must follow the page content').toBe(true);
+    } else {
+      expect(layout.navPosition, 'portrait navigation remains fixed').toBe('fixed');
+      expect(
+        layout.mainBottomPadding,
+        'main content reserves enough space for bottom navigation'
+      ).toBeGreaterThanOrEqual(layout.navHeight);
+    }
+  }
+
+  await attachDiagnostics(testInfo, { ...diagnostics, layoutChecks: checks });
+  expect(diagnostics.pageErrors, 'layout checks must not create browser exceptions').toEqual([]);
+  expect(diagnostics.mutatingRequests, 'layout checks must not send write requests').toEqual([]);
+});
+
 test('document exposes Persian RTL and primary navigation landmarks', async ({ page }) => {
   await openHome(page);
   await expect(page.locator('html')).toHaveAttribute('lang', 'fa');

@@ -1,4 +1,36 @@
-.pwa-install-entry{position:fixed;z-index:28;left:max(12px,calc((100vw - 780px)/2 + 12px));bottom:calc(82px + env(safe-area-inset-bottom));display:flex;align-items:center;gap:8px;padding:9px 13px;border:1px solid #8b3541;border-radius:13px;background:linear-gradient(110deg,#ef263e,#8e0c24);color:#fff;text-decoration:none;font-size:11px;font-weight:900;box-shadow:0 8px 24px #0009,0 0 16px #ed182c35;direction:rtl;backdrop-filter:blur(12px)}
-.pwa-install-entry-icon{display:grid;place-items:center;width:23px;height:23px;border-radius:8px;background:#ffffff20;font-size:18px;line-height:1}
+/* Keep the install action in normal document flow so it never covers game or account content. */
+.pwa-install-entry{
+  position:relative;
+  z-index:28;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:fit-content;
+  max-width:calc(100% - 24px);
+  margin-block:8px 0;
+  margin-inline-start:max(12px,calc((100vw - 780px)/2 + 12px));
+  margin-inline-end:auto;
+  padding:9px 13px;
+  border:1px solid #8b3541;
+  border-radius:13px;
+  background:linear-gradient(110deg,#ef263e,#8e0c24);
+  color:#fff;
+  text-decoration:none;
+  font-size:11px;
+  font-weight:900;
+  box-shadow:0 8px 24px #0009,0 0 16px #ed182c35;
+  direction:rtl;
+  backdrop-filter:blur(12px);
+}
+.pwa-install-entry-icon{
+  display:grid;
+  place-items:center;
+  width:23px;
+  height:23px;
+  border-radius:8px;
+  background:#ffffff20;
+  font-size:18px;
+  line-height:1;
+}
 .pwa-install-entry:focus-visible{outline:2px solid #f5bb45;outline-offset:3px}
-@media (display-mode: standalone){.pwa-install-entry{display:none}}
+@media (display-mode:standalone){.pwa-install-entry{display:none}}

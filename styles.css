@@ -946,3 +946,23 @@
 .room-all-tickets-panel{margin-top:12px}
 .room-all-tickets-list{grid-template-columns:repeat(auto-fit,minmax(230px,1fr));}
 @media(max-width:600px){.room-all-tickets-list{grid-template-columns:1fr;}}
+
+
+/* Short landscape screens: keep navigation in flow instead of covering the active page. */
+@media (orientation:landscape) and (max-height:520px){
+  .app-view{
+    min-height:0;
+    padding-bottom:calc(24px + env(safe-area-inset-bottom));
+  }
+  .bottom-nav{
+    position:static;
+    inset:auto;
+    left:auto;
+    right:auto;
+    bottom:auto;
+    transform:none;
+    width:min(100%,780px);
+    margin:12px auto 0;
+    border-radius:16px 16px 0 0;
+  }
+}
