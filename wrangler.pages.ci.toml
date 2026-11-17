@@ -6,6 +6,7 @@ pages_build_output_dir = "./dist"
 binding = "DB"
 database_name = "dabernaz-local-ci"
 database_id = "00000000000000000000000000000000"
+preview_database_id = "DB"
 migrations_dir = "./migrations"
 
 [vars]
