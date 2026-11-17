@@ -1140,7 +1140,8 @@ function tournamentLivePanel(room, type) {
     <div class="tour-live-leaders"><b>رتبه‌بندی برترها</b><ol>${leaderboard}</ol></div></section>`;
 }
 async function refreshTournamentData() {
-  if (tournamentPollBusy || !['tournaments','tournamentRoom','bingoTournament'].includes(currentPage)) return;
+  if (document.hidden || navigator.onLine === false ||
+      tournamentPollBusy || !['tournaments','tournamentRoom','bingoTournament'].includes(currentPage)) return;
   tournamentPollBusy = true;
   try {
     const publicData = await apiRequest('/api/tournaments', { method:'GET', headers:{} });
@@ -2268,11 +2269,19 @@ checkPersianVoicePack(); refreshPersianBrowserVoices();
 // Refresh the authenticated account and the active room when a mobile browser/WebView
 // returns to the foreground. Background tabs can throttle timers, so rely on an
 // immediate authoritative read when visibility or focus returns.
+let foregroundRefreshBusy = false;
 async function refreshAppAfterForeground() {
-  if (document.hidden) return;
-  if (currentUser) await loadAuthenticatedUser();
-  if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) {
-    pollCurrentRoom();
+  if (document.hidden || foregroundRefreshBusy) return;
+  foregroundRefreshBusy = true;
+  try {
+    if (currentUser) await loadAuthenticatedUser();
+    if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) {
+      pollCurrentRoom();
+    } else if (['tournaments','tournamentRoom','bingoTournament'].includes(currentPage)) {
+      refreshTournamentData();
+    }
+  } finally {
+    foregroundRefreshBusy = false;
   }
 }
 document.addEventListener('visibilitychange', refreshAppAfterForeground);
@@ -2282,9 +2291,12 @@ window.addEventListener('online', () => {
     if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom();
   });
 });
-setInterval(() => { if (currentUser && (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom(); }, 2200);
+setInterval(() => {
+  if (!document.hidden && navigator.onLine !== false && currentUser &&
+      (ROOM_CONFIGS.some(room=>room.id===currentPage) || currentPage==='roomGame')) pollCurrentRoom();
+}, 2200);
 setInterval(async()=>{
-  if(!currentUser)return;
+  if (!currentUser || document.hidden || navigator.onLine === false) return;
   if(currentPage==='supportAdmin'&&supportAdminEnabled){
     try{await refreshSupportAdmin();const composing=document.activeElement?.closest('#supportAdminReplyForm');if(!composing)render();}catch(_){}
   }else if(currentPage==='support'){
