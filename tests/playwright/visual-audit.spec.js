@@ -19,7 +19,20 @@ const viewports = [
 
 const colorSchemes = ['light', 'dark'];
 
-function observePage(page) {
+function redactErrorMessage(message) {
+  return String(message)
+    .replace(/https?:\\/\\/[^\\s)"']+/g, value => {
+      try {
+        const url = new URL(value);
+        return url.origin + url.pathname;
+      } catch (_) {
+        return '[url]';
+      }
+    })
+    .replace(/\\b(password|token|secret|authorization|api[_-]?key)(\\s*[:=]\\s*)[^\\s,;]+/ig, '$1$2[REDACTED]');
+}
+
+async function observePage(page) {
   const diagnostics = {
     pageErrors: [],
     consoleErrors: [],
@@ -28,38 +41,55 @@ function observePage(page) {
     mutatingRequests: []
   };
 
-  page.on('pageerror', error => diagnostics.pageErrors.push(error.message));
-  page.on('console', message => {
-    if (message.type() === 'error') diagnostics.consoleErrors.push(message.text());
-  });
-  page.on('request', request => {
+  // Block same-origin write methods before they can reach the public site.
+  await page.route('**/*', async route => {
+    const request = route.request();
     const method = request.method().toUpperCase();
-    if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return;
     let url;
-    try { url = new URL(request.url()); } catch (_) { return; }
-    if (url.origin === targetOrigin) {
-      diagnostics.mutatingRequests.push({ method, path: url.pathname });
+    try { url = new URL(request.url()); } catch (_) {
+      await route.continue();
+      return;
     }
+
+    if (url.origin === targetOrigin && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      diagnostics.mutatingRequests.push({ method, path: url.pathname });
+      await route.abort('blockedbyclient');
+      return;
+    }
+    await route.continue();
+  });
+
+  page.on('pageerror', error => {
+    diagnostics.pageErrors.push({
+      name: error.name || 'Error',
+      message: redactErrorMessage(error.message || 'Uncaught browser exception')
+    });
+  });
+  page.on('console', message => {
+    if (message.type() === 'error') diagnostics.consoleErrors.push(redactErrorMessage(message.text()));
   });
   page.on('requestfailed', request => {
+    let path = '[unavailable]';
+    try { path = new URL(request.url()).pathname; } catch (_) {}
     diagnostics.failedRequests.push({
       method: request.method(),
-      url: request.url(),
-      error: request.failure()?.errorText || 'unknown'
+      path,
+      error: redactErrorMessage(request.failure()?.errorText || 'unknown')
     });
   });
   page.on('response', response => {
     if (response.status() >= 400) {
+      let path = '[unavailable]';
+      try { path = new URL(response.url()).pathname; } catch (_) {}
       diagnostics.httpErrors.push({
         status: response.status(),
-        url: response.url()
+        path
       });
     }
   });
 
   return diagnostics;
 }
-
 async function openHome(page) {
   await page.goto('/#page=home', { waitUntil: 'domcontentloaded' });
   await page.locator('#appView').waitFor({ state: 'visible' });
@@ -80,7 +110,7 @@ async function attachDiagnostics(testInfo, diagnostics, layout = null) {
 for (const colorScheme of colorSchemes) {
   for (const viewport of viewports) {
     test('homepage layout ' + colorScheme + ' ' + viewport.width + 'x' + viewport.height, async ({ page }, testInfo) => {
-      const diagnostics = observePage(page);
+      const diagnostics = await observePage(page);
       await page.emulateMedia({ colorScheme });
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
       await openHome(page);
@@ -156,6 +186,16 @@ for (const colorScheme of colorSchemes) {
         path: screenshotPath,
         contentType: 'image/png'
       });
+      console.log('[PLAYWRIGHT_LAYOUT]', JSON.stringify({
+        viewport: viewport.width + 'x' + viewport.height,
+        colorScheme,
+        documentWidth: layout.documentWidth,
+        overflowCount: layout.overflowElements.length,
+        smallTargetCount: layout.smallTargets.length,
+        smallTextCount: layout.smallText.length,
+        smallTargetSamples: layout.smallTargets.slice(0, 6).map(({ tag, width, height }) => ({ tag, width, height })),
+        smallTextSamples: layout.smallText.slice(0, 6).map(({ tag, fontSize }) => ({ tag, fontSize }))
+      }));
       await attachDiagnostics(testInfo, diagnostics, layout);
 
       expect(layout.hasMainContent, 'homepage must render main content').toBe(true);
