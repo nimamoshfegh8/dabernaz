@@ -107,6 +107,26 @@ async function verifyPassword(password, stored) {
   }
 }
 
+async function assertSchemaReady(db) {
+  if (bootstrappedBindings.has(db)) return;
+  try {
+    const row = await db.prepare('SELECT MAX(version) AS version FROM schema_migrations').first();
+    if (Number(row?.version) < 1) {
+      throw new HttpError(503, 'ساختار پایگاه داده هنوز به نسخه موردنیاز ارتقا نیافته است.');
+    }
+    const required = await db.prepare(
+      "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN ('users','auth_sessions','transactions','room_rounds','room_purchases','room_outbox')"
+    ).first();
+    if (Number(required?.total) !== 6) {
+      throw new HttpError(503, 'بخشی از ساختار پایگاه داده ناقص است؛ اجرای Migration لازم است.');
+    }
+    bootstrappedBindings.add(db);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(503, 'نسخه Migration پایگاه داده در دسترس نیست؛ اجرای Migration محیط Preview لازم است.');
+  }
+}
+
 async function ensureSchema(db) {
   if (bootstrappedBindings.has(db)) return;
   // Base definitions also allow a new, empty D1 database to initialize automatically.
@@ -1505,7 +1525,7 @@ async function advanceTournamentSystem(db, nowMs, advanceDraws = true) {
 }
 
 async function recurringTournamentSnapshots(db, advanceDraws = true) {
-  await advanceTournamentSystem(db, Date.now(), advanceDraws);
+  if (advanceDraws) await advanceTournamentSystem(db, Date.now(), true);
   const rows = await db.prepare("SELECT * FROM tournament_events ORDER BY CASE WHEN status IN ('scheduled','registration','running') THEN 0 ELSE 1 END,scheduled_at ASC LIMIT 12").all();
   const output = [];
   for (const event of rows.results || []) {
@@ -1837,7 +1857,7 @@ async function routeRequest(request, env) {
   }
 
   if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
-  await ensureSchema(env.DB);
+  if (env.DABERNAZ_TEST_DIAGNOSTICS === '1') await ensureSchema(env.DB);\n  else await assertSchemaReady(env.DB);
 
   if (request.method === 'GET' && path === '/api/rooms/history') {
     return json({ ok: true, rounds: await recentWinners(env.DB) });
