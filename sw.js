@@ -1,7 +1,7 @@
 'use strict';
 
 // App shell assets are cached for first-load/offline recovery. Live app code remains network-first.
-const CACHE_NAME = 'dabernaz-shell-v31';
+const CACHE_NAME = 'dabernaz-shell-v32';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -71,7 +71,8 @@ self.addEventListener('fetch', event => {
       const network = fetch(request).then(async response => {
         if (response && response.ok) await cache.put(request, response.clone());
         return response;
-      });
+      }).catch(() => cached || Response.error());
+      // Keep the refresh promise handled even when a cached asset is returned immediately.
       return cached || network;
     })());
   }
