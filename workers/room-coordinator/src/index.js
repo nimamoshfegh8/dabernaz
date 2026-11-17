@@ -823,7 +823,7 @@ export class RoomCoordinator extends DurableObject {
       }
     });
   }
-\n
+
   async snapshot(roomId, userId) {
     const [playing, registration, waiting, latest] = await Promise.all([
       this.env.DB.prepare("SELECT * FROM room_rounds WHERE room_id=? AND status='playing' LIMIT 1").bind(roomId).first(),
