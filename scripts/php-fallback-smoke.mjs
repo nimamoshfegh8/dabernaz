@@ -25,7 +25,7 @@ async function waitForServer(baseUrl) {
   for (let attempt = 0; attempt < 60; attempt++) {
     try {
       const response = await fetch(baseUrl);
-      if (response.ok) return;
+      if (response.status >= 100 && response.status < 600) return;
     } catch (_) {}
     await new Promise(resolve => setTimeout(resolve, 100));
   }
@@ -34,6 +34,39 @@ async function waitForServer(baseUrl) {
 
 try {
   await copyFile(path.join(root, '..', 'api.php'), path.join(tempDir, 'api.php'));
+
+  // Default PHP fallback must be unavailable, including health, account writes,
+  // and room reads. This proves a deployed fallback cannot silently bypass D1.
+  const disabledPort = await reservePort();
+  const disabledBaseUrl = `http://127.0.0.1:${disabledPort}`;
+  const disabledApiUrl = path => {
+    const url = new URL('/api.php', disabledBaseUrl);
+    url.searchParams.set('path', path);
+    return url;
+  };
+  phpServer = spawn('php', ['-S', `127.0.0.1:${disabledPort}`, '-t', tempDir], {
+    cwd: tempDir,
+    stdio: 'ignore',
+    env: { ...process.env, DABERNAZ_TEST_MODE: '0' },
+  });
+  await waitForServer(disabledApiUrl('/api/health'));
+  assert.equal((await fetch(disabledApiUrl('/api/health'))).status, 503,
+    'PHP fallback health must report disabled outside isolated test mode');
+  assert.equal((await fetch(disabledApiUrl('/api/auth/register'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: disabledBaseUrl },
+    body: JSON.stringify({ name: 'Should Be Blocked', email: 'blocked@example.invalid', password: 'NeverEnabled-123!' }),
+  })).status, 503, 'PHP fallback must not create accounts outside isolated test mode');
+  assert.equal((await fetch(disabledApiUrl('/api/rooms/room5000'))).status, 503,
+    'PHP fallback must not expose state-changing room GETs outside isolated test mode');
+  await new Promise(resolve => {
+    if (!phpServer || phpServer.exitCode !== null) return resolve();
+    phpServer.once('exit', resolve);
+    phpServer.kill('SIGTERM');
+  });
+  phpServer = null;
+
+  // The following legacy-path checks run only against disposable CI data.
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   phpServer = spawn('php', ['-S', `127.0.0.1:${port}`, '-t', tempDir], {
@@ -117,7 +150,7 @@ try {
   assert.equal(blockedLogin.status, 429,
     'PHP fallback must rate limit repeated login attempts even when the caller rotates sessions');
 
-  console.log('PHP fallback smoke test passed: sessions work, forged game results are rejected, and IP/email login throttling is enforced.');
+  console.log('PHP fallback guard passed; the disabled default returns 503, and isolated legacy checks verify sessions, forged-result rejection, and IP/email login throttling.');
 } finally {
   if (phpServer && !phpServer.killed) phpServer.kill('SIGTERM');
   await rm(tempDir, { recursive: true, force: true });
