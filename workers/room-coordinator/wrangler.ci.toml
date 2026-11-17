@@ -1,0 +1,25 @@
+name = "dabernaz-room-coordinator-local-ci"
+main = "src/index.js"
+compatibility_date = "2026-11-17"
+workers_dev = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dabernaz-local-ci"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomCoordinator"]
+
+[triggers]
+crons = ["* * * * *"]
+
+[vars]
+DABERNAZ_TEST_DIAGNOSTICS = "1"
+DABERNAZ_TEST_REGISTRATION_WINDOW_MS = "4000"
+DABERNAZ_TEST_DRAW_INTERVAL_MS = "200"
