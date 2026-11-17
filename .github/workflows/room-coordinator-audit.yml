@@ -170,7 +170,7 @@ jobs:
           mkdir -p "$WRANGLER_PERSIST"
           npx wrangler d1 migrations apply "$D1_DATABASE" \
             --config "$WRANGLER_CONFIG" \
-            --local --persist-to "$WRANGLER_PERSIST" --yes
+            --local --persist-to "$WRANGLER_PERSIST"
           npx wrangler d1 execute "$D1_DATABASE" \
             --config "$WRANGLER_CONFIG" \
             --local --persist-to "$WRANGLER_PERSIST" --json \
