@@ -2011,7 +2011,7 @@ document.addEventListener('click', async event => {
     roomJoinBusy = true;
     actionEl.disabled = true;
     unlockPersianAudio();
-    const requestedCardCount = Math.max(1, Math.min(MAX_ROOM_CARDS_PER_PLAYER, Number(roomCardCount) || 1));
+    const requestedCardCount = action === 'room-join-next' ? 1 : Math.max(1, Math.min(MAX_ROOM_CARDS_PER_PLAYER, Number(roomCardCount) || 1));
     const purchaseAttempt = getRoomPurchaseAttempt(activeRoomId, requestedCardCount);
     try {
       let result;
