@@ -166,3 +166,19 @@ CREATE INDEX IF NOT EXISTS idx_room_outbox_due
 -- expires, the next purchase may create another independent future round.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_room_rounds_one_open_registration
   ON room_rounds(room_id) WHERE status='registration_open';
+
+-- Protect the ledger from mutation and record the completed schema version.
+CREATE TRIGGER IF NOT EXISTS financial_ledger_no_update
+BEFORE UPDATE ON financial_ledger
+BEGIN
+  SELECT RAISE(ABORT, 'financial_ledger is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS financial_ledger_no_delete
+BEFORE DELETE ON financial_ledger
+BEGIN
+  SELECT RAISE(ABORT, 'financial_ledger is append-only');
+END;
+
+INSERT OR IGNORE INTO schema_migrations(version,name)
+VALUES (1,'room_rounds_financial_queue');
