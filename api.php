@@ -371,13 +371,9 @@ if ($method==='PATCH' && $path==='/api/profile') {
     if (!$result) send_json(404,['error'=>'حساب کاربری پیدا نشد.']); send_json(200,['ok'=>true,'user'=>$result]);
 }
 if ($method==='POST' && $path==='/api/games/result') {
-    $body=request_body(); if (!isset($body['won']) || !is_bool($body['won'])) send_json(400,['error'=>'نتیجه مسابقه معتبر نیست.']);
-    $result=store_update(function (&$db) use ($userId,$body) { $i=get_user_index($db,$userId); if($i<0)return null;
-        $stats=$db['users'][$i]['stats']??['gamesPlayed'=>0,'wins'=>0,'points'=>0];
-        $stats['gamesPlayed']=min(100000000,(int)$stats['gamesPlayed']+1);
-        if($body['won']) {$stats['wins']=min(100000000,(int)$stats['wins']+1);$stats['points']=min(1000000000,(int)$stats['points']+10);}
-        $db['users'][$i]['stats']=$stats; return $stats; });
-    if(!$result)send_json(404,['error'=>'حساب کاربری پیدا نشد.']); send_json(200,['ok'=>true,'stats'=>$result]);
+    // Client-submitted win flags are untrusted; outcomes must be computed by
+    // the server-authoritative /api/games/start and /api/games/move routes.
+    send_json(405, ['error'=>'نتیجه بازی فقط از مسیر حرکت‌های معتبر سرور محاسبه می‌شود.']);
 }
 
 if (preg_match('~^/api/rooms/(room5000|room10000|room20000|room50000)(?:/(join|leave|next))?$~',$path,$m)) {
