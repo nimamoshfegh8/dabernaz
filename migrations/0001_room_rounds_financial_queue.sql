@@ -125,6 +125,18 @@ CREATE TABLE IF NOT EXISTS room_player_stats (
 
 -- This ledger is append-only by application contract. Each business effect can
 -- be represented at most once for a specific user and reference.
+
+-- A milestone can be rewarded only once even when several invitations register
+-- concurrently. The claim is the idempotency guard for the financial effect.
+CREATE TABLE IF NOT EXISTS referral_reward_claims (
+  inviter_id INTEGER NOT NULL,
+  milestone INTEGER NOT NULL CHECK (milestone > 0),
+  referral_count INTEGER NOT NULL CHECK (referral_count > 0),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (inviter_id, milestone),
+  FOREIGN KEY (inviter_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+
 CREATE TABLE IF NOT EXISTS financial_ledger (
   id TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL,
