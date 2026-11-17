@@ -799,7 +799,15 @@ export class RoomCoordinator extends DurableObject {
     const draws = await this.env.DB.prepare(
       "SELECT MIN(next_draw_at) AS next_at FROM room_rounds WHERE room_id=? AND status='playing'"
     ).bind(roomId).first();
-    const values = [Number(deadlines?.next_at) || null, Number(draws?.next_at) || null].filter((value) => value !== null);
+    const outbox = await this.env.DB.prepare(
+      "SELECT MIN(CASE WHEN status='processing' THEN COALESCE(lease_until,next_attempt_at) ELSE next_attempt_at END) AS next_at " +
+      "FROM room_outbox WHERE room_id=? AND status IN ('pending','processing')"
+    ).bind(roomId).first();
+    const values = [
+      Number(deadlines?.next_at) || null,
+      Number(draws?.next_at) || null,
+      Number(outbox?.next_at) || null,
+    ].filter((value) => value !== null);
     if (!values.length) {
       await this.ctx.storage.deleteAlarm();
       return;
