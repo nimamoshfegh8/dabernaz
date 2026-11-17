@@ -28,6 +28,8 @@ jobs:
           php-version: '8.2'
       - name: Check PHP syntax
         run: php -l api.php
+      - name: Test PHP fallback session and game-result security
+        run: node scripts/php-fallback-smoke.mjs
       - name: Check JavaScript syntax
         run: npm run check
       - name: Build Cloudflare Pages assets
