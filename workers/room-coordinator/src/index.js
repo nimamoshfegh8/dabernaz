@@ -246,7 +246,7 @@ export class RoomCoordinator extends DurableObject {
           await this.ctx.storage.put("roomId", roomId);
         }
 
-        if (!action && request.method === "GET")
+        if (!action && request.method === "GET") {
           const userId = Number(request.headers.get("x-dabernaz-user-id") || 0);
           return json({ ok: true, room: await this.snapshot(roomId, userId) });
         }
