@@ -81,4 +81,15 @@ for (const path of paths) {
 assert.deepEqual(writes, [],
   'GET health/auth/tournament/game/room/history routes must not write D1 or invoke room-service mutations');
 
+const healthResponse = await onRequest({
+  request: new Request('https://preview.example.invalid/api/health', { method: 'GET' }),
+  env
+});
+const healthBody = await healthResponse.json();
+assert.equal(healthBody.schema, 'v3', 'API health must report the complete D1 schema');
+assert.equal(healthBody.walletRequests?.idempotency, true, 'wallet idempotency table must be observable');
+assert.equal(healthBody.tournamentEntries?.idempotency, true, 'tournament idempotency table must be observable');
+assert.equal(healthBody.readiness, 'ready', 'mocked Pages and room service bindings should report ready');
+assert.deepEqual(writes, [], 'health readiness checks must remain read-only');
+
 console.log('API read-only contract passed: GET routes caused no D1 batch/run or room-service write.');
