@@ -209,8 +209,8 @@ jobs:
           echo $! > "$RUNNER_TEMP/dabernaz-pages-api.pid"
           for attempt in $(seq 1 90); do
             if curl --fail --silent "$BASE_URL/api/health" > "$RUNNER_TEMP/dabernaz-pages-health.json"; then
-              if node -e "const h=require('fs').readFileSync(process.argv[1],'utf8'); const x=JSON.parse(h); if(x.readiness!=='ready'||x.schema!=='v2'||!x.roomCoordinator?.available||!x.walletRequests?.idempotency) process.exit(1)" "$RUNNER_TEMP/dabernaz-pages-health.json"; then
-                echo "Pages API, D1 schema v2, wallet idempotency, and room Service Binding are ready."
+              if node -e "const h=require('fs').readFileSync(process.argv[1],'utf8'); const x=JSON.parse(h); if(x.readiness!=='ready'||x.schema!=='v3'||!x.roomCoordinator?.available||!x.walletRequests?.idempotency) process.exit(1)" "$RUNNER_TEMP/dabernaz-pages-health.json"; then
+                echo "Pages API, D1 schema v3, wallet idempotency, and room Service Binding are ready."
                 exit 0
               fi
             fi
