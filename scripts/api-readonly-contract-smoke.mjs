@@ -21,8 +21,8 @@ function createStatement(sql) {
   return {
     bind(...values) { params = values; return this; },
     async first() {
-      if (/MAX\(version\)/i.test(sql)) return { version: 1 };
-      if (/sqlite_master/i.test(sql)) return { total: 9 };
+      if (/MAX\(version\)/i.test(sql)) return { version: 3 };
+      if (/sqlite_master/i.test(sql)) return { total: 11 };
       if (/FROM auth_sessions\s+s\s+JOIN users/i.test(sql)) return user;
       if (/SELECT bingo_coins FROM users/i.test(sql)) return { bingo_coins: user.bingo_coins };
       if (/SELECT 1 AS ok/i.test(sql)) return { ok: 1 };
