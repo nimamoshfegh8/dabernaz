@@ -14,30 +14,17 @@ const defaultState = {
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if (!saved || typeof saved !== 'object') return cloneData(defaultState);
-    return {
-      ...cloneData(defaultState), ...saved,
-      // Payment card settings are server-owned secrets: never hydrate them from browser storage.
-      walletPaymentInfo: {cardNumber:'',cardHolder:'',bankName:'',paymentNote:''},
-      balance: Number.isFinite(Number(saved.balance)) ? Math.max(0, Number(saved.balance)) : defaultState.balance,
-      joined: Array.isArray(saved.joined) ? saved.joined : [],
-      transactions: Array.isArray(saved.transactions) ? saved.transactions.slice(0, 30) : [],
-      bingoCoins: Number.isFinite(Number(saved.bingoCoins)) ? Math.max(0, Math.floor(Number(saved.bingoCoins))) : 0,
-      coinTransactions: Array.isArray(saved.coinTransactions) ? saved.coinTransactions.slice(0, 50) : [],
-      inviteCount: Number.isFinite(Number(saved.inviteCount)) ? Math.max(0, Math.floor(Number(saved.inviteCount))) : 0,
-      inviteRewardMilestones: Array.isArray(saved.inviteRewardMilestones) ? saved.inviteRewardMilestones : [],
-      roomHistory: Array.isArray(saved.roomHistory) ? saved.roomHistory.slice(0,12) : [],
-      supportTickets: Array.isArray(saved.supportTickets) ? saved.supportTickets.slice(0,20) : [],
-      tournamentRooms: Array.isArray(saved.tournamentRooms) ? saved.tournamentRooms.slice(0,12) : [],
-      tournamentEntries: Array.isArray(saved.tournamentEntries) ? saved.tournamentEntries.slice(0,30) : [],
-      settings: (() => {
-        const previous = saved.settings && typeof saved.settings === 'object' ? saved.settings : {};
-        const merged = { ...defaultState.settings, ...previous };
-        if (!Number.isFinite(Number(previous.voiceAudioVersion)) || Number(previous.voiceAudioVersion) < 4) merged.voiceNumbers = false;
-        merged.voiceAudioVersion = 6;
-        return merged;
-      })()
-    };
+    const previous = saved && typeof saved === 'object' && saved.settings && typeof saved.settings === 'object'
+      ? saved.settings : {};
+    const settings = { ...defaultState.settings, ...previous };
+    if (!Number.isFinite(Number(previous.voiceAudioVersion)) || Number(previous.voiceAudioVersion) < 4) {
+      settings.voiceNumbers = false;
+    }
+    settings.voiceAudioVersion = 6;
+    // Older builds stored balances, histories, tickets and wallet data locally.
+    // Rewrite the record immediately so private account data is removed at startup.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings }));
+    return { ...cloneData(defaultState), settings };
   } catch (_) { return cloneData(defaultState); }
 }
 let state = loadState();
@@ -576,9 +563,9 @@ const faDigits = value => Number(value).toLocaleString('fa-IR');
 const escapeHTML = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 function saveState() {
   try {
-    // Never persist finance destination card details or payment notes in localStorage.
-    const safeState = { ...state, walletPaymentInfo:{cardNumber:'',cardHolder:'',bankName:'',paymentNote:''} };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeState));
+    // Only non-sensitive preferences belong in browser storage. Account identity,
+    // balances, histories, tickets, wallet requests and payment data are server-owned.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings: { ...state.settings } }));
   } catch (_) { showToast('فضای ذخیره‌سازی مرورگر در دسترس نیست'); }
 }
 const WALLET_REQUEST_KEY_STORAGE = 'dabernaz_wallet_request_idempotency_v1';
