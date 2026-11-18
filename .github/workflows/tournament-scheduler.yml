@@ -7,14 +7,26 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: dabernaz-tournament-scheduler
   cancel-in-progress: false
 
 jobs:
+  reject-non-production-ref:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop the production scheduler outside main
+        run: |
+          echo "::error::This workflow advances live tournaments. Run it only from the main branch."
+          exit 1
+
   advance:
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
