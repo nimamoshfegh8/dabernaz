@@ -149,10 +149,14 @@ await expectStatus('/api/wallet/requests/'+deposit.requestId+'/receipt',404,{acc
 
 const search=await request('/api/admin/wallet/users?q='+encodeURIComponent(customer.memberId),{account:admin});
 assert.ok(search.users.some(u=>String(u.member_id)===String(customer.memberId)));
-const adjustment=await request('/api/admin/wallet/adjust',{account:admin,method:'POST',body:{memberId:customer.memberId,amount:15000,reason:'اصلاح آزمایشی موجودی'}});
+const adjustmentKey=randomUUID();
+const adjustmentBody={memberId:customer.memberId,amount:15000,reason:'اصلاح آزمایشی موجودی'};
+const adjustment=await request('/api/admin/wallet/adjust',{account:admin,method:'POST',idempotencyKey:adjustmentKey,body:adjustmentBody});
 assert.equal(Number(adjustment.user.balance),235000);
+const adjustmentReplay=await request('/api/admin/wallet/adjust',{account:admin,method:'POST',idempotencyKey:adjustmentKey,body:adjustmentBody});
+assert.equal(Number(adjustmentReplay.user.balance),235000,'replaying the same admin adjustment must not apply it twice');
 assert.equal(Number((await me(customer)).balance),235000);
-await expectStatus('/api/admin/wallet/adjust',409,{account:admin,method:'POST',body:{memberId:customer.memberId,amount:-999999,reason:'کاهش بیش از موجودی'}});
+await expectStatus('/api/admin/wallet/adjust',409,{account:admin,method:'POST',idempotencyKey:randomUUID(),body:{memberId:customer.memberId,amount:-999999,reason:'کاهش بیش از موجودی'}});
 const tx=await me(customer);
 assert.ok(tx.transactions.some(t=>t.title.includes('شارژ دستی کیف پول')&&Number(t.amount)===50000));
 assert.ok(tx.transactions.some(t=>t.title.includes('بازگشت وجه برداشت ردشده')&&Number(t.amount)===20000));
