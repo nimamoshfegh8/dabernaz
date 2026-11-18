@@ -46,7 +46,7 @@ assert.match(nextSessionHandler, /\/api\/rooms\/\$\{activeRoomId\}\/next/,
   'opening the next session must call the no-purchase endpoint');
 assert.doesNotMatch(nextSessionHandler, /\/join|cardsCount|loadAuthenticatedUser/,
   'opening the next session must not trigger card purchase or wallet refresh');
-const explicitPurchaseHandler = app.match(/if \(action === 'room-join-auto'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-add-card'\)/)?.[1] || '';
+const explicitPurchaseHandler = app.match(/if \(action === 'room-join-auto' \|\| action === 'room-join-next'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-add-card'\)/)?.[1] || '';
 assert.match(explicitPurchaseHandler, /purchaseConfirmed\s*:\s*true/,
   'a new room card may be purchased only through the explicit purchase action');
 assert.match(app, /getWalletRequestIdempotencyKey\(\)/,
