@@ -43,7 +43,7 @@ const customer=await register('customer');
 const other=await register('other');
 const adminEmail=admin.email.replace(/'/g,"''");
 const customerEmail=customer.email.replace(/'/g,"''");
-execFileSync('wrangler',['d1','execute',d1Database,'--config',wranglerConfig,'--local','--persist-to',persistPath,'--command',
+execFileSync('npx',['--no-install','wrangler','d1','execute',d1Database,'--config',wranglerConfig,'--local','--persist-to',persistPath,'--command',
  "UPDATE users SET member_id='999999' WHERE email='"+adminEmail+"'; UPDATE users SET balance=200000 WHERE email='"+customerEmail+"';"],
  {stdio:'inherit'});
 admin.memberId='999999';
