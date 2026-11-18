@@ -41,7 +41,7 @@ assert.match(finishedAction,/data-action="room-next-session"/,
   'a finished room must expose the free next-session action');
 assert.doesNotMatch(finishedAction,/room-join-auto/,
   'a finished room must not use the purchase endpoint to open the next session');
-const nextSessionHandler = app.match(/if \(action === 'room-next-session'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-join-auto'\)/)?.[1] || '';
+const nextSessionHandler = app.match(/if \(action === 'room-next-session'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-join-auto'/)?.[1] || '';
 assert.match(nextSessionHandler, /\/api\/rooms\/\$\{activeRoomId\}\/next/,
   'opening the next session must call the no-purchase endpoint');
 assert.doesNotMatch(nextSessionHandler, /\/join|cardsCount|loadAuthenticatedUser/,
