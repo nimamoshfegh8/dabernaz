@@ -54,6 +54,11 @@ assert.match(app, /Idempotency-Key['"]\s*:\s*idempotencyKey/,
   'wallet requests must send their idempotency key to the backend');
 assert.match(app, /clearWalletRequestIdempotencyKey\(\)/,
   'wallet request idempotency state must clear after success or changed input');
+assert.match(app,/getTournamentEntryIdempotencyKey\(tournamentType\)/,'tournament registration must reuse a stable idempotency key after a lost response');
+assert.match(app,/headers:\{'Idempotency-Key':idempotencyKey\}/,'tournament registration must send its idempotency key to the server');
+assert.match(app,/clearTournamentEntryIdempotencyKey\(tournamentType\)/,'successful tournament registration must clear its pending idempotency key');
+assert.match(api,/FROM tournament_entry_idempotency WHERE user_id=\? AND idempotency_key=\?/,'tournament registration must resolve prior requests by user and idempotency key');
+assert.match(api,/NOT EXISTS \(SELECT 1 FROM tournament_entry_idempotency WHERE user_id=\? AND idempotency_key=\?\)/,'concurrent tournament retries must claim the key before charging another event');
 
 assert.match(app,/supportAdmin:renderSupportAdmin/,'the administrator support inbox must remain a registered app page');
 assert.match(app,/walletAdmin:renderWalletAdmin/,'the finance admin panel must remain a registered app page');
