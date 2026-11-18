@@ -183,7 +183,7 @@ async function applyLocalMigrationsAndSeed() {
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", "migrations/0001_room_rounds_financial_queue.sql"]);
   const seed = [
-    ...Array.from({ length: 21 }, (_, index) => {
+    ...Array.from({ length: 22 }, (_, index) => {
       const id = 910001 + index;
       const n = index + 1;
       return `INSERT INTO users(id,username,password_hash,balance,bingo_coins,created_at,email,member_id,games_played,wins,points) VALUES(${id},'ci-room-user-${n}','test-only-not-a-real-credential',1000000,500,'2026-11-17T00:00:00.000Z','room-user-${n}@example.invalid','CIROOM${n}',0,0,0);`;
@@ -194,7 +194,7 @@ async function applyLocalMigrationsAndSeed() {
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", tempSql]);
   const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910021");
-  assert.equal(Number(users.count), 21, "Twenty-one isolated synthetic test users must be seeded");
+  assert.equal(Number(users.count), 22, "Twenty-two isolated synthetic test users must be seeded");
   const schema = one("SELECT MAX(version) AS version FROM schema_migrations");
   assert.equal(Number(schema.version), 1, "Both versioned D1 migrations must be applied locally");
 }
@@ -254,21 +254,39 @@ async function main() {
   assert.equal(invalidReconcileGet.status, 405);
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_rounds WHERE room_id='room20000'").count), Number(invalidGetBefore.count));
 
-  // One-player round: two cards in one purchase must be refunded once, in full,
-  // without any follow-up browser request.
-  const singleBefore = Number(one("SELECT balance FROM users WHERE id=910003").balance);
+  // One-player round: use a dedicated account that was not part of the
+  // concurrent 20-player round, so its prize payouts cannot race this balance check.
+  // Repeated reconciliation must not issue a second refund or ledger entry.
+  const soloUserId = 910022;
+  const singleBefore = Number(one("SELECT balance FROM users WHERE id=" + soloUserId).balance);
   const single = await requestRoom("room10000", {
-    method: "POST", action: "join", userId: 910003, idempotencyKey: "single-player-refund-0001",
+    method: "POST", action: "join", userId: soloUserId, idempotencyKey: "single-player-refund-0001",
     body: { cardsCount: 2, purchaseConfirmed: true, amount: 1 },
   });
   assert.equal(single.status, 200, JSON.stringify(single.data));
   assert.equal(Number(single.data.purchase.amount), 20_000, "Server price must override a forged client amount");
   assert.equal(Number(single.data.room.playerCount), 1);
-  await waitForSnapshot("room10000", 910003, (room) => room.currentRoundStatus === "refunded", 30_000);
-  const singleBalance = Number(one("SELECT balance FROM users WHERE id=910003").balance);
+  await waitForSnapshot("room10000", soloUserId, (room) => room.currentRoundStatus === "refunded", 30_000);
+
+  const soloPurchaseId = String(single.data.purchase.id);
+  assert.match(soloPurchaseId, /^[a-f0-9]{32}$/i, "Worker must return a safe purchase ID");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const reconcile = await requestRoom("room10000", { method: "POST", action: "reconcile" });
+    assert.equal(reconcile.status, 200, "Repeated reconcile must be accepted without replaying money");
+  }
+
+  const singleBalance = Number(one("SELECT balance FROM users WHERE id=" + soloUserId).balance);
   assert.equal(singleBalance, singleBefore, "Single-player refund must restore the exact original balance");
-  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_refunds WHERE user_id=910003").count), 1);
-  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE user_id=910003 AND room_id='room10000'").count), 1);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_refunds WHERE purchase_id='" + soloPurchaseId + "'").count), 1,
+    "Exactly one refund row must exist for the solo purchase");
+  assert.equal(Number(one("SELECT amount FROM room_refunds WHERE purchase_id='" + soloPurchaseId + "'").amount), 20_000,
+    "Refund amount must equal the exact purchase amount");
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE id='" + soloPurchaseId + "' AND user_id=" + soloUserId + " AND room_id='room10000'").count), 1,
+    "The solo account must own exactly one matching room purchase");
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM financial_ledger WHERE user_id=" + soloUserId + " AND operation='room_refund' AND reference_type='room_purchase' AND reference_id='" + soloPurchaseId + "'").count), 1,
+    "Exactly one append-only refund ledger entry must exist");
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE user_id=" + soloUserId + " AND type='room_refund' AND description LIKE '%" + soloPurchaseId + "%'").count), 1,
+    "Exactly one refund transaction must exist");
 
   // A five-card purchase is valid, retries with the same key are replayed, a
   // changed payload is rejected, and a sixth card in that round is rejected.
