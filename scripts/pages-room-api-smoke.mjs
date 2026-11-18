@@ -234,4 +234,51 @@ await fetch(workerUrl + '/rooms/room10000/reconcile', { method: 'POST' });
 assert.equal(Number(d1("SELECT COUNT(*) AS count FROM room_refunds WHERE round_id=" + sqlString(refundRound))[0].count), 1,
   'reconcile retries must not duplicate refunds');
 
+// Recurring tournament entry uses the same exactly-once financial contract.
+const tournamentEventId = 'ci-simple-' + runId;
+const tournamentNow = new Date().toISOString();
+const tournamentScheduled = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+d1("INSERT INTO tournament_events(id,tournament_type,scheduled_at,registration_opens_at,status,registered_count,capacity,prize_pool,min_players,stage,created_at,updated_at) VALUES(" +
+  [tournamentEventId, 'simple', tournamentScheduled, tournamentNow, 'registration', 0, 30, 0, 5, 'registration', tournamentNow, tournamentNow].map(sqlString).join(',') + ")");
+d1("UPDATE users SET bingo_coins=500 WHERE id IN (" + accounts[0].id + "," + accounts[1].id + ")");
+const tournamentKey = 'tournament-ci-' + runId;
+const tournamentBody = { type: 'simple' };
+const tournamentFirst = await raw('/api/tournaments/register', {
+  account: accounts[0], method: 'POST', key: tournamentKey, body: tournamentBody
+});
+assert.equal(tournamentFirst.response.status, 200, 'first recurring tournament entry must succeed: ' + (tournamentFirst.data.error || ''));
+assert.equal(tournamentFirst.data.replayed, false);
+assert.equal(tournamentFirst.data.event_id, tournamentEventId);
+const tournamentReplay = await raw('/api/tournaments/register', {
+  account: accounts[0], method: 'POST', key: tournamentKey, body: tournamentBody
+});
+assert.equal(tournamentReplay.response.status, 200);
+assert.equal(tournamentReplay.data.replayed, true);
+assert.equal(tournamentReplay.data.event_id, tournamentEventId);
+await expect('/api/tournaments/register', 409, {
+  account: accounts[0], method: 'POST', key: tournamentKey, body: { type: 'bingo' }
+});
+assert.equal(Number(d1("SELECT bingo_coins FROM users WHERE id=" + accounts[0].id)[0].bingo_coins), 480,
+  'same tournament key must debit the entry fee exactly once');
+assert.equal(Number(d1("SELECT COUNT(*) AS count FROM tournament_event_entries WHERE event_id=" + sqlString(tournamentEventId) + " AND user_id=" + accounts[0].id)[0].count), 1);
+assert.equal(Number(d1("SELECT COUNT(*) AS count FROM tournament_entry_idempotency WHERE user_id=" + accounts[0].id + " AND idempotency_key=" + sqlString(tournamentKey))[0].count), 1);
+assert.equal(Number(d1("SELECT COUNT(*) AS count FROM financial_ledger WHERE operation='tournament_entry' AND user_id=" + accounts[0].id + " AND reference_id=" + sqlString(tournamentEventId + ':' + accounts[0].id))[0].count), 1);
+
+const concurrentTournamentKey = 'tournament-concurrent-' + runId;
+const concurrentTournamentRequests = await Promise.all(Array.from({ length: 5 }, () => raw('/api/tournaments/register', {
+  account: accounts[1], method: 'POST', key: concurrentTournamentKey, body: tournamentBody
+})));
+assert.ok(concurrentTournamentRequests.every(item => item.response.status === 200),
+  'concurrent retries with one tournament key must resolve to the original successful entry');
+assert.equal(new Set(concurrentTournamentRequests.map(item => item.data.event_id)).size, 1);
+assert.equal(Number(d1("SELECT bingo_coins FROM users WHERE id=" + accounts[1].id)[0].bingo_coins), 480,
+  'five concurrent requests with one key must debit only one entry fee');
+assert.equal(Number(d1("SELECT COUNT(*) AS count FROM tournament_event_entries WHERE event_id=" + sqlString(tournamentEventId) + " AND user_id=" + accounts[1].id)[0].count), 1);
+assert.equal(Number(d1("SELECT COUNT(*) AS count FROM tournament_entry_idempotency WHERE user_id=" + accounts[1].id + " AND idempotency_key=" + sqlString(concurrentTournamentKey))[0].count), 1);
+await expect('/api/tournaments/register', 409, {
+  account: accounts[1], method: 'POST', key: 'tournament-new-key-' + runId, body: tournamentBody
+});
+assert.equal(Number(d1("SELECT bingo_coins FROM users WHERE id=" + accounts[1].id)[0].bingo_coins), 480,
+  'a different key must not bypass the one-entry-per-event rule');
+
 console.log('Pages + Worker API integration passed: independent authenticated accounts, spoofed identity rejection, idempotent purchases, five-card cap, read-only GET, 150s CI deadline, queued rounds, one-playing invariant, alarm-driven game completion, exact 10/75/15 finance, and exactly-once one-player refund.');
