@@ -59,6 +59,10 @@ assert.match(app,/headers:\{'Idempotency-Key':idempotencyKey\}/,'tournament regi
 assert.match(app,/clearTournamentEntryIdempotencyKey\(tournamentType\)/,'successful tournament registration must clear its pending idempotency key');
 assert.match(api,/FROM tournament_entry_idempotency WHERE user_id=\? AND idempotency_key=\?/,'tournament registration must resolve prior requests by user and idempotency key');
 assert.match(api,/NOT EXISTS \(SELECT 1 FROM tournament_entry_idempotency WHERE user_id=\? AND idempotency_key=\?\)/,'concurrent tournament retries must claim the key before charging another event');
+assert.match(api,/tournament_line_win/,'official tournament line winners must receive a BingoCoin ledger credit');
+assert.match(api,/tournament_full_win/,'official tournament full-card winners must receive a BingoCoin ledger credit');
+assert.match(api,/String\(round\.id\) \+ ':line'/,'line bonus idempotency must be scoped to a specific round');
+assert.match(api,/String\(round\.id\) \+ ':full'/,'full bonus idempotency must be scoped to a specific round');
 
 assert.match(app,/supportAdmin:renderSupportAdmin/,'the administrator support inbox must remain a registered app page');
 assert.match(app,/walletAdmin:renderWalletAdmin/,'the finance admin panel must remain a registered app page');
