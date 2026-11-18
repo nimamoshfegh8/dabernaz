@@ -100,6 +100,33 @@ const emailList = accounts.map(account => sqlString(account.email)).join(',');
 d1("UPDATE users SET balance=" + startingBalance + " WHERE email IN (" + emailList + ");");
 for (const account of accounts) assert.equal(Number((await me(account)).balance), startingBalance);
 
+const rateSince = Math.floor(Date.now() / 1000) - 600;
+const rateEmail = sqlString(accounts[0].email);
+const rateState = d1("SELECT " +
+  "(SELECT COUNT(*) FROM auth_attempts WHERE email=" + rateEmail + " AND attempted_at>" + rateSince + ") AS email_count," +
+  "(SELECT ip FROM auth_attempts WHERE email=" + rateEmail + " ORDER BY attempted_at DESC LIMIT 1) AS test_ip," +
+  "(SELECT COUNT(*) FROM auth_attempts WHERE ip=(SELECT ip FROM auth_attempts WHERE email=" + rateEmail + " ORDER BY attempted_at DESC LIMIT 1) AND email=" + rateEmail + " AND attempted_at>" + rateSince + ") AS pair_count," +
+  "(SELECT COUNT(*) FROM auth_attempts WHERE ip=(SELECT ip FROM auth_attempts WHERE email=" + rateEmail + " ORDER BY attempted_at DESC LIMIT 1) AND attempted_at>" + rateSince + ") AS ip_count")[0];
+const rateAllowed = Math.max(0, Math.min(
+  20,
+  10 - Number(rateState.email_count || 0),
+  10 - Number(rateState.pair_count || 0),
+  30 - Number(rateState.ip_count || 0)
+));
+const concurrentAuthAttempts = await Promise.all(Array.from({ length: 20 }, () => raw('/api/auth/register', {
+  method: 'POST',
+  body: { name: 'Rate Limit Duplicate', email: accounts[0].email, password }
+})));
+assert.ok(concurrentAuthAttempts.every(item => [409, 429].includes(item.response.status)),
+  'concurrent duplicate registrations must be either rejected as existing accounts or rate-limited');
+assert.equal(concurrentAuthAttempts.filter(item => item.response.status === 409).length, rateAllowed,
+  'atomic rate limiter must admit only the remaining attempts below all thresholds');
+assert.equal(concurrentAuthAttempts.filter(item => item.response.status === 429).length, 20 - rateAllowed,
+  'concurrent authentication attempts beyond the thresholds must receive HTTP 429');
+const rateCountAfter = Number(d1("SELECT COUNT(*) AS n FROM auth_attempts WHERE email=" + rateEmail + " AND attempted_at>" + rateSince)[0].n);
+assert.equal(rateCountAfter, Number(rateState.email_count || 0) + rateAllowed,
+  'only admitted authentication attempts may be recorded');
+
 // No session and an unconfirmed request must never charge or create a purchase.
 await expect('/api/rooms/room5000/join', 401, {
   method: 'POST', key: randomUUID(), body: { cardsCount: 1, purchaseConfirmed: true }
