@@ -1011,6 +1011,38 @@ async function scoreTournamentRound(db, eventId, round, tournamentType) {
     }
     if (statements.length) await db.batch(statements);
   }
+
+  // Official line/full winners receive the configured BingoCoin bonuses.
+  // The immutable ledger reference is unique per round, winner and reward type,
+  // so retries after a scheduler restart cannot credit the same bonus twice.
+  const bonusStatements = [];
+  const lineWinnerIds = [...new Set(parseTournamentArray(round.line_winner_ids_json).map(Number))]
+    .filter((id) => Number.isSafeInteger(id) && id > 0);
+  const fullWinnerIds = [...new Set(parseTournamentArray(round.full_winner_ids_json).map(Number))]
+    .filter((id) => Number.isSafeInteger(id) && id > 0);
+  for (const userId of lineWinnerIds) {
+    const referenceId = String(round.id) + ':line';
+    bonusStatements.push(
+      db.prepare("INSERT OR IGNORE INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) VALUES(?,?,'bingo_coin',1,'tournament_line_win','tournament_round',?,?)")
+        .bind(randomToken(16), userId, referenceId, Date.now()),
+      db.prepare("UPDATE users SET bingo_coins=bingo_coins+1 WHERE id=? AND changes()=1")
+        .bind(userId),
+      db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',1,?,? WHERE changes()=1")
+        .bind(userId, 'پاداش یک BingoCoin برای برنده خطی تورنومنت', nowText)
+    );
+  }
+  for (const userId of fullWinnerIds) {
+    const referenceId = String(round.id) + ':full';
+    bonusStatements.push(
+      db.prepare("INSERT OR IGNORE INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) VALUES(?,?,'bingo_coin',2,'tournament_full_win','tournament_round',?,?)")
+        .bind(randomToken(16), userId, referenceId, Date.now()),
+      db.prepare("UPDATE users SET bingo_coins=bingo_coins+2 WHERE id=? AND changes()=1")
+        .bind(userId),
+      db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',2,?,? WHERE changes()=1")
+        .bind(userId, 'پاداش دو BingoCoin برای برنده کامل تورنومنت', nowText)
+    );
+  }
+  if (bonusStatements.length) await db.batch(bonusStatements);
 }
 
 async function advanceTournamentRound(db, round, nowMs) {
