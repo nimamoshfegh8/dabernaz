@@ -1596,6 +1596,7 @@ async function routeRequest(request, env) {
         schema: 'unknown',
         roomCoordinator: { available: false },
         walletRequests: { idempotency: false },
+        tournamentEntries: { idempotency: false },
         readiness: 'misconfigured',
         mode: 'misconfigured',
       }, 503);
@@ -1612,10 +1613,16 @@ async function routeRequest(request, env) {
         await env.DB.prepare('SELECT 1 FROM wallet_request_idempotency LIMIT 1').first();
         walletIdempotencyAvailable = true;
       } catch (_) {}
-      const readiness = roomCoordinatorAvailable && walletIdempotencyAvailable ? 'ready' : 'degraded';
+      let tournamentIdempotencyAvailable = false;
+      try {
+        await env.DB.prepare('SELECT 1 FROM tournament_entry_idempotency LIMIT 1').first();
+        tournamentIdempotencyAvailable = true;
+      } catch (_) {}
+      const readiness = roomCoordinatorAvailable && walletIdempotencyAvailable && tournamentIdempotencyAvailable ? 'ready' : 'degraded';
       const unavailableFeatures = [];
       if (!roomCoordinatorAvailable) unavailableFeatures.push('paid_rooms');
       if (!walletIdempotencyAvailable) unavailableFeatures.push('wallet_request_submission');
+      if (!tournamentIdempotencyAvailable) unavailableFeatures.push('tournament_entry_idempotency');
       return json({
         ok: true,
         service: 'dabernaz',
@@ -1631,6 +1638,10 @@ async function routeRequest(request, env) {
           idempotency: walletIdempotencyAvailable,
           migration: walletIdempotencyAvailable ? 2 : null,
         },
+        tournamentEntries: {
+          idempotency: tournamentIdempotencyAvailable,
+          migration: tournamentIdempotencyAvailable ? 3 : null,
+        },
         readiness,
         mode: readiness,
         unavailableFeatures,
@@ -1645,6 +1656,7 @@ async function routeRequest(request, env) {
         schema: 'unknown',
         roomCoordinator: { available: typeof env.ROOM_COORDINATOR?.fetch === 'function' },
         walletRequests: { idempotency: false },
+        tournamentEntries: { idempotency: false },
         readiness: 'degraded',
         mode: 'degraded',
         error: message,
