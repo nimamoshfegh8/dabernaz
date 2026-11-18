@@ -193,7 +193,7 @@ async function applyLocalMigrationsAndSeed() {
   await writeFile(tempSql, seed, "utf8");
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", tempSql]);
-  const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910021");
+  const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910022");
   assert.equal(Number(users.count), 22, "Twenty-two isolated synthetic test users must be seeded");
   const schema = one("SELECT MAX(version) AS version FROM schema_migrations");
   assert.equal(Number(schema.version), 1, "Both versioned D1 migrations must be applied locally");
