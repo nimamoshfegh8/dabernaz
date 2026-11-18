@@ -21,7 +21,7 @@
 - دستور Build: `npm run build:pages`.
 - پوشه خروجی: `dist`.
 - Binding فعلی D1 با نام `DB` به دیتابیس آزمایشی `dabernaz-preview` وصل است.
-- Migrationهای نسخه 0 و 1 روی همین D1 آزمایشی ثبت و راستی‌آزمایی شده‌اند.
+- Migrationهای نسخه 0 تا 3 روی همین D1 آزمایشی ثبت و راستی‌آزمایی شده‌اند.
 - Worker هماهنگ‌کننده هنوز در حساب Cloudflare Deploy نشده است.
 - Namespace مربوط به Durable Object در حساب Cloudflare ایجاد نشده است.
 - Pages Service Binding به نام `ROOM_COORDINATOR` در تنظیمات Preview وجود ندارد.
@@ -36,8 +36,10 @@ Migrationهای اجراشده فقط روی D1 آزمایشی:
 
 - `migrations/0000_core_schema.sql` — ثبت Schema پایه و جدول‌های سازگار با پروژه.
 - `migrations/0001_room_rounds_financial_queue.sql` — دورهای مستقل، خرید یکتا، کارت‌ها، بازپرداخت، جایزه، دفترکل، صف Outbox و Triggerهای جلوگیری از UPDATE/DELETE دفترکل.
+- `migrations/0002_wallet_request_idempotency.sql` — کلیدهای idempotency برای درخواست‌های کیف پول.
+- `migrations/0003_tournament_entry_idempotency.sql` — جلوگیری از ثبت‌نام تکراری تورنومنت.
 
-جدول `schema_migrations` نسخه‌های 0 و 1 را ثبت کرده است. جدول‌ها، Triggerها و ایندکس‌های اصلی بررسی شده‌اند. هیچ Migration روی D1 Production اجرا نشده است.
+جدول `schema_migrations` نسخه‌های 0، 1، 2 و 3 را ثبت کرده است. جدول‌ها، Triggerها و ایندکس‌های اصلی بررسی شده‌اند. هیچ Migration روی D1 Production اجرا نشده است.
 
 Cloudflare Export برای D1 Preview وضعیت `complete` گزارش کرده و فایل SQL را در یک بخش بارگذاری کرده است. اما دریافت فایل Export از نشانی موقت امضاشده در محیط ممیزی با HTTP 403 مسدود شد؛ بنابراین محتوای Backup به‌صورت مستقل دانلود و بررسی نشده است. همچنین `PRAGMA integrity_check` از API به علت محدودیت مجوز SQLite اجرا نشد. این محدودیت باید در گزارش‌ها صریح بماند.
 

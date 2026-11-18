@@ -127,20 +127,39 @@ while (Date.now() <= deadline) {
     }
   }
 
+  const unavailableFeatures = Array.isArray(health?.unavailableFeatures)
+    ? health.unavailableFeatures
+    : [];
+  const expectedPaidRoomsDegraded = health?.readiness === 'degraded' &&
+    health?.ok === true &&
+    health?.roomCoordinator?.available === false &&
+    unavailableFeatures.length === 1 &&
+    unavailableFeatures[0] === 'paid_rooms';
+
   const checks = {
     http200: status === 200,
     contentTypeJson: contentType.toLowerCase().includes('application/json'),
     jsonParseable: Boolean(health && typeof health === 'object'),
-    readinessReady: health?.readiness === 'ready',
+    healthOk: health?.ok === true,
+    readinessCompatible: health?.readiness === 'ready' || expectedPaidRoomsDegraded,
     schemaV3: health?.schema === 'v3',
-    roomCoordinatorAvailable: health?.roomCoordinator?.available === true,
+    roomCoordinatorStateValid: typeof health?.roomCoordinator?.available === 'boolean',
+    paidRoomsFailClosed: health?.roomCoordinator?.available === true || expectedPaidRoomsDegraded,
     walletIdempotency: health?.walletRequests?.idempotency === true,
     tournamentIdempotency: health?.tournamentEntries?.idempotency === true,
   };
 
   if (Object.values(checks).every(Boolean)) {
-    console.log('Preview health preflight passed.');
-    console.log(JSON.stringify({ ...diag, bodyPrefix: undefined, checks }, null, 2));
+    const state = expectedPaidRoomsDegraded
+      ? 'safe degraded state; paid_rooms remains disabled until the Worker binding is deployed'
+      : 'fully ready';
+    console.log('Preview health preflight passed (' + state + ').');
+    console.log(JSON.stringify({
+      ...diag,
+      bodyPrefix: undefined,
+      checks,
+      unavailableFeatures
+    }, null, 2));
     process.exit(0);
   }
 
@@ -149,7 +168,7 @@ while (Date.now() <= deadline) {
     checks,
     healthReadiness: health?.readiness,
     schema: health?.schema,
-  }, 'Preview returned a readable health payload but failed one or more mandatory readiness conditions.');
+  }, 'Preview returned a readable health payload but failed one or more mandatory core-health or fail-closed conditions.');
 }
 
 reportFailure({ url: healthURL.origin + healthURL.pathname, attempt },

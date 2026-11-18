@@ -5,6 +5,12 @@ on:
     branches:
       - test/playwright-audit
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      CF_ACCESS_CLIENT_ID:
+        required: false
+      CF_ACCESS_CLIENT_SECRET:
+        required: false
 
 permissions:
   contents: read
@@ -114,7 +120,7 @@ jobs:
       - name: Install Chromium and system dependencies
         run: npx playwright install --with-deps chromium
 
-      - name: Require a valid, fully ready Preview health response
+      - name: Require safe Preview core health; keep paid rooms fail-closed until Worker binding is deployed
         run: node scripts/preview-health-check.mjs
 
       - name: Run read-only Chromium audit against live Preview
