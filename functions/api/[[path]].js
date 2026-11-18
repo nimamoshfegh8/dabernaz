@@ -475,21 +475,26 @@ async function checkAuthRate(db, request, email) {
   const now = Math.floor(Date.now() / 1000);
   const ip = String(request.headers.get('cf-connecting-ip') || 'unknown').slice(0, 64);
   const normalizedEmail = String(email || '').trim().toLowerCase().slice(0, 190);
-  const [pairCount, ipCount, emailCount] = await Promise.all([
-    db.prepare('SELECT COUNT(*) AS n FROM auth_attempts WHERE ip=? AND email=? AND attempted_at>?')
-      .bind(ip, normalizedEmail, now - 600).first(),
-    db.prepare('SELECT COUNT(*) AS n FROM auth_attempts WHERE ip=? AND attempted_at>?')
-      .bind(ip, now - 600).first(),
-    db.prepare('SELECT COUNT(*) AS n FROM auth_attempts WHERE email=? AND attempted_at>?')
-      .bind(normalizedEmail, now - 600).first(),
-  ]);
-  if (Number(pairCount?.n || 0) >= 10 ||
-      Number(emailCount?.n || 0) >= 10 ||
-      Number(ipCount?.n || 0) >= 30) {
+
+  // Enforce all three limits inside one conditional INSERT. The former
+  // SELECT-then-INSERT sequence allowed concurrent requests to observe the
+  // same low count and all pass the threshold before any attempt was recorded.
+  const attempt = await db.prepare(
+    'INSERT INTO auth_attempts(ip,email,attempted_at) ' +
+    'SELECT ?,?,? WHERE ' +
+    '(SELECT COUNT(*) FROM auth_attempts WHERE ip=? AND email=? AND attempted_at>?) < 10 ' +
+    'AND (SELECT COUNT(*) FROM auth_attempts WHERE email=? AND attempted_at>?) < 10 ' +
+    'AND (SELECT COUNT(*) FROM auth_attempts WHERE ip=? AND attempted_at>?) < 30'
+  ).bind(
+    ip, normalizedEmail, now,
+    ip, normalizedEmail, now - 600,
+    normalizedEmail, now - 600,
+    ip, now - 600
+  ).run();
+  if (Number(attempt?.meta?.changes || 0) !== 1) {
     throw new HttpError(429, 'تعداد تلاش‌ها زیاد است. ده دقیقه بعد دوباره تلاش کن.');
   }
-  await db.prepare('INSERT INTO auth_attempts (ip, email, attempted_at) VALUES (?, ?, ?)')
-    .bind(ip, normalizedEmail, now).run();
+
   await db.prepare('DELETE FROM auth_attempts WHERE attempted_at < ?').bind(now - 3600).run();
   return { ip, email:normalizedEmail };
 }
