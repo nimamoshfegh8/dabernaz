@@ -6,6 +6,18 @@ if (!baseURL.startsWith('http://') && !baseURL.startsWith('https://')) {
   throw new Error('PLAYWRIGHT_BASE_URL must be an http(s) URL.');
 }
 
+const accessHeaders = {};
+const accessClientId = process.env.CF_ACCESS_CLIENT_ID || '';
+const accessClientSecret = process.env.CF_ACCESS_CLIENT_SECRET || '';
+if (accessClientId && accessClientSecret) {
+  accessHeaders['CF-Access-Client-Id'] = accessClientId;
+  accessHeaders['CF-Access-Client-Secret'] = accessClientSecret;
+}
+
+const traceMode = process.env.PLAYWRIGHT_TRACE === 'off'
+  ? 'off'
+  : 'retain-on-failure';
+
 module.exports = defineConfig({
   testDir: './tests/playwright',
   testMatch: '**/*.spec.js',
@@ -23,8 +35,9 @@ module.exports = defineConfig({
   use: {
     baseURL,
     browserName: 'chromium',
+    extraHTTPHeaders: accessHeaders,
     screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    trace: traceMode,
     actionTimeout: 10_000,
     navigationTimeout: 20_000
   },
