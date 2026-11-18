@@ -35,9 +35,9 @@ export async function onRequestGet({ env }) {
     const schemaVersion = Number(migration?.version);
     const required = await env.DB.prepare(
       "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN " +
-      "('users','auth_sessions','transactions','room_rounds','room_purchases','room_outbox','financial_ledger','referral_reward_claims','wallet_adjustment_requests','tournament_entry_idempotency')"
+      "('users','auth_sessions','transactions','room_rounds','room_purchases','room_outbox','financial_ledger','referral_reward_claims','wallet_adjustment_requests','wallet_request_idempotency','tournament_entry_idempotency')"
     ).first();
-    if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 3 || Number(required?.total) !== 10) {
+    if (!Number.isSafeInteger(schemaVersion) || schemaVersion < 3 || Number(required?.total) !== 11) {
       return jsonResponse({
         ok: false,
         service: 'dabernaz',
