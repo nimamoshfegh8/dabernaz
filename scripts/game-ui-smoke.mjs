@@ -85,8 +85,9 @@ assert.ok(api.includes("r.user_note"),'the finance admin inbox must receive the 
 assert.ok(api.includes("VALUES(?,'user',?,?)"),'customer messages must be stored as customer messages');
 assert.ok(api.includes("VALUES(?,'admin',?,?)"),'admin replies must be stored as admin messages');
 assert.ok(!api.includes('SELECT id,request_type,amount,status,receipt_mime,card_number,card_holder,bank_name'),'user wallet requests must not return card details');
-assert.ok(app.includes("const safeState = { ...state, walletPaymentInfo:{cardNumber:'',cardHolder:'',bankName:'',paymentNote:''} }"),'finance destination card details must never be persisted in browser localStorage');
-assert.match(app,/walletPaymentInfo: \{cardNumber:'',cardHolder:'',bankName:'',paymentNote:''\}/,'old stored finance card details must be cleared when local state is loaded');
+assert.match(app,/JSON\.stringify\(\{ settings: \{ \.\.\.state\.settings \} \}\)/,'browser storage must persist only non-sensitive user preferences');
+assert.match(app,/localStorage\.setItem\(STORAGE_KEY, JSON\.stringify\(\{ settings \}\)\)/,'legacy localStorage records must be sanitized immediately on startup');
+assert.doesNotMatch(app,/JSON\.stringify\(\{ \.\.\.state/,'account state must never be serialized wholesale into browser storage');
 assert.doesNotMatch(app,/شارژ آنلاین و برداشت پول تا اتصال درگاه پرداخت غیرفعال است|شارژ و برداشت واقعی کیف پول تا اتصال درگاه پرداخت فعال نیست/,'help text must not contradict the manual wallet request workflow');
 assert.match(app,/واریز و برداشت تومانی کیف پول به‌صورت دستی و با بررسی مدیریت انجام می‌شود/,'help text must describe the current manual deposit and withdrawal process');
 console.log('Game-room, mini-game, support, admin portal and wallet request center UI smoke tests passed.');
