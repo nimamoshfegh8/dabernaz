@@ -285,8 +285,8 @@ async function main() {
     "The solo account must own exactly one matching room purchase");
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM financial_ledger WHERE user_id=" + soloUserId + " AND operation='room_refund' AND reference_type='room_purchase' AND reference_id='" + soloPurchaseId + "'").count), 1,
     "Exactly one append-only refund ledger entry must exist");
-  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE user_id=" + soloUserId + " AND type='room_refund' AND description LIKE '%" + soloPurchaseId + "%'").count), 1,
-    "Exactly one refund transaction must exist");
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE user_id=" + soloUserId + " AND type='room_refund' AND amount=20000 AND description=(SELECT 'بازپرداخت کامل دور تک‌نفره ' || round_id FROM room_refunds WHERE purchase_id='" + soloPurchaseId + "')").count), 1,
+    "Exactly one refund transaction linked to the refunded round must exist");
 
   // A five-card purchase is valid, retries with the same key are replayed, a
   // changed payload is rejected, and a sixth card in that round is rejected.
