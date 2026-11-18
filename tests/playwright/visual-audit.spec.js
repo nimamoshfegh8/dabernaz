@@ -225,6 +225,7 @@ test('API health accurately reports D1 schema and room coordinator readiness', a
     expect(typeof body.roomCoordinator?.available).toBe('boolean');
     expect(typeof body.walletRequests?.idempotency).toBe('boolean');
     expect(body.walletRequests.idempotency).toBe(true);
+    expect(body.tournamentEntries?.idempotency).toBe(true);
     expect(['ready', 'degraded']).toContain(body.readiness);
     if (!body.roomCoordinator.available) {
       expect(body.readiness).toBe('degraded');
