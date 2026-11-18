@@ -35,8 +35,8 @@ assert.match(app, /queue\.status === 'finished'[\s\S]*?data-action="room-next-se
   'a finished room must open the next session without buying a card');
 assert.match(app, /queue\.status === 'finished'[\s\S]*?ورود رایگان به سانس بعدی/,
   'the finished-room action must be clearly described as free entry');
-const purchaseAction = app.match(/const purchaseAction =([\\s\\S]*?)const waitingMessage =/)?.[1] || '';
-const finishedAction = purchaseAction.match(/queue\\.status === 'finished'\\s*\\?([\\s\\S]*?)(?::\\s*joined && waiting)/)?.[1] || '';
+const purchaseAction = app.match(/const purchaseAction =([\s\S]*?)const waitingMessage =/)?.[1] || '';
+const finishedAction = purchaseAction.match(/queue\.status === 'finished'\s*\?([\s\S]*?)(?::\s*joined && waiting)/)?.[1] || '';
 assert.match(finishedAction,/data-action="room-next-session"/,
   'a finished room must expose the free next-session action');
 assert.doesNotMatch(finishedAction,/room-join-auto/,
