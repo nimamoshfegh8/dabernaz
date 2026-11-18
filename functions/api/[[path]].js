@@ -1306,12 +1306,51 @@ async function publicTournamentSnapshots(db) {
   return rooms;
 }
 
+async function findTournamentRegistrationReplay(db, userId, idempotencyKey, requestHash) {
+  let claim;
+  try {
+    claim = await db.prepare(
+      'SELECT request_hash,event_id,entry_id FROM tournament_entry_idempotency WHERE user_id=? AND idempotency_key=?'
+    ).bind(userId, idempotencyKey).first();
+  } catch (_) {
+    throw new HttpError(503, 'ساختار Idempotency تورنومنت آماده نیست؛ Migration شماره ۳ لازم است.');
+  }
+  if (!claim) return null;
+  if (String(claim.request_hash) !== requestHash) {
+    throw new HttpError(409, 'این کلید یکتا قبلاً برای درخواست تورنومنت متفاوتی استفاده شده است.');
+  }
+  const [event, entry, user] = await Promise.all([
+    db.prepare('SELECT id,tournament_type FROM tournament_events WHERE id=?').bind(claim.event_id).first(),
+    db.prepare('SELECT id,event_id,user_id FROM tournament_event_entries WHERE id=? AND event_id=? AND user_id=?')
+      .bind(claim.entry_id, claim.event_id, userId).first(),
+    db.prepare('SELECT * FROM users WHERE id=?').bind(userId).first()
+  ]);
+  if (!event || !entry || !user) {
+    throw new HttpError(503, 'ثبت‌نام تورنومنت در وضعیت بازیابی است؛ اطلاعات مرجع را دوباره بررسی کن.');
+  }
+  return {
+    ok: true,
+    event_id: event.id,
+    tournament: event.tournament_type,
+    user: await publicUser(db, user),
+    replayed: true
+  };
+}
+
 async function registerRecurringTournament(db, user, request) {
   validateWriteOrigin(request);
   const body = await readJson(request);
   const type = String(body.type || "");
   const cost = tournamentCost(type);
   if (!cost) throw new HttpError(400, "نوع تورنومنت معتبر نیست.");
+  const idempotencyKey = String(request.headers.get('idempotency-key') || '');
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+    throw new HttpError(400, 'کلید یکتای ثبت‌نام تورنومنت معتبر نیست.');
+  }
+  const requestHash = await sha256Hex(JSON.stringify({ type, cost }));
+  const replay = await findTournamentRegistrationReplay(db, user.id, idempotencyKey, requestHash);
+  if (replay) return json(replay);
+
   await advanceTournamentSystem(db, Date.now(), false);
   const nowText = new Date().toISOString();
   const event = await db.prepare("SELECT * FROM tournament_events WHERE tournament_type=? AND status='registration' AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1")
@@ -1319,12 +1358,14 @@ async function registerRecurringTournament(db, user, request) {
   if (!event) throw new HttpError(409, "ثبت‌نام این دوره در حال حاضر باز نیست.");
 
   const result = await db.batch([
-    db.prepare("UPDATE tournament_events SET registered_count=registered_count+1,prize_pool=prize_pool+?,updated_at=? WHERE id=? AND status='registration' AND registered_count<capacity AND scheduled_at>? AND EXISTS (SELECT 1 FROM users WHERE id=? AND bingo_coins>=?) AND NOT EXISTS (SELECT 1 FROM tournament_event_entries WHERE event_id=? AND user_id=?)")
-      .bind(cost, nowText, event.id, nowText, user.id, cost, event.id, user.id),
+    db.prepare("UPDATE tournament_events SET registered_count=registered_count+1,prize_pool=prize_pool+?,updated_at=? WHERE id=? AND status='registration' AND registered_count<capacity AND scheduled_at>? AND EXISTS (SELECT 1 FROM users WHERE id=? AND bingo_coins>=?) AND NOT EXISTS (SELECT 1 FROM tournament_event_entries WHERE event_id=? AND user_id=?) AND NOT EXISTS (SELECT 1 FROM tournament_entry_idempotency WHERE user_id=? AND idempotency_key=?)")
+      .bind(cost, nowText, event.id, nowText, user.id, cost, event.id, user.id, user.id, idempotencyKey),
     db.prepare("UPDATE users SET bingo_coins=bingo_coins-? WHERE id=? AND changes()=1")
       .bind(cost, user.id),
     db.prepare("INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,created_at) SELECT ?,?,?,'registered',? WHERE changes()=1")
       .bind(event.id, user.id, cost, nowText),
+    db.prepare("INSERT INTO tournament_entry_idempotency (user_id,idempotency_key,request_hash,event_id,entry_id,created_at) SELECT ?,?,?,?,last_insert_rowid(),? WHERE changes()=1")
+      .bind(user.id, idempotencyKey, requestHash, event.id, Date.now()),
     db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
       .bind(user.id, -cost, "ورود به " + tournamentTitle(type), nowText),
     db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',?,'tournament_entry','tournament_entry',?,? WHERE changes()=1")
@@ -1332,6 +1373,8 @@ async function registerRecurringTournament(db, user, request) {
   ]);
 
   if (!Number(result[0] && result[0].meta && result[0].meta.changes || 0)) {
+    const replayAfterRace = await findTournamentRegistrationReplay(db, user.id, idempotencyKey, requestHash);
+    if (replayAfterRace) return json(replayAfterRace);
     const existing = await db.prepare("SELECT id FROM tournament_event_entries WHERE event_id=? AND user_id=?").bind(event.id, user.id).first();
     if (existing) throw new HttpError(409, "برای این دوره قبلاً ثبت‌نام کرده‌ای.");
     const freshEvent = await db.prepare("SELECT registered_count,capacity FROM tournament_events WHERE id=?").bind(event.id).first();
@@ -1343,7 +1386,7 @@ async function registerRecurringTournament(db, user, request) {
     throw new HttpError(409, "مهلت ثبت‌نام این دوره به پایان رسیده است.");
   }
   const updated = await db.prepare("SELECT * FROM users WHERE id=?").bind(user.id).first();
-  return json({ ok: true, event_id: event.id, tournament: type, user: await publicUser(db, updated) });
+  return json({ ok: true, event_id: event.id, tournament: type, user: await publicUser(db, updated), replayed: false });
 }
 
 async function myRecurringTournamentData(db, userId) {
