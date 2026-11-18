@@ -1,0 +1,27 @@
+# Default-branch registration entry point. Canonical test logic stays on test/playwright-audit.
+name: Dabernaz read-only Playwright visual audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  require-audit-branch:
+    if: github.ref != 'refs/heads/test/playwright-audit'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the dedicated audit branch
+        run: |
+          echo "::error::Select test/playwright-audit in the Branch dropdown. The canonical Playwright audit runs from that branch."
+          exit 1
+
+  run-canonical-audit:
+    if: github.ref == 'refs/heads/test/playwright-audit'
+    uses: nimamoshfegh8/dabernaz/.github/workflows/playwright-audit.yml@test/playwright-audit
+    permissions:
+      contents: read
+    secrets:
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
