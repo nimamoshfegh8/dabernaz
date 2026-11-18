@@ -116,9 +116,9 @@ async function assertSchemaReady(db) {
       throw new HttpError(503, 'ساختار پایگاه داده هنوز به نسخه موردنیاز ارتقا نیافته است.');
     }
     const required = await db.prepare(
-      "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN ('users','auth_sessions','transactions','room_rounds','room_purchases','room_outbox','financial_ledger','referral_reward_claims','wallet_adjustment_requests','tournament_entry_idempotency')"
+      "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN ('users','auth_sessions','transactions','room_rounds','room_purchases','room_outbox','financial_ledger','referral_reward_claims','wallet_adjustment_requests','wallet_request_idempotency','tournament_entry_idempotency')"
     ).first();
-    if (Number(required?.total) !== 10) {
+    if (Number(required?.total) !== 11) {
       throw new HttpError(503, 'بخشی از ساختار پایگاه داده ناقص است؛ اجرای Migration لازم است.');
     }
     bootstrappedBindings.add(db);
