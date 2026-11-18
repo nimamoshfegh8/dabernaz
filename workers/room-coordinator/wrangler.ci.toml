@@ -6,7 +6,7 @@ workers_dev = false
 [[d1_databases]]
 binding = "DB"
 database_name = "dabernaz-local-ci"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "00000000000000000000000000000000"
 
 [[durable_objects.bindings]]
 name = "ROOMS"
