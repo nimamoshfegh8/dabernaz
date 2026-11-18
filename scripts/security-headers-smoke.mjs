@@ -18,8 +18,12 @@ for (const directive of [
   "connect-src 'self' https://api.github.com",
   "upgrade-insecure-requests"
 ]) assert.ok(csp.includes(directive), 'CSP missing ' + directive);
-assert.doesNotMatch(csp, /unsafe-eval|script-src[^\n]*unsafe-inline/,
-  'scripts and eval must not be relaxed by CSP');
+const scriptSrc = csp.split(';').map(value => value.trim()).find(value => value.startsWith('script-src')) || '';
+assert.ok(scriptSrc, 'CSP must define script-src explicitly');
+assert.doesNotMatch(scriptSrc, /unsafe-inline|unsafe-eval/,
+  'script execution must not allow inline scripts or eval');
+assert.doesNotMatch(csp, /unsafe-eval/,
+  'CSP must not enable eval in any directive');
 assert.match(headers, /X-Content-Type-Options: nosniff/);
 assert.match(headers, /X-Frame-Options: DENY/);
 assert.match(headers, /Referrer-Policy: strict-origin-when-cross-origin/);
