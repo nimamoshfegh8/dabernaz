@@ -14,15 +14,49 @@ const password = 'Pages-Room-QA-2026!';
 const startingBalance = 500000;
 
 function d1(sql) {
-  const output = execFileSync('npx', [
+  const args = [
     'wrangler', 'd1', 'execute', database,
     '--config', config, '--local', '--persist-to', persist, '--json', '--command', sql
-  ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 8 * 1024 * 1024 });
-  const parsed = JSON.parse(output.trim());
-  const statements = Array.isArray(parsed) ? parsed : [parsed];
-  const failed = statements.find(item => item?.success === false);
-  if (failed) throw new Error('D1 query failed: ' + JSON.stringify(failed));
-  return statements.flatMap(item => item?.results || item?.result?.results || []);
+  ];
+  const waitCell = new Int32Array(new SharedArrayBuffer(4));
+  let lastError;
+  for (let attempt = 0; attempt < 9; attempt++) {
+    try {
+      const output = execFileSync('npx', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        maxBuffer: 8 * 1024 * 1024
+      });
+      const parsed = JSON.parse(output.trim());
+      const statements = Array.isArray(parsed) ? parsed : [parsed];
+      const failed = statements.find(item => item?.success === false);
+      if (failed) {
+        const detail = JSON.stringify(failed);
+        if (!/SQLITE_BUSY|SQLITE_LOCKED|database is locked/i.test(detail)) {
+          throw new Error('D1 query failed: ' + detail);
+        }
+        lastError = new Error('D1 is temporarily locked: ' + detail);
+      } else {
+        return statements.flatMap(item => item?.results || item?.result?.results || []);
+      }
+    } catch (error) {
+      const detail = [
+        error?.message,
+        error?.stdout?.toString?.(),
+        error?.stderr?.toString?.()
+      ].filter(Boolean).join(' ');
+      if (!/SQLITE_BUSY|SQLITE_LOCKED|database is locked/i.test(detail)) throw error;
+      lastError = error;
+    }
+    if (attempt < 8) {
+      const backoffMs = Math.min(250 * (2 ** attempt), 3000);
+      Atomics.wait(waitCell, 0, 0, backoffMs);
+    }
+  }
+  throw new Error(
+    'D1 remained locked after 9 bounded attempts; refusing to skip the database assertion. ' +
+    (lastError?.message || String(lastError || 'unknown D1 lock error'))
+  );
 }
 function sqlString(value) {
   return "'" + String(value).replace(/'/g, "''") + "'";
