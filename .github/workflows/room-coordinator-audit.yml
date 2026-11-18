@@ -276,15 +276,17 @@ jobs:
           archive="dabernaz-source-${GITHUB_SHA}.zip"
           git archive --format=zip --output="$RUNNER_TEMP/$archive" "$GITHUB_SHA"
           unzip -t "$RUNNER_TEMP/$archive"
-          sha256sum "$RUNNER_TEMP/$archive" | tee "$RUNNER_TEMP/$archive.sha256"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$archive" | tee "$archive.sha256"
+            sha256sum -c "$archive.sha256"
+          )
           {
             echo "### Source package"
-            echo "- Commit: `$GITHUB_SHA`"
-            echo "- ZIP: `$archive`"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- ZIP: $archive"
             echo "- SHA-256:"
-            echo "```"
-            sha256sum "$RUNNER_TEMP/$archive"
-            echo "```"
+            cat "$RUNNER_TEMP/$archive.sha256"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload source ZIP and checksum
