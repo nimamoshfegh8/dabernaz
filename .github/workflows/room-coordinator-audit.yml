@@ -200,8 +200,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Wrangler Pages currently only accepts its config at the repository root.
+          cp wrangler.pages.ci.toml wrangler.toml
           npx wrangler pages dev dist \
-            --config "$WRANGLER_CONFIG" \
             --service ROOM_COORDINATOR=dabernaz-room-coordinator-local-ci \
             --ip 127.0.0.1 --port 8788 \
             --persist-to "$WRANGLER_PERSIST" \
