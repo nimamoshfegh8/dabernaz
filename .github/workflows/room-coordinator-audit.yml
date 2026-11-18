@@ -255,3 +255,44 @@ jobs:
             ${{ runner.temp }}/dabernaz-room-worker.log
           if-no-files-found: warn
           retention-days: 14
+
+  source-package:
+    name: Package source branch and calculate SHA-256
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact audit commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Create and verify source-only ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="dabernaz-source-${GITHUB_SHA}.zip"
+          git archive --format=zip --output="$RUNNER_TEMP/$archive" "$GITHUB_SHA"
+          unzip -t "$RUNNER_TEMP/$archive"
+          sha256sum "$RUNNER_TEMP/$archive" | tee "$RUNNER_TEMP/$archive.sha256"
+          {
+            echo "### Source package"
+            echo "- Commit: `$GITHUB_SHA`"
+            echo "- ZIP: `$archive`"
+            echo "- SHA-256:"
+            echo "```"
+            sha256sum "$RUNNER_TEMP/$archive"
+            echo "```"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload source ZIP and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-source-release-candidate
+          path: |
+            ${{ runner.temp }}/dabernaz-source-${{ github.sha }}.zip
+            ${{ runner.temp }}/dabernaz-source-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
