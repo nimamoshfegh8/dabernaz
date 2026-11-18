@@ -144,12 +144,12 @@ while (Date.now() <= deadline) {
     process.exit(0);
   }
 
-  if (Date.now() + 2_000 > deadline) {
-    reportFailure({ ...diag, checks, healthReadiness: health?.readiness, schema: health?.schema },
-      'Preview did not satisfy every mandatory readiness condition.');
-  }
-
-  await sleep(2_000);
+  reportFailure({
+    ...diag,
+    checks,
+    healthReadiness: health?.readiness,
+    schema: health?.schema,
+  }, 'Preview returned a readable health payload but failed one or more mandatory readiness conditions.');
 }
 
 reportFailure({ url: healthURL.origin + healthURL.pathname, attempt },
