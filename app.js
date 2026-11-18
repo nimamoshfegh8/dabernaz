@@ -587,6 +587,33 @@ function clearWalletRequestIdempotencyKey() {
   walletRequestKeyFallback = '';
   try { window.sessionStorage.removeItem(WALLET_REQUEST_KEY_STORAGE); } catch (_) {}
 }
+
+const TOURNAMENT_ENTRY_KEY_PREFIX = 'dabernaz_tournament_entry_attempt_v1:';
+const tournamentEntryKeyFallback = new Map();
+function getTournamentEntryIdempotencyKey(type) {
+  const tournamentType = String(type || '');
+  if (!['simple','bingo'].includes(tournamentType)) throw new Error('نوع تورنومنت معتبر نیست.');
+  if (tournamentEntryKeyFallback.has(tournamentType)) return tournamentEntryKeyFallback.get(tournamentType);
+  const storageKey = TOURNAMENT_ENTRY_KEY_PREFIX + tournamentType;
+  try {
+    const existing = window.localStorage.getItem(storageKey);
+    if (/^[A-Za-z0-9._:-]{16,128}$/.test(existing || '')) {
+      tournamentEntryKeyFallback.set(tournamentType, existing);
+      return existing;
+    }
+  } catch (_) {}
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const key = 'tournament.' + Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  tournamentEntryKeyFallback.set(tournamentType, key);
+  try { window.localStorage.setItem(storageKey, key); } catch (_) {}
+  return key;
+}
+function clearTournamentEntryIdempotencyKey(type) {
+  const tournamentType = String(type || '');
+  tournamentEntryKeyFallback.delete(tournamentType);
+  try { window.localStorage.removeItem(TOURNAMENT_ENTRY_KEY_PREFIX + tournamentType); } catch (_) {}
+}
 async function apiRequest(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const requestOptions = {
@@ -2152,8 +2179,10 @@ document.addEventListener('click', async event => {
   else if (action === 'join-tournament') {
     if(!requireLogin() || actionEl.disabled) return;
     actionEl.disabled=true;
-    apiRequest('/api/tournaments/register',{method:'POST',body:JSON.stringify({type:actionEl.dataset.tournament})})
-      .then(async result=>{ applyAuthenticatedUser(result.user); await loadAuthenticatedUser(); showToast('ثبت‌نام تورنومنت با موفقیت انجام شد.'); })
+    const tournamentType = actionEl.dataset.tournament;
+    const idempotencyKey = getTournamentEntryIdempotencyKey(tournamentType);
+    apiRequest('/api/tournaments/register',{method:'POST',headers:{'Idempotency-Key':idempotencyKey},body:JSON.stringify({type:tournamentType})})
+      .then(async result=>{ clearTournamentEntryIdempotencyKey(tournamentType); applyAuthenticatedUser(result.user); await loadAuthenticatedUser(); showToast('ثبت‌نام تورنومنت با موفقیت انجام شد.'); })
       .catch(error=>showToast(error.message))
       .finally(()=>{ if(actionEl.isConnected) actionEl.disabled=false; });
   } else if (action === 'faq') actionEl.parentElement.classList.toggle('open');
