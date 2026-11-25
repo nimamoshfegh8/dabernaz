@@ -14,30 +14,17 @@ const defaultState = {
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
-    if (!saved || typeof saved !== 'object') return cloneData(defaultState);
-    return {
-      ...cloneData(defaultState), ...saved,
-      // Payment card settings are server-owned secrets: never hydrate them from browser storage.
-      walletPaymentInfo: {cardNumber:'',cardHolder:'',bankName:'',paymentNote:''},
-      balance: Number.isFinite(Number(saved.balance)) ? Math.max(0, Number(saved.balance)) : defaultState.balance,
-      joined: Array.isArray(saved.joined) ? saved.joined : [],
-      transactions: Array.isArray(saved.transactions) ? saved.transactions.slice(0, 30) : [],
-      bingoCoins: Number.isFinite(Number(saved.bingoCoins)) ? Math.max(0, Math.floor(Number(saved.bingoCoins))) : 0,
-      coinTransactions: Array.isArray(saved.coinTransactions) ? saved.coinTransactions.slice(0, 50) : [],
-      inviteCount: Number.isFinite(Number(saved.inviteCount)) ? Math.max(0, Math.floor(Number(saved.inviteCount))) : 0,
-      inviteRewardMilestones: Array.isArray(saved.inviteRewardMilestones) ? saved.inviteRewardMilestones : [],
-      roomHistory: Array.isArray(saved.roomHistory) ? saved.roomHistory.slice(0,12) : [],
-      supportTickets: Array.isArray(saved.supportTickets) ? saved.supportTickets.slice(0,20) : [],
-      tournamentRooms: Array.isArray(saved.tournamentRooms) ? saved.tournamentRooms.slice(0,12) : [],
-      tournamentEntries: Array.isArray(saved.tournamentEntries) ? saved.tournamentEntries.slice(0,30) : [],
-      settings: (() => {
-        const previous = saved.settings && typeof saved.settings === 'object' ? saved.settings : {};
-        const merged = { ...defaultState.settings, ...previous };
-        if (!Number.isFinite(Number(previous.voiceAudioVersion)) || Number(previous.voiceAudioVersion) < 4) merged.voiceNumbers = false;
-        merged.voiceAudioVersion = 6;
-        return merged;
-      })()
-    };
+    const previous = saved && typeof saved === 'object' && saved.settings && typeof saved.settings === 'object'
+      ? saved.settings : {};
+    const settings = { ...defaultState.settings, ...previous };
+    if (!Number.isFinite(Number(previous.voiceAudioVersion)) || Number(previous.voiceAudioVersion) < 4) {
+      settings.voiceNumbers = false;
+    }
+    settings.voiceAudioVersion = 6;
+    // Older builds stored balances, histories, tickets and wallet data locally.
+    // Rewrite the record immediately so private account data is removed at startup.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings }));
+    return { ...cloneData(defaultState), settings };
   } catch (_) { return cloneData(defaultState); }
 }
 let state = loadState();
@@ -576,10 +563,56 @@ const faDigits = value => Number(value).toLocaleString('fa-IR');
 const escapeHTML = value => String(value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 function saveState() {
   try {
-    // Never persist finance destination card details or payment notes in localStorage.
-    const safeState = { ...state, walletPaymentInfo:{cardNumber:'',cardHolder:'',bankName:'',paymentNote:''} };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeState));
+    // Only non-sensitive preferences belong in browser storage. Account identity,
+    // balances, histories, tickets, wallet requests and payment data are server-owned.
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ settings: { ...state.settings } }));
   } catch (_) { showToast('فضای ذخیره‌سازی مرورگر در دسترس نیست'); }
+}
+const WALLET_REQUEST_KEY_STORAGE = 'dabernaz_wallet_request_idempotency_v1';
+let walletRequestKeyFallback = '';
+function getWalletRequestIdempotencyKey() {
+  if (walletRequestKeyFallback) return walletRequestKeyFallback;
+  try {
+    const existing = window.sessionStorage.getItem(WALLET_REQUEST_KEY_STORAGE);
+    if (/^[A-Za-z0-9._:-]{16,128}$/.test(existing || '')) return existing;
+  } catch (_) {}
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const key = 'wallet.' + Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  walletRequestKeyFallback = key;
+  try { window.sessionStorage.setItem(WALLET_REQUEST_KEY_STORAGE, key); } catch (_) {}
+  return key;
+}
+function clearWalletRequestIdempotencyKey() {
+  walletRequestKeyFallback = '';
+  try { window.sessionStorage.removeItem(WALLET_REQUEST_KEY_STORAGE); } catch (_) {}
+}
+
+const TOURNAMENT_ENTRY_KEY_PREFIX = 'dabernaz_tournament_entry_attempt_v1:';
+const tournamentEntryKeyFallback = new Map();
+function getTournamentEntryIdempotencyKey(type) {
+  const tournamentType = String(type || '');
+  if (!['simple','bingo'].includes(tournamentType)) throw new Error('نوع تورنومنت معتبر نیست.');
+  if (tournamentEntryKeyFallback.has(tournamentType)) return tournamentEntryKeyFallback.get(tournamentType);
+  const storageKey = TOURNAMENT_ENTRY_KEY_PREFIX + tournamentType;
+  try {
+    const existing = window.localStorage.getItem(storageKey);
+    if (/^[A-Za-z0-9._:-]{16,128}$/.test(existing || '')) {
+      tournamentEntryKeyFallback.set(tournamentType, existing);
+      return existing;
+    }
+  } catch (_) {}
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const key = 'tournament.' + Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('');
+  tournamentEntryKeyFallback.set(tournamentType, key);
+  try { window.localStorage.setItem(storageKey, key); } catch (_) {}
+  return key;
+}
+function clearTournamentEntryIdempotencyKey(type) {
+  const tournamentType = String(type || '');
+  tournamentEntryKeyFallback.delete(tournamentType);
+  try { window.localStorage.removeItem(TOURNAMENT_ENTRY_KEY_PREFIX + tournamentType); } catch (_) {}
 }
 async function apiRequest(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
@@ -612,9 +645,12 @@ async function apiRequest(path, options = {}) {
   }
 
   const contentType = response.headers.get('content-type') || '';
-  // PHP fallback is only for an HTTP response indicating that the pretty API route is unavailable.
-  // A transient network error must not be mislabeled as a missing PHP/Node installation.
-  if (path.startsWith('/api/') && (!contentType.includes('application/json') || response.status === 404)) {
+  // Money, authentication, room coordination and tournament routes must never
+  // fall back to the legacy PHP backend. Those fallbacks do not share the D1
+  // transaction/DO source of truth and could duplicate or mis-handle payments.
+  const criticalApiRoute = /^\/api\/(?:rooms\/|tournaments(?:\/|$)|wallet(?:\/|$)|profile$|games\/|admin\/wallet(?:\/|$))/.test(path);
+  // PHP fallback is only for non-critical HTTP routes when the Pages route is unavailable.
+  if (!criticalApiRoute && path.startsWith('/api/') && (!contentType.includes('application/json') || response.status === 404)) {
     try {
       const fallback = await fetch(`/api.php?path=${encodeURIComponent(path)}`, requestOptions);
       if ((fallback.headers.get('content-type') || '').includes('application/json')) response = fallback;
@@ -629,6 +665,54 @@ async function apiRequest(path, options = {}) {
   apiErrorMessage = '';
   return data;
 }
+const pendingRoomPurchaseMemory = new Map();
+function getAdminAdjustmentAttempt(payload) {
+  const owner = String(currentUser?.memberId || state.memberId || 'admin');
+  const keyName = 'dabernaz:wallet-adjustment:' + owner;
+  const payloadText = JSON.stringify(payload);
+  let current = null;
+  try { current = JSON.parse(sessionStorage.getItem(keyName) || 'null'); } catch (_) {}
+  if (!current || current.payload !== payloadText ||
+      typeof current.key !== 'string' || Date.now() - Number(current.createdAt || 0) > 86400000) {
+    current = {
+      key: globalThis.crypto?.randomUUID
+        ? globalThis.crypto.randomUUID()
+        : 'wallet-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2),
+      payload: payloadText,
+      createdAt: Date.now()
+    };
+    try { sessionStorage.setItem(keyName, JSON.stringify(current)); } catch (_) {}
+  }
+  return {
+    key: current.key,
+    clear() { try { sessionStorage.removeItem(keyName); } catch (_) {} }
+  };
+}
+
+function getRoomPurchaseAttempt(roomId, cardsCount) {
+  const owner = String(currentUser?.memberId || state.memberId || 'account');
+  const storageKey = 'dabernaz:pending-room-purchase:' + owner + ':' + roomId;
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); }
+  catch (_) { pending = pendingRoomPurchaseMemory.get(storageKey) || null; }
+  if (!pending || Number(pending.cardsCount) !== Number(cardsCount) ||
+      typeof pending.key !== 'string' || Date.now() - Number(pending.createdAt || 0) > 86400000) {
+    const key = globalThis.crypto?.randomUUID
+      ? globalThis.crypto.randomUUID()
+      : 'room-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) + '-' + Math.random().toString(36).slice(2);
+    pending = { key, cardsCount:Number(cardsCount), createdAt:Date.now() };
+    try { sessionStorage.setItem(storageKey, JSON.stringify(pending)); }
+    catch (_) { pendingRoomPurchaseMemory.set(storageKey, pending); }
+  }
+  return {
+    key:pending.key,
+    clear() {
+      try { sessionStorage.removeItem(storageKey); } catch (_) {}
+      pendingRoomPurchaseMemory.delete(storageKey);
+    }
+  };
+}
+
 function applyAuthenticatedUser(user) {
   currentUser = user;
   state.username = user.name; state.memberId = user.memberId;
@@ -928,27 +1012,38 @@ function renderRoomPurchasePage() {
   const lineEstimate = Math.max(0, Number(queue.estimatedPrizes?.line ?? Math.floor(collected * 0.10)) || 0);
   const fullEstimate = Math.max(0, Number(queue.estimatedPrizes?.full ?? Math.floor(collected * 0.75)) || 0);
   const minPlayersToStart = Math.max(2, Number(queue.minPlayersToStart) || 2);
+  const nextRound = queue.status === 'playing' ? queue.nextRound : null;
+  const nextRoundJoined = Boolean(nextRound?.joined);
+  const nextRoundCardCount = Array.isArray(nextRound?.myCards) ? nextRound.myCards.length : 0;
   const purchaseControls = joined && waiting
     ? `<small>کارت‌های خریداری‌شده</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(ownedCardCount)} از ۵ کارت</b></div>`
-    : `<small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${selectedCount <= 1 ? 'disabled' : ''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${selectedCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>+</button></div>`;
-  const purchaseTotal = queue.status === 'finished'
-    ? `<div class="purchase-total"><span>ورود به سانس بعدی</span><b>بدون برداشت وجه</b></div>`
-    : joined && waiting
-      ? `<div class="purchase-total"><span>هزینه ۱ کارت اضافی</span><b>${faDigits(room.price)} تومان</b></div>`
-      : `<div class="purchase-total"><span>هزینه کل ${faDigits(selectedCount)} کارت</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>`;
+    : queue.status === 'playing' && nextRoundJoined
+      ? `<small>کارت‌های ثبت‌شده برای سانس بعدی</small><div class="purchase-qty-controls"><b id="roomQty">${faDigits(nextRoundCardCount)} از ۵ کارت</b></div>`
+      : `<small>تعداد کارت برای این سانس</small><div class="purchase-qty-controls"><button data-action="room-decrease" aria-label="کاهش تعداد کارت" ${selectedCount <= 1 ? 'disabled' : ''}>−</button><b id="roomQty">${faDigits(selectedCount)}</b><button data-action="room-increase" aria-label="افزایش تعداد کارت" ${selectedCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>+</button></div>`;
+  const purchaseTotal = queue.status === 'playing' && nextRoundJoined
+    ? `<div class="purchase-total"><span>هزینه هر کارت اضافی برای سانس بعدی</span><b>${faDigits(room.price)} تومان</b></div>`
+    : queue.status === 'finished'
+      ? `<div class="purchase-total"><span>هزینه کارت سانس بعدی</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>`
+      : joined && waiting
+        ? `<div class="purchase-total"><span>هزینه ۱ کارت اضافی</span><b>${faDigits(room.price)} تومان</b></div>`
+        : `<div class="purchase-total"><span>هزینه کل ${faDigits(selectedCount)} کارت</span><b>${faDigits(room.price * selectedCount)} تومان</b></div>`;
   const purchaseAction = !currentUser
     ? `<button class="btn btn-primary btn-block" data-page="account">ورود / ثبت‌نام برای بازی</button>`
     : queue.status === 'playing' && joined
       ? `<button class="btn btn-primary btn-block" data-action="room-open-game">ورود به بازی زنده</button>`
-      : queue.status === 'playing'
-        ? `<button class="btn btn-muted btn-block" disabled>سانس در حال اجراست</button>`
-        : queue.status === 'finished'
-          ? `<button class="btn btn-primary btn-block" data-action="room-next-session">ورود به سانس بعدی · بدون خرید کارت</button>`
-          : joined && waiting
-            ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER || timerExpired ? 'disabled' : ''}>${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت تکمیل شده' : timerExpired ? 'مهلت خرید پایان یافته' : 'افزودن و خرید یک کارت'}</button>`
-            : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">خرید کارت و ورود به اتاق</button>`;
-  const waitingMessage = queue.status === 'playing' ? 'بازی در حال اجراست و قرعه‌کشی خودکار انجام می‌شود.'
-    : queue.status === 'finished' ? 'سانس قبلی پایان یافته است؛ ورود به سانس بعدی رایگان است و خرید کارت جداگانه انجام می‌شود.'
+      : queue.status === 'playing' && nextRoundJoined
+        ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${nextRoundCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>${nextRoundCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت سانس بعدی تکمیل شده' : 'افزودن یک کارت به سانس بعدی'}</button>`
+        : queue.status === 'playing'
+          ? `<button class="btn btn-primary btn-block" data-action="room-join-next">خرید کارت و ثبت‌نام سانس بعدی</button>`
+          : queue.status === 'finished'
+            ? `<button class="btn btn-primary btn-block" data-action="room-next-session">ورود رایگان به سانس بعدی</button>`
+            : joined && waiting
+              ? `<button class="btn btn-primary btn-block" data-action="room-add-card" ${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER || timerExpired ? 'disabled' : ''}>${ownedCardCount >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت تکمیل شده' : timerExpired ? 'مهلت خرید پایان یافته' : 'افزودن و خرید یک کارت'}</button>`
+              : `<button class="btn btn-primary btn-block purchase-join" data-action="room-join-auto">خرید کارت و ورود به اتاق</button>`;
+  const waitingMessage = queue.status === 'playing' ? (nextRound
+    ? 'بازی فعلی در حال اجراست؛ ثبت‌نام سانس بعدی در جریان است و پس از پایان بازی فعلی آغاز می‌شود.'
+    : 'بازی فعلی در حال اجراست؛ می‌توانی برای سانس بعدی ثبت‌نام کنی.')
+    : queue.status === 'finished' ? 'سانس قبلی پایان یافته است؛ ورود به صفحه سانس بعدی رایگان است و هیچ مبلغی تا تأیید جداگانه خرید کارت کسر نمی‌شود.'
     : registrationStarted && playerCount < minPlayersToStart && timerExpired ? `مهلت اولیه تمام شده؛ بازی پس از رسیدن تعداد شرکت‌کنندگان به حداقل ${faDigits(minPlayersToStart)} نفر شروع می‌شود.`
     : registrationStarted ? (timerExpired ? 'مهلت خرید به پایان رسیده و حداقل شرکت‌کنندگان کامل شده؛ بازی در حال شروع است.' : `تا پایان مهلت خرید و شروع خودکار بازی با حداقل ${faDigits(minPlayersToStart)} شرکت‌کننده:`)
     : 'با اولین خرید کارت، زمان‌سنج ۲ دقیقه و ۳۰ ثانیه‌ای شروع می‌شود.';
@@ -983,6 +1078,24 @@ function renderRoomPurchasePage() {
   <section class="room-panel ticket-selection"><div class="room-panel-heading"><div><span class="eyebrow">YOUR TICKETS</span><h3>کارت‌های تو</h3><p>کارت‌ها هنگام خرید روی سرور ساخته و نگهداری می‌شوند.</p></div><span class="ticket-count-badge" id="roomTicketCount">${faDigits(selectedCount)} کارت</span></div><div class="room-tickets-list" id="roomTicketsList">${joined && roomCards.length ? roomCards.map(roomCardMarkup).join('') : '<div class="empty"><span>🎟️</span>کارت نهایی پس از خرید و ثبت در صف، به‌صورت تصادفی روی سرور ساخته می‌شود.</div>'}</div></section>`;
 }
 
+function renderNextRoundPanel() {
+  const next = roomServerSnapshot?.nextRound || null;
+  const joined = Boolean(next?.joined);
+  const count = Array.isArray(next?.myCards) ? next.myCards.length : 0;
+  const remaining = next?.registrationRemainingMs == null ? null : formatRoomCountdown(next.registrationRemainingMs);
+  return `<section class="room-panel room-next-round-panel">
+    <div class="room-panel-heading"><div><span class="eyebrow">NEXT SESSION QUEUE</span><h3>ثبت‌نام سانس بعدی</h3>
+      <p>${joined ? 'ثبت‌نام تو برای سانس بعدی ذخیره شده و مستقل از بازی جاری است.' : 'در حالی که این بازی ادامه دارد، می‌توانی برای سانس بعدی کارت بخری.'}</p></div>
+      <span class="ticket-count-badge">${joined ? faDigits(count) + ' از ۵ کارت' : 'هنوز ثبت‌نام نکرده‌ای'}</span></div>
+    ${next ? `<div class="wait-stats"><div><b>${faDigits(next.playerCount || 0)}</b><small>بازیکنان سانس بعدی</small></div>
+      <div><b>${faDigits(next.cardCount || 0)}</b><small>کارت‌های سانس بعدی</small></div>
+      <div><b>${remaining || '۰:۰۰'}</b><small>زمان ثبت‌نام</small></div></div>` : '<p class="muted-note">با اولین خرید، دور بعدی و مهلت مستقل ۱۵۰ ثانیه‌ای آن ایجاد می‌شود.</p>'}
+    <button class="btn btn-primary btn-block" data-action="${joined ? 'room-add-card' : 'room-join-next'}" ${joined && count >= MAX_ROOM_CARDS_PER_PLAYER ? 'disabled' : ''}>
+      ${joined ? (count >= MAX_ROOM_CARDS_PER_PLAYER ? 'سقف ۵ کارت سانس بعدی تکمیل شده' : 'خرید یک کارت دیگر برای سانس بعدی') : 'خرید کارت و ثبت‌نام سانس بعدی'}
+    </button>
+  </section>`;
+}
+
 function renderRoomGame() {
   const room=currentRoomConfig();
   const isFinished=roomServerSnapshot?.status==='finished';
@@ -995,7 +1108,7 @@ function renderRoomGame() {
       <div class="room-number-history" id="roomNumberHistory">${roomCalledMarkup()}</div>
       <small class="room-safe-caption">${isFinished?'این سانس به پایان رسیده است.':'قرعه‌کشی توسط سرور انجام می‌شود؛ نیازی به فشردن دکمه نیست.'}</small>
     </section>
-    <section class="room-game-layout"><div class="room-game-ticket"><div class="room-panel-heading"><div><span class="eyebrow">MY TICKETS</span><h3>کارت‌های من</h3></div><span class="ticket-count-badge">${faDigits(roomCards.length)} کارت</span></div><div id="roomTicketsList" class="room-tickets-list">${roomCards.map(roomCardMarkup).join('')}</div></div>
+    ${renderNextRoundPanel()}\n    <section class="room-game-layout"><div class="room-game-ticket"><div class="room-panel-heading"><div><span class="eyebrow">MY TICKETS</span><h3>کارت‌های من</h3></div><span class="ticket-count-badge">${faDigits(roomCards.length)} کارت</span></div><div id="roomTicketsList" class="room-tickets-list">${roomCards.map(roomCardMarkup).join('')}</div></div>
       <aside class="room-panel stages-panel"><div class="room-panel-heading"><div><span class="eyebrow">WINNING PATTERNS</span><h3>برندگان سانس</h3></div><span class="trophy-mark">🏆</span></div><div class="room-stages-list" id="roomStagesList">${roomStageMarkup()}</div><div class="room-rules-tip"><b>برد هم‌زمان پشتیبانی می‌شود</b><p>یک یا چند نفر می‌توانند در یک شماره هم‌زمان برنده یک خط یا دبرنای کامل شوند؛ جایزه همان مرحله بین برندگان تقسیم می‌شود.</p></div></aside>
     </section>
     <section class="room-panel"><div class="room-panel-heading"><div><span class="eyebrow">SESSION HISTORY</span><h3>برندگان سانس‌های اخیر</h3></div><span class="trophy-mark">🏆</span></div><div id="recentSessionWinners">${recentSessionWinnersMarkup()}</div></section>
@@ -1410,7 +1523,8 @@ function renderAccount() {
     ${section('مدیریت حساب')}
     ${accountRow('✎','اطلاعات شخصی','نام نمایشی و مشخصات حساب','edit-profile')}
     ${accountRow('🛡','امنیت حساب','ورود با رمز عبور رمزنگاری‌شده','security')}
-    ${accountRow('⇥','خروج از حساب','خروج امن از حساب کاربری','logout')}`;
+    ${accountRow('⇥','خروج از حساب','خروج امن از این دستگاه','logout')}
+    ${accountRow('⛨','خروج از همه دستگاه‌ها','ابطال تمام نشست‌های فعال حساب','logout-all')}`;
 }
 function renderAuthPage() {
   const register=authMode==='register';
@@ -1952,19 +2066,21 @@ document.addEventListener('click', async event => {
     finally { roomJoinBusy = false; if (actionEl.isConnected) actionEl.disabled = false; }
     return;
   }
-  if (action === 'room-join-auto') {
+  if (action === 'room-join-auto' || action === 'room-join-next') {
     if(!requireLogin() || roomJoinBusy || actionEl.disabled) return;
     roomJoinBusy = true;
     actionEl.disabled = true;
     unlockPersianAudio();
+    const requestedCardCount = action === 'room-join-next' ? 1 : Math.max(1, Math.min(MAX_ROOM_CARDS_PER_PLAYER, Number(roomCardCount) || 1));
+    const purchaseAttempt = getRoomPurchaseAttempt(activeRoomId, requestedCardCount);
     try {
       let result;
-      // A short retry makes simultaneous joins resilient to a temporary D1 room lock.
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           result = await apiRequest(`/api/rooms/${activeRoomId}/join`, {
             method:'POST',
-            body:JSON.stringify({cardsCount:roomCardCount,purchaseConfirmed:true})
+            headers:{'Idempotency-Key':purchaseAttempt.key},
+            body:JSON.stringify({cardsCount:requestedCardCount,purchaseConfirmed:true})
           });
           break;
         } catch (error) {
@@ -1973,65 +2089,78 @@ document.addEventListener('click', async event => {
           await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
         }
       }
-      const requestedCardCount=roomCardCount;
-      roomServerSnapshot=result.room;
-      roomCards=result.room.myCards||[];
-      roomAllCards=Array.isArray(result.room.allPlayerCards)?result.room.allPlayerCards:[];
-      roomCardCount=roomCards.length||roomCardCount;
-      if(result.room.status==='playing'){
-        activeRoomId=result.room.id;
-        roomCalledNumbers=result.room.allCalledNumbers||[];
-        currentPage='roomGame';
+      purchaseAttempt.clear();
+      roomServerSnapshot = result.room;
+      roomCards = Array.isArray(result.room.myCards) ? result.room.myCards : [];
+      roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
+      roomCardCount = roomCards.length || requestedCardCount;
+      if (result.room.status === 'playing' && result.room.joined) {
+        activeRoomId = result.room.id;
+        roomCalledNumbers = result.room.allCalledNumbers || [];
+        currentPage = 'roomGame';
       }
-      // Refresh the authenticated profile from D1 immediately after payment.
       await loadAuthenticatedUser();
-      if(roomCards.length < requestedCardCount) {
-        showToast(`فقط ${faDigits(roomCards.length)} کارت ثبت شد.`);
+      if (result.room.status === 'playing' && !result.room.joined) {
+        showToast('ثبت‌نام سانس بعدی ثبت شد؛ پس از پایان بازی جاری نوبت آن می‌رسد.');
+      } else if (result.room.status === 'playing') {
+        showToast('کارت‌های سانس بعدی ثبت شد؛ بازی فعلی ادامه دارد.');
       } else {
-        showToast(result.room.status==='playing'?'بازی آغاز شد.':'کارت‌ها خریداری شدند؛ مهلت ۲:۳۰ دقیقه‌ای از اولین خرید محاسبه می‌شود.');
+        showToast('کارت‌ها خریداری شدند؛ مهلت ۲:۳۰ دقیقه‌ای از اولین خرید این سانس محاسبه می‌شود.');
       }
       render();
-    } catch(error) { showToast(error.message); }
-    finally { roomJoinBusy = false; if (actionEl.isConnected) actionEl.disabled = false; }
+    } catch(error) {
+      // Keep the same idempotency key on ambiguous network/server failures.
+      showToast(error.message);
+    } finally {
+      roomJoinBusy = false;
+      if (actionEl.isConnected) actionEl.disabled = false;
+    }
     return;
   }
   if (action === 'room-add-card') {
-    if(!requireLogin() || actionEl.disabled) return;
+    if(!requireLogin() || roomJoinBusy || actionEl.disabled) return;
+    roomJoinBusy = true;
     unlockPersianAudio();
-    actionEl.disabled=true;
+    actionEl.disabled = true;
+    const purchaseAttempt = getRoomPurchaseAttempt(activeRoomId, 1);
     try {
       let result;
-      for (let attempt=0; attempt<3; attempt++) {
+      for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          result=await apiRequest(`/api/rooms/${activeRoomId}/join`, {
+          result = await apiRequest(`/api/rooms/${activeRoomId}/join`, {
             method:'POST',
+            headers:{'Idempotency-Key':purchaseAttempt.key},
             body:JSON.stringify({cardsCount:1,purchaseConfirmed:true})
           });
           break;
         } catch(error) {
-          const temporaryLock=error.message.includes('اتاق در حال به‌روزرسانی است');
-          if(!temporaryLock || attempt===2) throw error;
-          await new Promise(resolve=>setTimeout(resolve,250*(attempt+1)));
+          const temporaryLock = error.message.includes('اتاق در حال به‌روزرسانی است');
+          if (!temporaryLock || attempt === 2) throw error;
+          await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
         }
       }
-      roomServerSnapshot=result.room;
-      roomCards=Array.isArray(result.room.myCards)?result.room.myCards:[];
-      roomAllCards=Array.isArray(result.room.allPlayerCards)?result.room.allPlayerCards:[];
-      roomCardCount=roomCards.length;
-      if(result.room.status==='playing') {
-        activeRoomId=result.room.id;
-        roomCalledNumbers=result.room.allCalledNumbers||[];
-        currentPage='roomGame';
+      purchaseAttempt.clear();
+      roomServerSnapshot = result.room;
+      roomCards = Array.isArray(result.room.myCards) ? result.room.myCards : [];
+      roomAllCards = Array.isArray(result.room.allPlayerCards) ? result.room.allPlayerCards : [];
+      roomCardCount = roomCards.length || roomCardCount;
+      if (result.room.status === 'playing' && result.room.joined) {
+        activeRoomId = result.room.id;
+        roomCalledNumbers = result.room.allCalledNumbers || [];
+        currentPage = 'roomGame';
       }
       await loadAuthenticatedUser();
-      showToast(result.room.status==='playing'
-        ? 'کارت خریداری شد و بازی در حال اجراست.'
-        : 'یک کارت جدید خریداری و به کارت‌های تو اضافه شد.');
+      showToast(result.room.status === 'playing' && !result.room.joined
+        ? 'یک کارت برای سانس بعدی خریداری شد.'
+        : result.room.status === 'playing'
+          ? 'کارت سانس بعدی ثبت شد؛ بازی جاری ادامه دارد.'
+          : 'یک کارت جدید خریداری و به کارت‌های تو اضافه شد.');
       render();
     } catch(error) {
       showToast(error.message);
     } finally {
-      if(actionEl.isConnected) actionEl.disabled=false;
+      roomJoinBusy = false;
+      if (actionEl.isConnected) actionEl.disabled = false;
     }
     return;
   }
@@ -2050,8 +2179,10 @@ document.addEventListener('click', async event => {
   else if (action === 'join-tournament') {
     if(!requireLogin() || actionEl.disabled) return;
     actionEl.disabled=true;
-    apiRequest('/api/tournaments/register',{method:'POST',body:JSON.stringify({type:actionEl.dataset.tournament})})
-      .then(async result=>{ applyAuthenticatedUser(result.user); await loadAuthenticatedUser(); showToast('ثبت‌نام تورنومنت با موفقیت انجام شد.'); })
+    const tournamentType = actionEl.dataset.tournament;
+    const idempotencyKey = getTournamentEntryIdempotencyKey(tournamentType);
+    apiRequest('/api/tournaments/register',{method:'POST',headers:{'Idempotency-Key':idempotencyKey},body:JSON.stringify({type:tournamentType})})
+      .then(async result=>{ clearTournamentEntryIdempotencyKey(tournamentType); applyAuthenticatedUser(result.user); await loadAuthenticatedUser(); showToast('ثبت‌نام تورنومنت با موفقیت انجام شد.'); })
       .catch(error=>showToast(error.message))
       .finally(()=>{ if(actionEl.isConnected) actionEl.disabled=false; });
   } else if (action === 'faq') actionEl.parentElement.classList.toggle('open');
@@ -2069,9 +2200,10 @@ document.addEventListener('click', async event => {
   else if (action === 'memory-card') revealMemory(actionEl);
   else if (action === 'edit-profile') editProfile();
   else if (action === 'settings') setPage('settings');
-  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه فعلی Cloudflare رمز عبور با PBKDF2-SHA256 و salt اختصاصی هش می‌شود. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
+  else if (action === 'security') openModal('امنیت حساب', `<div class="form-stack"><p class="muted-note">در نسخه Cloudflare رمز عبور با PBKDF2-HMAC-SHA256، ۶۰۰٬۰۰۰ تکرار و salt اختصاصی هش می‌شود. رمز خام ذخیره نمی‌شود.</p><p class="muted-note">نشست ورود با کوکی HttpOnly نگهداری می‌شود، روی HTTPS ویژگی Secure دارد و پس از ۳۰ روز منقضی می‌شود. سیاست SameSite با توجه به نوع استقرار تنظیم می‌شود.</p><p class="muted-note">تأیید ایمیل و بازیابی رمز عبور هنوز به سرویس ارسال ایمیل نیاز دارد و در این نسخه فعال نیست.</p></div>`);
   else if (action === 'achievements') showToast(`تعداد بردهای ثبت‌شده: ${state.wins}`);
   else if (action === 'logout') { try { await apiRequest('/api/auth/logout',{method:'POST',body:'{}'}); currentUser=null; walletActivePaymentInfo=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('با موفقیت از حساب خارج شدی.'); } catch(error){showToast(error.message);} }
+  else if (action === 'logout-all') { try { await apiRequest('/api/auth/logout-all',{method:'POST',body:'{}'}); currentUser=null; walletActivePaymentInfo=null; state=cloneData(defaultState); roomServerSnapshot=null; saveState(); closeModal(); setPage('home'); showToast('تمام نشست‌های فعال حساب باطل شدند.'); } catch(error){showToast(error.message);} }
   else if (action === 'test-number-voice') {
     voicePlaybackErrorShown = false;
     const ok = await PersianAudioManager.speak(42, { fromGesture: true });
@@ -2167,8 +2299,14 @@ function updateWalletRequestType(type){
  if(rule)rule.textContent=withdraw?'مبلغ برداشت پس از ثبت از موجودی رزرو می‌شود. شماره کارت و نام صاحب کارت باید دقیق باشد؛ در صورت رد درخواست، مبلغ به کیف پول برمی‌گردد.':'پس از ثبت واریز، اطلاعات کارت مقصد فقط برای همین حساب و همین درخواست نمایش داده می‌شود. رسید را برای بررسی مدیریت ارسال کن.';
  if(submit)submit.textContent=withdraw?'ثبت درخواست برداشت':'ثبت درخواست واریز';
 }
+document.addEventListener('input', event => {
+  if (event.target.closest?.('#walletRequestForm')) clearWalletRequestIdempotencyKey();
+});
 document.addEventListener('change',event=>{
- if(event.target.matches('#walletRequestForm input[name="type"]'))updateWalletRequestType(event.target.value);
+ if(event.target.matches('#walletRequestForm input[name="type"]')) {
+   clearWalletRequestIdempotencyKey();
+   updateWalletRequestType(event.target.value);
+ }
 });
 document.addEventListener('submit', async event => {
 
@@ -2185,7 +2323,13 @@ document.addEventListener('submit', async event => {
     }
     const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
     try{
-      const result=await apiRequest('/api/wallet/requests',{method:'POST',body:JSON.stringify(payload)});
+      const idempotencyKey = getWalletRequestIdempotencyKey();
+      const result=await apiRequest('/api/wallet/requests',{
+        method:'POST',
+        headers:{'Idempotency-Key':idempotencyKey},
+        body:JSON.stringify(payload)
+      });
+      clearWalletRequestIdempotencyKey();
       await refreshWalletData();
       render();
       if(type==='deposit'){
@@ -2230,8 +2374,9 @@ document.addEventListener('submit', async event => {
     event.preventDefault();
     const data=new FormData(event.target);
     const payload={memberId:String(data.get('memberId')||'').trim(),amount:Number(data.get('amount')),reason:String(data.get('reason')||'').trim()};
+    const attempt=getAdminAdjustmentAttempt(payload);
     const button=event.target.querySelector('button[type=submit]');if(button)button.disabled=true;
-    try{const result=await apiRequest('/api/admin/wallet/adjust',{method:'POST',body:JSON.stringify(payload)});await refreshWalletAdmin();await refreshWalletData();walletAdminSelectedMemberId=String(result.user?.member_id||payload.memberId);walletAdminUsers=[result.user,...walletAdminUsers.filter(u=>String(u.member_id)!==String(result.user?.member_id))].filter(Boolean);render();showToast('موجودی '+escapeHTML(result.user?.username||'کاربر')+' به اندازه '+money(payload.amount)+' تومان اصلاح شد.');}
+    try{const result=await apiRequest('/api/admin/wallet/adjust',{method:'POST',headers:{'Idempotency-Key':attempt.key},body:JSON.stringify(payload)});attempt.clear();await refreshWalletAdmin();await refreshWalletData();walletAdminSelectedMemberId=String(result.user?.member_id||payload.memberId);walletAdminUsers=[result.user,...walletAdminUsers.filter(u=>String(u.member_id)!==String(result.user?.member_id))].filter(Boolean);render();showToast((result.replayed?'درخواست قبلی تأیید شد. ':'')+'موجودی '+escapeHTML(result.user?.username||'کاربر')+' به اندازه '+money(payload.amount)+' تومان اصلاح شد.');}
     catch(error){showToast(error.message);}
     finally{if(button?.isConnected)button.disabled=false;}
   }

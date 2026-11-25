@@ -436,8 +436,22 @@ async function handleServerMiniGame(req,res,url,user) {
 }
 
 async function routeApi(req,res,url) {
+  if (req.method==='GET' && url.pathname==='/api/health') {
+    if (process.env.NODE_ENV === 'test') {
+      return json(res,200,{ok:true,service:'dabernaz',backend:'node',mode:'isolated-test-only'});
+    }
+    return json(res,503,{ok:false,service:'dabernaz',backend:'node',mode:'disabled',code:'NODE_FALLBACK_DISABLED'});
+  }
+  // The JSON-file Node backend has no D1 transaction, append-only financial
+  // ledger, or Durable Object room coordinator. Fail closed outside isolated CI.
+  if (process.env.NODE_ENV !== 'test') {
+    return json(res,503,{
+      ok:false,
+      code:'NODE_FALLBACK_DISABLED',
+      error:'این API جایگزین امنی برای Cloudflare Pages و D1 نیست؛ عملیات از این مسیر غیرفعال است.'
+    });
+  }
   if (['POST','PATCH','PUT','DELETE'].includes(req.method)) validateWriteOrigin(req,url);
-  if (req.method==='GET' && url.pathname==='/api/health') return json(res,200,{ok:true,service:'dabernaz',backend:'node',mode:'accounts-and-automatic-rooms-ready'});
   if (req.method==='POST' && (url.pathname==='/api/auth/register' || url.pathname==='/api/auth/login')) {
     if (rateLimited(req)) return json(res,429,{error:'تعداد درخواست‌ها زیاد است. کمی بعد دوباره تلاش کن.'});
     const body=await readBody(req);
@@ -489,6 +503,15 @@ async function routeApi(req,res,url) {
     user.name=name; await persist(); return json(res,200,{ok:true,user:publicUser(user)});
   }
   const roomMatch=url.pathname.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave|next))?$/);
+  if (roomMatch && process.env.NODE_ENV !== 'test') {
+    // JSON-file fallback has no shared D1 transaction or durable room
+    // coordinator. Paid-room operations must fail closed outside isolated tests.
+    return json(res,503,{
+      ok:false,
+      code:'ROOM_COORDINATOR_UNAVAILABLE',
+      error:'زیرساخت امن اتاق بازی در این Backend فعال نیست؛ خرید کارت موقتاً غیرفعال است.'
+    });
+  }
   if (roomMatch) {
     const [,roomId,action]=roomMatch; const room=db.rooms[roomId];
     if (req.method==='GET' && !action) { const changed=advanceWaitingRoom(room); if(changed) await persist(); return json(res,200,{ok:true,room:publicRoom(room,user.id)}); }

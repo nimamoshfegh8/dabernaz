@@ -21,3 +21,11 @@ android/**/build/
 android/.idea/
 *.jks
 *.keystore
+
+# Generated test and local Cloudflare state
+playwright-report/
+test-results/
+test-artifacts/
+.wrangler/
+/wrangler.toml
+/wrangler.jsonc

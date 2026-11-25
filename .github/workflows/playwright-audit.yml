@@ -1,27 +1,143 @@
-# Default-branch registration entry point. Canonical test logic stays on test/playwright-audit.
 name: Dabernaz read-only Playwright visual audit
 
 on:
+  push:
+    branches:
+      - test/playwright-audit
+      - release/dabernaz-hardening
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      CF_ACCESS_CLIENT_ID:
+        required: false
+      CF_ACCESS_CLIENT_SECRET:
+        required: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: dabernaz-playwright-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  require-audit-branch:
-    if: github.ref != 'refs/heads/test/playwright-audit'
+  browser-audit:
+    name: Chromium visual and route audit (read-only)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_BASE_URL: http://127.0.0.1:8788
     steps:
-      - name: Require the dedicated audit branch
+      - name: Check out audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run existing source syntax checks
+        run: npm run check
+
+      - name: Install pinned Playwright Test without changing project manifests
+        run: npm install --no-save --package-lock=false @playwright/test@1.65.1
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Start isolated local server with temporary test data
+        env:
+          NODE_ENV: test
+          COOKIE_SECURE: "false"
+          HOST: 127.0.0.1
+          PORT: "8788"
+          DABERNAZ_DATA_DIR: ${{ runner.temp }}/dabernaz-playwright-data
         run: |
-          echo "::error::Select test/playwright-audit in the Branch dropdown. The canonical Playwright audit runs from that branch."
+          mkdir -p "$DABERNAZ_DATA_DIR"
+          node server.js > "$RUNNER_TEMP/dabernaz-playwright-server.log" 2>&1 &
+          server_pid=$!
+          echo "$server_pid" > "$RUNNER_TEMP/dabernaz-playwright-server.pid"
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8788/api/health > /dev/null; then
+              echo "Isolated local server is ready."
+              exit 0
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/dabernaz-playwright-server.log"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          cat "$RUNNER_TEMP/dabernaz-playwright-server.log"
           exit 1
 
-  run-canonical-audit:
-    if: github.ref == 'refs/heads/test/playwright-audit'
-    uses: nimamoshfegh8/dabernaz/.github/workflows/playwright-audit.yml@test/playwright-audit
-    permissions:
-      contents: read
-    secrets:
+      - name: Run read-only browser audit against this branch's local code
+        run: npx playwright test --config=playwright.config.js
+
+      - name: Stop isolated local server
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/dabernaz-playwright-server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/dabernaz-playwright-server.pid")" 2>/dev/null || true
+          fi
+
+      - name: Upload HTML report, screenshots, traces, and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-playwright-audit
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  preview-browser-audit:
+    if: github.event_name == 'workflow_dispatch'
+    name: Chromium visual and route audit (live Preview, read-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BASE_URL: https://test-playwright-audit.dabernaz.pages.dev
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      PLAYWRIGHT_TRACE: "off"
+    steps:
+      - name: Check out audit branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run source syntax checks
+        run: npm run check
+
+      - name: Install pinned Playwright Test without changing project manifests
+        run: npm install --no-save --package-lock=false @playwright/test@1.65.1
+
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Require safe Preview core health; keep paid rooms fail-closed until Worker binding is deployed
+        run: node scripts/preview-health-check.mjs
+
+      - name: Run read-only Chromium audit against live Preview
+        run: npx playwright test --config=playwright.config.js
+
+      - name: Upload live Preview screenshots, report, and diagnostics (traces disabled)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-preview-playwright-audit
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: warn
+          retention-days: 14

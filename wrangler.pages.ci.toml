@@ -1,0 +1,12 @@
+name = "dabernaz-pages-local-ci"
+compatibility_date = "2026-11-18"
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dabernaz-local-ci"
+database_id = "00000000000000000000000000000000"
+migrations_dir = "./migrations"
+
+[vars]
+SUPPORT_ADMIN_MEMBER_IDS = "999999"

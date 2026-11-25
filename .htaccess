@@ -1,14 +1,20 @@
 Options -Indexes
 RewriteEngine On
 
-# Protect PHP/Node runtime data even when the private directory is created at runtime.
+# Never expose dotfiles or local tool state on Apache/cPanel.
+RewriteRule (^|/)\.(?!well-known(?:/|$)) - [F,L,NC]
+
+# Protect runtime state even when the private directory is created at runtime.
 RewriteRule ^\.private(?:/|$) - [F,L,NC]
+
+# Do not expose source, test, migration, build, or repository metadata on shared hosting.
+RewriteRule ^(?:\.git|\.wrangler|node_modules|functions|workers|migrations|scripts|tests|docs|src|android|android-app|dabernaz_pro)(?:/|$) - [F,L,NC]
 
 # API endpoint for ordinary Apache/cPanel PHP hosting.
 RewriteRule ^api(?:/.*)?$ api.php [QSA,L]
 
-# Do not expose application/server documentation or private data.
-<FilesMatch "^(server\.js|package\.json|README(\.fa)?\.md)$">
+# Do not expose server entry points, package manifests, SQL dumps, or local databases.
+<FilesMatch "^(server\.js|package(-lock)?\.json|README(\.fa)?\.md|.*\.(sql|sqlite|sqlite3|db|pem|key))$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>

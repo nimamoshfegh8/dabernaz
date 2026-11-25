@@ -4,12 +4,16 @@ import { execFileSync } from 'node:child_process';
 
 const baseUrl=(process.env.BASE_URL||'http://127.0.0.1:8788').replace(/\/$/,'');
 const origin=new URL(baseUrl).origin;
+const d1Database=process.env.D1_DATABASE||'dabernaz-local-ci';
+const wranglerConfig=process.env.WRANGLER_CONFIG||'wrangler.pages.ci.toml';
+const persistPath=process.env.WRANGLER_PERSIST||'.wrangler/pages-api-test-state';
 const runId=randomUUID().slice(0,8);
 const password='Manual-Wallet-QA-2026!';
-async function raw(path,{account,method='GET',body}={}){
+async function raw(path,{account,method='GET',body,idempotencyKey}={}){
  const headers={accept:'application/json'};
  if(account?.cookie)headers.cookie=account.cookie;
  if(method!=='GET'){headers['content-type']='application/json';headers.origin=origin;}
+ if(idempotencyKey)headers['idempotency-key']=idempotencyKey;
  return fetch(baseUrl+path,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)})});
 }
 async function request(path,options={}){
@@ -39,7 +43,7 @@ const customer=await register('customer');
 const other=await register('other');
 const adminEmail=admin.email.replace(/'/g,"''");
 const customerEmail=customer.email.replace(/'/g,"''");
-execFileSync('wrangler',['d1','execute','dabernaz-ci','--local','--persist-to','.wrangler/test-state','--command',
+execFileSync('npx',['--no-install','wrangler','d1','execute',d1Database,'--config',wranglerConfig,'--local','--persist-to',persistPath,'--command',
  "UPDATE users SET member_id='999999' WHERE email='"+adminEmail+"'; UPDATE users SET balance=200000 WHERE email='"+customerEmail+"';"],
  {stdio:'inherit'});
 admin.memberId='999999';
@@ -47,8 +51,8 @@ assert.equal(String((await me(admin)).memberId),'999999');
 assert.equal(Number((await me(customer)).balance),200000);
 
 await expectStatus('/api/admin/wallet',403,{account:customer});
-await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',body:{type:'deposit',amount:104}});
-await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',body:{type:'withdraw',amount:204,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
+await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{type:'deposit',amount:104}});
+await expectStatus('/api/wallet/requests',400,{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{type:'withdraw',amount:204,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
 const inbox=await request('/api/admin/wallet',{account:admin});
 assert.equal(inbox.isAdmin,true);
 assert.deepEqual(inbox.requests,[]);
@@ -60,8 +64,17 @@ const saved=await request('/api/admin/wallet/settings',{account:admin,method:'PO
 assert.equal(saved.settings.cardNumber,'1234567812345678');
 await expectStatus('/api/wallet/payment-info',405,{account:customer});
 
-const deposit=await request('/api/wallet/requests',{account:customer,method:'POST',body:{type:'deposit',amount:50000,userNote:'کد پیگیری آزمایشی 50000'}});
+const depositKey=randomUUID();
+const depositBody={type:'deposit',amount:50000,userNote:'کد پیگیری آزمایشی 50000'};
+const deposit=await request('/api/wallet/requests',{account:customer,method:'POST',idempotencyKey:depositKey,body:depositBody});
 assert.ok(deposit.requestId>0);
+assert.equal(deposit.replayed,false,'first deposit submission must be reported as new');
+const depositReplay=await request('/api/wallet/requests',{account:customer,method:'POST',idempotencyKey:depositKey,body:depositBody});
+assert.equal(depositReplay.requestId,deposit.requestId,'same deposit key must return the original request');
+assert.equal(depositReplay.replayed,true,'same deposit key must be marked as a replay');
+await expectStatus('/api/wallet/requests',409,{account:customer,method:'POST',idempotencyKey:depositKey,body:{...depositBody,amount:50001}});
+assert.equal((await request('/api/wallet/requests',{account:customer})).requests.length,1,
+ 'duplicate deposit submissions must create only one finance inbox item');
 await request('/api/admin/wallet/settings',{account:admin,method:'POST',body:{
  cardNumber:'1111111111111111',cardHolder:'Wallet QA Updated Holder',bankName:'بانک جدید',paymentNote:'تنظیمات جدید برای درخواست‌های بعدی'
 }});
@@ -107,11 +120,16 @@ assert.equal(Number((await me(customer)).balance),250000);
 await expectStatus('/api/admin/wallet/'+deposit.requestId+'/decision',409,{account:admin,method:'POST',body:{decision:'approve'}});
 assert.equal(Number((await me(customer)).balance),250000,'deposit approval must credit exactly once');
 
-const withdraw=await request('/api/wallet/requests',{account:customer,method:'POST',body:{
- type:'withdraw',amount:30000,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer',bankName:'بانک مقصد',userNote:'برداشت آزمایشی با توضیح'
-}});
+const withdrawKey=randomUUID();
+const withdrawBody={type:'withdraw',amount:30000,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer',bankName:'بانک مقصد',userNote:'برداشت آزمایشی با توضیح'};
+const withdraw=await request('/api/wallet/requests',{account:customer,method:'POST',idempotencyKey:withdrawKey,body:withdrawBody});
 assert.equal(withdraw.status,'pending_transfer');
-assert.equal(Number((await me(customer)).balance),220000,'withdrawal request must reserve the amount immediately');
+assert.equal(withdraw.replayed,false,'first withdrawal submission must be reported as new');
+const withdrawReplay=await request('/api/wallet/requests',{account:customer,method:'POST',idempotencyKey:withdrawKey,body:withdrawBody});
+assert.equal(withdrawReplay.requestId,withdraw.requestId,'same withdrawal key must return the original request');
+assert.equal(withdrawReplay.replayed,true,'same withdrawal key must be marked as a replay');
+await expectStatus('/api/wallet/requests',409,{account:customer,method:'POST',idempotencyKey:withdrawKey,body:{...withdrawBody,amount:30001}});
+assert.equal(Number((await me(customer)).balance),220000,'a repeated withdrawal key must not reserve funds twice');
 const withdrawDetail=await request('/api/admin/wallet/'+withdraw.requestId,{account:admin});
 assert.equal(withdrawDetail.request.card_number,'9876543298765432');
 assert.equal(withdrawDetail.request.card_holder,'Wallet QA Customer');
@@ -119,29 +137,33 @@ assert.equal(withdrawDetail.request.user_note,'برداشت آزمایشی با 
 await request('/api/admin/wallet/'+withdraw.requestId+'/decision',{account:admin,method:'POST',body:{decision:'paid'}});
 assert.equal(Number((await me(customer)).balance),220000,'marking a reserved withdrawal paid must not debit twice');
 
-const rejectedWithdraw=await request('/api/wallet/requests',{account:customer,method:'POST',body:{
+const rejectedWithdraw=await request('/api/wallet/requests',{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{
  type:'withdraw',amount:20000,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'
 }});
 assert.equal(Number((await me(customer)).balance),200000);
 await request('/api/admin/wallet/'+rejectedWithdraw.requestId+'/decision',{account:admin,method:'POST',body:{decision:'reject',note:'مشخصات کارت نیاز به اصلاح دارد'}});
 assert.equal(Number((await me(customer)).balance),220000,'rejected withdrawal must refund the reserved amount exactly once');
-await expectStatus('/api/wallet/requests',409,{account:customer,method:'POST',body:{type:'withdraw',amount:500000,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
+await expectStatus('/api/wallet/requests',409,{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{type:'withdraw',amount:500000,cardNumber:'9876543298765432',cardHolder:'Wallet QA Customer'}});
 // Non-owner cannot attach proof to another customer's deposit.
 await expectStatus('/api/wallet/requests/'+deposit.requestId+'/receipt',404,{account:other,method:'POST',body:{dataUrl:fakePng}});
 
 const search=await request('/api/admin/wallet/users?q='+encodeURIComponent(customer.memberId),{account:admin});
 assert.ok(search.users.some(u=>String(u.member_id)===String(customer.memberId)));
-const adjustment=await request('/api/admin/wallet/adjust',{account:admin,method:'POST',body:{memberId:customer.memberId,amount:15000,reason:'اصلاح آزمایشی موجودی'}});
+const adjustmentKey=randomUUID();
+const adjustmentBody={memberId:customer.memberId,amount:15000,reason:'اصلاح آزمایشی موجودی'};
+const adjustment=await request('/api/admin/wallet/adjust',{account:admin,method:'POST',idempotencyKey:adjustmentKey,body:adjustmentBody});
 assert.equal(Number(adjustment.user.balance),235000);
+const adjustmentReplay=await request('/api/admin/wallet/adjust',{account:admin,method:'POST',idempotencyKey:adjustmentKey,body:adjustmentBody});
+assert.equal(Number(adjustmentReplay.user.balance),235000,'replaying the same admin adjustment must not apply it twice');
 assert.equal(Number((await me(customer)).balance),235000);
-await expectStatus('/api/admin/wallet/adjust',409,{account:admin,method:'POST',body:{memberId:customer.memberId,amount:-999999,reason:'کاهش بیش از موجودی'}});
+await expectStatus('/api/admin/wallet/adjust',409,{account:admin,method:'POST',idempotencyKey:randomUUID(),body:{memberId:customer.memberId,amount:-999999,reason:'کاهش بیش از موجودی'}});
 const tx=await me(customer);
 assert.ok(tx.transactions.some(t=>t.title.includes('شارژ دستی کیف پول')&&Number(t.amount)===50000));
 assert.ok(tx.transactions.some(t=>t.title.includes('بازگشت وجه برداشت ردشده')&&Number(t.amount)===20000));
 assert.ok(tx.transactions.some(t=>t.title.includes('اصلاح موجودی توسط مدیر')&&Number(t.amount)===15000));
 
 // Boundary checks: exactly 105 toman for deposit and 205 toman for withdrawal are accepted.
-const minimumDeposit=await request('/api/wallet/requests',{account:customer,method:'POST',body:{type:'deposit',amount:105,userNote:'حداقل واریز'}});
+const minimumDeposit=await request('/api/wallet/requests',{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{type:'deposit',amount:105,userNote:'حداقل واریز'}});
 assert.equal(minimumDeposit.status,'awaiting_receipt');
 const minimumPayment=await request('/api/wallet/requests/'+minimumDeposit.requestId+'/payment-instructions',{account:customer});
 assert.equal(minimumPayment.paymentInfo.cardNumber,'1111111111111111');
@@ -150,7 +172,7 @@ assert.equal(minReceipt.status,'pending_review');
 await request('/api/admin/wallet/'+minimumDeposit.requestId+'/decision',{account:admin,method:'POST',body:{decision:'approve',note:'حداقل واریز آزمون شد'}});
 assert.equal(Number((await me(customer)).balance),235105,'a 105-toman deposit must credit exactly 105 toman');
 
-const minimumWithdraw=await request('/api/wallet/requests',{account:customer,method:'POST',body:{
+const minimumWithdraw=await request('/api/wallet/requests',{account:customer,method:'POST',idempotencyKey:randomUUID(),body:{
  type:'withdraw',amount:205,cardNumber:'۹۸۷۶۵۴۳۲۹۸۷۶۵۴۳۲',cardHolder:'Wallet QA Customer',bankName:'بانک مقصد',userNote:'حداقل برداشت'
 }});
 assert.equal(minimumWithdraw.status,'pending_transfer');

@@ -1,24 +1,305 @@
-# Default-branch registration entry point. Canonical test logic stays on test/playwright-audit.
 name: Dabernaz isolated Room Worker and D1 audit
 
 on:
+  push:
+    branches:
+      - test/playwright-audit
+      - release/dabernaz-hardening
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: dabernaz-room-coordinator-audit-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  require-audit-branch:
-    if: github.ref != 'refs/heads/test/playwright-audit'
+  room-coordinator:
+    name: Durable Object, local D1 and financial invariants
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Require the dedicated audit branch
+      - name: Check out the branch under test
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Install Wrangler v4 for local-only Cloudflare emulation
+        run: npm install --no-save --package-lock=false wrangler@4
+
+      - name: Set up PHP CLI for isolated fallback tests
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Check Worker and integration test syntax
         run: |
-          echo "::error::Select test/playwright-audit in the Branch dropdown. The canonical Room Worker and D1 audit runs from that branch."
+          npm run check
+          for script in \
+            scripts/room-coordinator-smoke.mjs \
+            scripts/api-readonly-contract-smoke.mjs \
+            scripts/security-headers-smoke.mjs \
+            scripts/node-fallback-guard-smoke.mjs \
+            scripts/node-fallback-room-smoke.mjs \
+            scripts/php-fallback-smoke.mjs \
+            scripts/tournament-rules-smoke.mjs \
+            scripts/game-ui-smoke.mjs \
+            scripts/voice-ui-smoke.mjs \
+            scripts/pwa-install-smoke.mjs \
+            scripts/voice-pack-validation.mjs; do
+            node --check "$script"
+          done
+          php -l api.php
+
+      - name: Run isolated D1 and Durable Object integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-artifacts
+          node scripts/room-coordinator-smoke.mjs 2>&1 | tee test-artifacts/room-coordinator-smoke.log
+
+      - name: Assert GET APIs are strictly read-only
+        run: node scripts/api-readonly-contract-smoke.mjs 2>&1 | tee test-artifacts/api-readonly-contract.log
+
+      - name: Verify Pages CSP and security headers
+        run: node scripts/security-headers-smoke.mjs 2>&1 | tee test-artifacts/security-headers.log
+
+      - name: Verify Node JSON fallback is disabled outside test mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/node-fallback-guard-smoke.mjs 2>&1 | tee test-artifacts/node-fallback-guard.log
+
+      - name: Exercise isolated Node room queue and mini-games with independent accounts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/node-fallback-room-smoke.mjs 2>&1 | tee test-artifacts/node-fallback-room.log
+
+      - name: Verify PHP fallback is disabled unless running in disposable tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/php-fallback-smoke.mjs 2>&1 | tee test-artifacts/php-fallback.log
+
+      - name: Run tournament rules and card-generation invariants
+        run: node scripts/tournament-rules-smoke.mjs 2>&1 | tee test-artifacts/tournament-rules.log
+
+      - name: Run mini-game and room UI contract checks
+        run: node scripts/game-ui-smoke.mjs 2>&1 | tee test-artifacts/game-ui.log
+
+      - name: Run Persian voice UI contract checks
+        run: node scripts/voice-ui-smoke.mjs 2>&1 | tee test-artifacts/voice-ui.log
+
+      - name: Run PWA and Android release configuration checks
+        run: node scripts/pwa-install-smoke.mjs 2>&1 | tee test-artifacts/pwa-install.log
+
+      - name: Record voice audio package readiness without masking a missing release asset
+        shell: bash
+        run: |
+          set -uo pipefail
+          set +e
+          node scripts/voice-pack-validation.mjs > test-artifacts/voice-pack-validation.log 2>&1
+          status=$?
+          set -e
+          cat test-artifacts/voice-pack-validation.log
+          if [ "$status" -ne 0 ]; then
+            echo "Voice audio is a release blocker; the validation failure is recorded, not treated as a passing audio test."
+            printf 'VOICE_PACK_STATUS=INCOMPLETE\n' > test-artifacts/voice-pack-status.txt
+          else
+            printf 'VOICE_PACK_STATUS=COMPLETE\n' > test-artifacts/voice-pack-status.txt
+          fi
+
+      - name: Upload integration evidence and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-room-coordinator-audit
+          path: test-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
+
+  pages-api-integration:
+    name: Pages Functions + D1 + Worker + Durable Object end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: room-coordinator
+    env:
+      CI: "1"
+      BASE_URL: http://127.0.0.1:8788
+      ROOM_WORKER_URL: http://127.0.0.1:8791
+      D1_DATABASE: dabernaz-local-ci
+      WRANGLER_CONFIG: wrangler.pages.ci.toml
+      WRANGLER_PERSIST: .wrangler/pages-shared-state
+    steps:
+      - name: Check out the branch under test
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install project dependencies and local Wrangler
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false wrangler@4
+
+      - name: Set up PHP CLI for fallback guard
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Build Pages assets
+        run: npm run build:pages
+
+      - name: Apply all versioned migrations to isolated local D1
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WRANGLER_PERSIST"
+          npx wrangler d1 migrations apply "$D1_DATABASE" \
+            --config "$WRANGLER_CONFIG" \
+            --local --persist-to "$WRANGLER_PERSIST"
+          npx wrangler d1 execute "$D1_DATABASE" \
+            --config "$WRANGLER_CONFIG" \
+            --local --persist-to "$WRANGLER_PERSIST" --json \
+            --command "SELECT MAX(version) AS schema_version FROM schema_migrations"
+
+      - name: Start local room Worker with Durable Object and shared D1 state
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler dev \
+            --config workers/room-coordinator/wrangler.ci.toml \
+            --ip 127.0.0.1 --port 8791 \
+            --persist-to "$WRANGLER_PERSIST" \
+            > "$RUNNER_TEMP/dabernaz-room-worker.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dabernaz-room-worker.pid"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8791/rooms/room5000 > /dev/null; then
+              echo "Local room Worker is ready."
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/dabernaz-room-worker.log"
           exit 1
 
-  run-canonical-audit:
-    if: github.ref == 'refs/heads/test/playwright-audit'
-    uses: nimamoshfegh8/dabernaz/.github/workflows/room-coordinator-audit.yml@test/playwright-audit
+      - name: Start local Pages Functions with private Worker Service Binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Wrangler Pages currently only accepts its config at the repository root.
+          cp wrangler.pages.ci.toml wrangler.toml
+          npx wrangler pages dev dist \
+            --service ROOM_COORDINATOR=dabernaz-room-coordinator-local-ci \
+            --ip 127.0.0.1 --port 8788 \
+            --persist-to "$WRANGLER_PERSIST" \
+            > "$RUNNER_TEMP/dabernaz-pages-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/dabernaz-pages-api.pid"
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent "$BASE_URL/api/health" > "$RUNNER_TEMP/dabernaz-pages-health.json"; then
+              if node -e "const h=require('fs').readFileSync(process.argv[1],'utf8'); const x=JSON.parse(h); if(x.readiness!=='ready'||x.schema!=='v3'||!x.roomCoordinator?.available||!x.walletRequests?.idempotency||!x.tournamentEntries?.idempotency) process.exit(1)" "$RUNNER_TEMP/dabernaz-pages-health.json"; then
+                echo "Pages API, D1 schema v3, wallet/tournament idempotency, and room Service Binding are ready."
+                exit 0
+              fi
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/dabernaz-pages-health.json" || true
+          cat "$RUNNER_TEMP/dabernaz-pages-api.log"
+          cat "$RUNNER_TEMP/dabernaz-room-worker.log"
+          exit 1
+
+      - name: Test authenticated wallet, privacy, admin controls, and request idempotency
+        run: node scripts/manual-wallet-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/dabernaz-wallet-api.log"
+
+      - name: Test Pages-to-Worker room lifecycle, queue, payouts, and refunds
+        run: node scripts/pages-room-api-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/dabernaz-pages-room-api.log"
+
+      - name: Stop local Pages and Worker processes
+        if: always()
+        shell: bash
+        run: |
+          for pid_file in "$RUNNER_TEMP/dabernaz-pages-api.pid" "$RUNNER_TEMP/dabernaz-room-worker.pid"; do
+            if [ -f "$pid_file" ]; then
+              kill "$(cat "$pid_file")" 2>/dev/null || true
+            fi
+          done
+
+      - name: Upload end-to-end API, Worker, D1 and server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-pages-api-worker-integration
+          path: |
+            ${{ runner.temp }}/dabernaz-wallet-api.log
+            ${{ runner.temp }}/dabernaz-pages-room-api.log
+            ${{ runner.temp }}/dabernaz-pages-health.json
+            ${{ runner.temp }}/dabernaz-pages-api.log
+            ${{ runner.temp }}/dabernaz-room-worker.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  source-package:
+    name: Package source branch and calculate SHA-256
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
+    steps:
+      - name: Check out the exact workflow commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Create and verify source-only ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="dabernaz-source-${GITHUB_SHA}.zip"
+          git archive --format=zip --output="$RUNNER_TEMP/$archive" "$GITHUB_SHA"
+          unzip -t "$RUNNER_TEMP/$archive"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$archive" | tee "$archive.sha256"
+            sha256sum -c "$archive.sha256"
+          )
+          {
+            echo "### Source package"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- ZIP: $archive"
+            echo "- SHA-256:"
+            cat "$RUNNER_TEMP/$archive.sha256"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload source ZIP and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: dabernaz-source-release-candidate
+          path: |
+            ${{ runner.temp }}/dabernaz-source-${{ github.sha }}.zip
+            ${{ runner.temp }}/dabernaz-source-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
