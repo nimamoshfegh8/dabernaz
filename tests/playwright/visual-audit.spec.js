@@ -240,6 +240,7 @@ for (const colorScheme of colorSchemes) {
       expect(layout.headerOverlaps, 'header controls must not overlap at ' + viewport.width + 'px').toEqual([]);
       expect(layout.headerItems.every(item => !item.missing && item.height >= 44), 'header controls must have at least 44px height').toBe(true);
       expect(layout.shortPrimaryTargets, 'primary navigation and game actions must meet 44px touch target dimensions').toEqual([]);
+      expect(layout.smallTargets, 'all visible interactive controls must meet 44px touch target dimensions').toEqual([]);
       expect(
         layout.documentWidth,
         'horizontal overflow at ' + viewport.width + 'px in ' + colorScheme + ' mode'
