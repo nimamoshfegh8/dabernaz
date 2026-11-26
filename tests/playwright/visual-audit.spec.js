@@ -157,6 +157,44 @@ for (const colorScheme of colorSchemes) {
           .filter(item => item.text && item.fontSize < 12)
           .slice(0, 40);
 
+        const header = document.querySelector('.topbar');
+        const headerItems = ['.profile-chip', '.brand', '.balance-chip']
+          .map(selector => {
+            const element = header?.querySelector(selector);
+            if (!element) return { selector, missing: true };
+            const rect = element.getBoundingClientRect();
+            return {
+              selector,
+              left: Math.round(rect.left),
+              right: Math.round(rect.right),
+              top: Math.round(rect.top),
+              bottom: Math.round(rect.bottom),
+              height: Math.round(rect.height)
+            };
+          });
+        const headerOverlaps = [];
+        for (let i = 0; i < headerItems.length; i++) {
+          for (let j = i + 1; j < headerItems.length; j++) {
+            const a = headerItems[i], b = headerItems[j];
+            if (a.missing || b.missing) continue;
+            if (a.left < b.right - 1 && a.right > b.left + 1 &&
+                a.top < b.bottom - 1 && a.bottom > b.top + 1) {
+              headerOverlaps.push([a.selector, b.selector]);
+            }
+          }
+        }
+        const primaryTargets = Array.from(document.querySelectorAll(
+          '.topbar .profile-chip, .topbar .brand, .topbar .balance-chip, .bottom-nav .nav-item, .hero .btn, .game-card .btn, .promo .btn, .pwa-install-entry'
+        )).filter(visible).map(element => {
+          const rect = element.getBoundingClientRect();
+          return {
+            selector: element.className?.baseVal || String(element.className || element.tagName).slice(0, 80),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          };
+        });
+        const shortPrimaryTargets = primaryTargets.filter(target => target.height < 44 || target.width < 44);
+
         return {
           viewportWidth: window.innerWidth,
           documentWidth,
@@ -166,7 +204,11 @@ for (const colorScheme of colorSchemes) {
           direction: root.dir,
           overflowElements,
           smallTargets,
-          smallText
+          smallText,
+          headerItems,
+          headerOverlaps,
+          primaryTargets,
+          shortPrimaryTargets
         };
       });
 
@@ -185,6 +227,8 @@ for (const colorScheme of colorSchemes) {
         overflowCount: layout.overflowElements.length,
         smallTargetCount: layout.smallTargets.length,
         smallTextCount: layout.smallText.length,
+        headerOverlaps: layout.headerOverlaps.length,
+        shortPrimaryTargets: layout.shortPrimaryTargets.length,
         smallTargetSamples: layout.smallTargets.slice(0, 6).map(({ tag, width, height }) => ({ tag, width, height })),
         smallTextSamples: layout.smallText.slice(0, 6).map(({ tag, fontSize }) => ({ tag, fontSize }))
       }));
@@ -193,6 +237,9 @@ for (const colorScheme of colorSchemes) {
       expect(layout.hasMainContent, 'homepage must render main content').toBe(true);
       expect(layout.language, 'document language should be Persian').toBe('fa');
       expect(layout.direction, 'document direction should be RTL').toBe('rtl');
+      expect(layout.headerOverlaps, 'header controls must not overlap at ' + viewport.width + 'px').toEqual([]);
+      expect(layout.headerItems.every(item => !item.missing && item.height >= 44), 'header controls must have at least 44px height').toBe(true);
+      expect(layout.shortPrimaryTargets, 'primary navigation and game actions must meet 44px touch target dimensions').toEqual([]);
       expect(
         layout.documentWidth,
         'horizontal overflow at ' + viewport.width + 'px in ' + colorScheme + ' mode'
