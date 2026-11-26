@@ -98,12 +98,12 @@ jobs:
           retention-days: 14
 
   preview-browser-audit:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.head_ref == 'release/dabernaz-hardening')
     name: Chromium visual and route audit (live Preview, read-only)
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      PLAYWRIGHT_BASE_URL: https://test-playwright-audit.dabernaz.pages.dev
+      PLAYWRIGHT_BASE_URL: ${{ github.event_name == 'workflow_dispatch' && 'https://test-playwright-audit.dabernaz.pages.dev' || 'https://release-dabernaz-hardening.dabernaz.pages.dev' }}
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       PLAYWRIGHT_TRACE: "off"
