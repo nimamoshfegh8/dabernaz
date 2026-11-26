@@ -107,6 +107,7 @@ jobs:
       CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
       CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
       PLAYWRIGHT_TRACE: "off"
+      REQUIRE_ROOM_COORDINATOR: "1"
     steps:
       - name: Check out audit branch
         uses: actions/checkout@v4
@@ -125,7 +126,7 @@ jobs:
       - name: Install Chromium and system dependencies
         run: npx playwright install --with-deps chromium
 
-      - name: Require safe Preview core health; keep paid rooms fail-closed until Worker binding is deployed
+      - name: Require full Preview readiness, including the deployed Room Worker binding
         run: node scripts/preview-health-check.mjs
 
       - name: Run read-only Chromium audit against live Preview
