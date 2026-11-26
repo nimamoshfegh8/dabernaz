@@ -183,7 +183,7 @@ async function applyLocalMigrationsAndSeed() {
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", "migrations/0001_room_rounds_financial_queue.sql"]);
   const seed = [
-    ...Array.from({ length: 22 }, (_, index) => {
+    ...Array.from({ length: 27 }, (_, index) => {
       const id = 910001 + index;
       const n = index + 1;
       return `INSERT INTO users(id,username,password_hash,balance,bingo_coins,created_at,email,member_id,games_played,wins,points) VALUES(${id},'ci-room-user-${n}','test-only-not-a-real-credential',1000000,500,'2026-11-17T00:00:00.000Z','room-user-${n}@example.invalid','CIROOM${n}',0,0,0);`;
@@ -193,8 +193,8 @@ async function applyLocalMigrationsAndSeed() {
   await writeFile(tempSql, seed, "utf8");
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", tempSql]);
-  const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910022");
-  assert.equal(Number(users.count), 22, "Twenty-two isolated synthetic test users must be seeded");
+  const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910027");
+  assert.equal(Number(users.count), 27, "Twenty-seven isolated synthetic test users must be seeded");
   const schema = one("SELECT MAX(version) AS version FROM schema_migrations");
   assert.equal(Number(schema.version), 1, "Both versioned D1 migrations must be applied locally");
 }
@@ -290,9 +290,9 @@ async function main() {
 
   // A five-card purchase is valid, retries with the same key are replayed, a
   // changed payload is rejected, and a sixth card in that round is rejected.
-  const firstBefore = Number(one("SELECT balance FROM users WHERE id=910001").balance);
+  const firstBefore = Number(one("SELECT balance FROM users WHERE id=910023").balance);
   const first = await requestRoom("room5000", {
-    method: "POST", action: "join", userId: 910001, idempotencyKey: "five-card-round-purchase-0001",
+    method: "POST", action: "join", userId: 910023, idempotencyKey: "five-card-round-purchase-0001",
     body: { cardsCount: 5, purchaseConfirmed: true },
   });
   assert.equal(first.status, 200, JSON.stringify(first.data));
@@ -301,26 +301,26 @@ async function main() {
   first.data.room.myCards.forEach(assertValidCard);
 
   const replay = await requestRoom("room5000", {
-    method: "POST", action: "join", userId: 910001, idempotencyKey: "five-card-round-purchase-0001",
+    method: "POST", action: "join", userId: 910023, idempotencyKey: "five-card-round-purchase-0001",
     body: { cardsCount: 5, purchaseConfirmed: true },
   });
   assert.equal(replay.status, 200);
   assert.equal(replay.data.purchase.replayed, true);
   const changedPayload = await requestRoom("room5000", {
-    method: "POST", action: "join", userId: 910001, idempotencyKey: "five-card-round-purchase-0001",
+    method: "POST", action: "join", userId: 910023, idempotencyKey: "five-card-round-purchase-0001",
     body: { cardsCount: 4, purchaseConfirmed: true },
   });
   assert.equal(changedPayload.status, 409);
   const sixth = await requestRoom("room5000", {
-    method: "POST", action: "join", userId: 910001, idempotencyKey: "sixth-card-must-fail-0001",
+    method: "POST", action: "join", userId: 910023, idempotencyKey: "sixth-card-must-fail-0001",
     body: { cardsCount: 1, purchaseConfirmed: true },
   });
   assert.equal(sixth.status, 409);
-  assert.equal(Number(one("SELECT balance FROM users WHERE id=910001").balance), firstBefore - 25_000);
-  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE user_id=910001 AND room_id='room5000'").count), 1);
+  assert.equal(Number(one("SELECT balance FROM users WHERE id=910023").balance), firstBefore - 25_000);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE user_id=910023 AND room_id='room5000'").count), 1);
 
   const second = await requestRoom("room5000", {
-    method: "POST", action: "join", userId: 910002, idempotencyKey: "second-player-round-0001",
+    method: "POST", action: "join", userId: 910024, idempotencyKey: "second-player-round-0001",
     body: { cardsCount: 1, purchaseConfirmed: true },
   });
   assert.equal(second.status, 200, JSON.stringify(second.data));
@@ -328,41 +328,41 @@ async function main() {
 
   // A concurrent duplicate using the same key must produce one debit and one
   // purchase record, even when the caller sends both requests simultaneously.
-  const concurrentBefore = Number(one("SELECT balance FROM users WHERE id=910005").balance);
+  const concurrentBefore = Number(one("SELECT balance FROM users WHERE id=910025").balance);
   const concurrent = await Promise.all([
     requestRoom("room20000", {
-      method: "POST", action: "join", userId: 910005, idempotencyKey: "concurrent-identical-key-0001",
+      method: "POST", action: "join", userId: 910025, idempotencyKey: "concurrent-identical-key-0001",
       body: { cardsCount: 2, purchaseConfirmed: true },
     }),
     requestRoom("room20000", {
-      method: "POST", action: "join", userId: 910005, idempotencyKey: "concurrent-identical-key-0001",
+      method: "POST", action: "join", userId: 910025, idempotencyKey: "concurrent-identical-key-0001",
       body: { cardsCount: 2, purchaseConfirmed: true },
     }),
   ]);
   assert.deepEqual(concurrent.map((item) => item.status).sort(), [200, 200]);
   assert.equal(concurrent.filter((item) => item.data.purchase.replayed).length, 1);
-  assert.equal(Number(one("SELECT balance FROM users WHERE id=910005").balance), concurrentBefore - 40_000);
-  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE user_id=910005 AND room_id='room20000'").count), 1);
+  assert.equal(Number(one("SELECT balance FROM users WHERE id=910025").balance), concurrentBefore - 40_000);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE user_id=910025 AND room_id='room20000'").count), 1);
 
   // The second round is accepted while the first game is playing. Once its
   // own 150-second-equivalent test deadline expires, it must wait in the queue.
-  const firstPlaying = await waitForSnapshot("room5000", 910001, (room) => room.status === "playing", 30_000);
+  const firstPlaying = await waitForSnapshot("room5000", 910023, (room) => room.status === "playing", 30_000);
   assert.equal(firstPlaying.joined, true);
   const nextA = await requestRoom("room5000", {
-    method: "POST", action: "join", userId: 910003, idempotencyKey: "future-round-player-a-0001",
+    method: "POST", action: "join", userId: 910026, idempotencyKey: "future-round-player-a-0001",
     body: { cardsCount: 1, purchaseConfirmed: true },
   });
   assert.equal(nextA.status, 200, JSON.stringify(nextA.data));
   assert.equal(nextA.data.room.status, "playing");
   assert.equal(nextA.data.room.joined, false, "Future-round players must not be mistaken for current-round players");
   const nextB = await requestRoom("room5000", {
-    method: "POST", action: "join", userId: 910004, idempotencyKey: "future-round-player-b-0001",
+    method: "POST", action: "join", userId: 910027, idempotencyKey: "future-round-player-b-0001",
     body: { cardsCount: 1, purchaseConfirmed: true },
   });
   assert.equal(nextB.status, 200, JSON.stringify(nextB.data));
   assert.equal(nextB.data.room.status, "playing");
 
-  const queued = await waitForSnapshot("room5000", 910003,
+  const queued = await waitForSnapshot("room5000", 910026,
     (room) => room.status === "playing" && room.nextRound?.status === "waiting_for_room", 30_000);
   assert.equal(queued.nextRound.joined, true);
   assert.equal(queued.nextRound.playerCount, 2);
@@ -375,13 +375,13 @@ async function main() {
   await stopWorker();
   startWorker();
   await waitForServer();
-  const afterRestart = await waitForSnapshot("room5000", 910001,
+  const afterRestart = await waitForSnapshot("room5000", 910023,
     (room) => room.status === "playing" && room.allCalledNumbers.length > calledBeforeRestart, 12_000);
   assert.ok(afterRestart.allCalledNumbers.length > calledBeforeRestart,
     "The game must resume from durable state after the Worker restarts");
 
   const round1Id = queued.roundId;
-  const completed = await waitForSnapshot("room5000", 910003,
+  const completed = await waitForSnapshot("room5000", 910026,
     (room) => (room.recentSessions || []).some((session) => session.roundId === round1Id), 75_000);
   const round1 = one("SELECT id,status,gross_revenue,line_prize_paid,full_prize_paid,site_commission,called_numbers_json FROM room_rounds WHERE room_id='room5000' AND sequence=1");
   assert.equal(round1.status, "completed");
@@ -407,7 +407,7 @@ async function main() {
   assert.equal(secondRound.status, "playing", "The oldest ready round must start first");
 
   // Verify the append-only database contract is enforced, not merely documented.
-  const ledgerRow = one("SELECT id FROM financial_ledger WHERE user_id=910001 AND operation='room_purchase' LIMIT 1");
+  const ledgerRow = one("SELECT id FROM financial_ledger WHERE user_id=910023 AND operation='room_purchase' LIMIT 1");
   let updateBlocked = false;
   try {
     query("UPDATE financial_ledger SET amount=amount WHERE id='" + String(ledgerRow.id).replace(/'/g, "''") + "'");
