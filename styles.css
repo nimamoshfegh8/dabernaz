@@ -982,7 +982,7 @@
 .nav-item{min-height:44px;padding:5px 1px 4px;font-size:8px;}
 .bottom-nav{grid-template-columns:repeat(8,minmax(44px,1fr));overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;}
 .bottom-nav::-webkit-scrollbar{display:none;}
-.game-card .btn,.promo .btn{min-height:44px;}
+.game-card .btn,.promo .btn,.hero .btn,.pwa-install-entry{min-height:44px;}
 @media(max-width:380px){
   .topbar{padding-left:6px;padding-right:6px;gap:3px;}
   .brand{font-size:clamp(13px,4vw,16px);}
