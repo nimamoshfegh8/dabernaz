@@ -130,7 +130,8 @@ while (Date.now() <= deadline) {
   const unavailableFeatures = Array.isArray(health?.unavailableFeatures)
     ? health.unavailableFeatures
     : [];
-  const expectedPaidRoomsDegraded = health?.readiness === 'degraded' &&
+  const requireRoomCoordinator = process.env.REQUIRE_ROOM_COORDINATOR === '1';
+  const expectedPaidRoomsDegraded = !requireRoomCoordinator && health?.readiness === 'degraded' &&
     health?.ok === true &&
     health?.roomCoordinator?.available === false &&
     unavailableFeatures.length === 1 &&
