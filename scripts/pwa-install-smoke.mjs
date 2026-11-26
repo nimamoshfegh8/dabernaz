@@ -30,13 +30,13 @@ assert.doesNotMatch(index, /<main\b[^>]*aria-live=/,
 assert.match(index, /apple-touch-icon/);
 assert.match(index, /pwa-entry\.js/);
 assert.match(index, /pwa-install\.css/);
-assert.match(sw, /dabernaz-shell-v34/);
+assert.match(sw, /dabernaz-shell-v35/);
 for (const asset of ['./install.html', './install.js', './pwa-entry.js', './pwa-install.css', './icon-192.png', './icon-512.png', './icon-maskable-512.png']) {
   assert.ok(sw.includes(asset), 'service worker must precache ' + asset);
   assert.ok(build.includes("'" + asset.slice(2) + "'") || build.includes("'" + asset + "'"), 'Pages build must copy ' + asset);
 }
 assert.match(sw, /install\.html/);
-assert.match(register, /sw\.js\?v=20/);
+assert.match(register, /sw\.js\?v=21/);
 assert.match(installHtml, /pwaInstallButton/);
 assert.match(installHtml, /iosInstructions/);
 assert.match(installJs, /beforeinstallprompt/);
