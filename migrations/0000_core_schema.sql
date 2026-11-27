@@ -12,7 +12,7 @@ INSERT OR IGNORE INTO schema_migrations(version,name) VALUES (0,'core_schema');
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
-  phone TEXT,
+  phone TEXT UNIQUE,
   password_hash TEXT NOT NULL,
   balance INTEGER NOT NULL DEFAULT 0,
   bingo_coins INTEGER NOT NULL DEFAULT 0,
