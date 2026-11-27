@@ -41,7 +41,7 @@ jobs:
         run: npm ci
 
       - name: Install Wrangler v4 for local-only Cloudflare emulation
-        run: npm install --no-save --package-lock=false wrangler@4
+        run: npm install --no-save --package-lock=false wrangler@4.168.0
 
       - name: Set up PHP CLI for isolated fallback tests
         uses: shivammathur/setup-php@v2
@@ -161,7 +161,7 @@ jobs:
       - name: Install project dependencies and local Wrangler
         run: |
           npm ci
-          npm install --no-save --package-lock=false wrangler@4
+          npm install --no-save --package-lock=false wrangler@4.168.0
 
       - name: Set up PHP CLI for fallback guard
         uses: shivammathur/setup-php@v2
