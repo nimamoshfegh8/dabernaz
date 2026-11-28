@@ -14,6 +14,7 @@ const persist = await mkdtemp(path.join(tmpdir(), "dabernaz-room-do-"));
 const tempSql = path.join(persist, "seed.sql");
 let worker = null;
 let workerLog = "";
+let workerExit = null;
 let failed = false;
 
 function wrangler(args, options = {}) {
@@ -72,6 +73,7 @@ function one(sql) {
 
 function startWorker() {
   workerLog = "";
+  workerExit = null;
   worker = spawn("npx", [
     "wrangler", "dev",
     "--config", config,
@@ -87,7 +89,8 @@ function startWorker() {
   worker.stdout.on("data", (chunk) => { workerLog = (workerLog + chunk.toString()).slice(-20_000); });
   worker.stderr.on("data", (chunk) => { workerLog = (workerLog + chunk.toString()).slice(-20_000); });
   worker.once("exit", (code, signal) => {
-    if (!failed && code !== 0 && signal !== "SIGTERM") {
+    workerExit = { code, signal };
+    if (!failed && signal !== "SIGTERM") {
       console.error("Local Worker exited unexpectedly:", code, signal, workerLog);
     }
   });
@@ -144,11 +147,25 @@ async function requestRoom(roomId, options = {}) {
   if (options.userId) headers.set("x-dabernaz-user-id", String(options.userId));
   if (options.idempotencyKey) headers.set("Idempotency-Key", options.idempotencyKey);
   if (options.body !== undefined) headers.set("content-type", "application/json");
-  const response = await fetch(baseUrl + `/rooms/${roomId}` + (options.action ? `/${options.action}` : ""), {
-    method: options.method || "GET",
-    headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  });
+  const url = baseUrl + `/rooms/${roomId}` + (options.action ? `/${options.action}` : "");
+  let response = null;
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(url, {
+        method: options.method || "GET",
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      });
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await delay(200 * (attempt + 1));
+    }
+  }
+  if (!response) {
+    throw new Error(`Local Worker request failed after retries (exit=${JSON.stringify(workerExit)}): ${lastError}; logs: ${workerLog.slice(-4000)}`);
+  }
   const data = await response.json().catch(() => ({}));
   return { status: response.status, data };
 }
@@ -317,6 +334,8 @@ async function main() {
     "The refund transaction must reference its exact round");
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE user_id=" + soloUserId + " AND type='room_refund' AND amount=20000 AND description=(SELECT 'بازپرداخت کامل دور تک‌نفره ' || round_id FROM room_refunds WHERE purchase_id='" + soloPurchaseId + "')").count), 1,
     "Exactly one refund transaction linked to the refunded round must exist");
+  await waitForServer();
+  await assertWorkerHealth();
 
   // A five-card purchase is valid, retries with the same key are replayed, a
   // changed payload is rejected, and a sixth card in that round is rejected.
