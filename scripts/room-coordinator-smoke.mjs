@@ -121,7 +121,7 @@ async function waitForServer() {
       throw new Error(`Local Worker stopped before becoming ready.\n${workerLog}`);
     }
     try {
-      const response = await fetch(baseUrl + "/rooms/room5000");
+      const response = await fetch(baseUrl + "/rooms/room5000", { signal: AbortSignal.timeout(3_000) });
       if (response.ok) return;
       lastError = new Error(`Worker returned HTTP ${response.status}`);
     } catch (error) {
@@ -133,7 +133,7 @@ async function waitForServer() {
 }
 
 async function assertWorkerHealth() {
-  const response = await fetch(baseUrl + "/health");
+  const response = await fetch(baseUrl + "/health", { signal: AbortSignal.timeout(5_000) });
   const data = await response.json().catch(() => ({}));
   assert.equal(response.status, 200, "Worker health must confirm the D1 and Durable Object bindings: " + JSON.stringify(data));
   assert.equal(data.ready, true);
@@ -156,6 +156,7 @@ async function requestRoom(roomId, options = {}) {
         method: options.method || "GET",
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: AbortSignal.timeout(5_000),
       });
       break;
     } catch (error) {
