@@ -98,6 +98,8 @@ const healthBody = await healthResponse.json();
 assert.equal(healthBody.schema, 'v4', 'API health must report the complete D1 schema');
 assert.equal(healthBody.walletRequests?.idempotency, true, 'wallet idempotency table must be observable');
 assert.equal(healthBody.tournamentEntries?.idempotency, true, 'tournament idempotency table must be observable');
+assert.equal(healthBody.roomCoordinator?.ready, true, 'health must probe the actual room coordinator and Durable Object');
+assert.equal(healthBody.roomCoordinator?.transactionRoundLink, true, 'health must verify the round-linked transaction schema');
 assert.equal(healthBody.readiness, 'ready', 'mocked Pages and room service bindings should report ready');
 assert.deepEqual(writes, [], 'health readiness checks must remain read-only');
 
