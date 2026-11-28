@@ -654,7 +654,7 @@ export class RoomCoordinator extends DurableObject {
             ).bind(purchase.amount, purchase.user_id),
             this.env.DB.prepare(
               "INSERT INTO transactions(user_id,type,amount,description,created_at,round_id) " +
-              "SELECT ?,'room_refund',?,?,?,?,? WHERE changes()=1"
+              "SELECT ?,'room_refund',?,?,?,? WHERE changes()=1"
             ).bind(purchase.user_id, purchase.amount, "بازپرداخت کامل دور تک‌نفره " + roundId, new Date(now).toISOString(), roundId),
             this.env.DB.prepare(
               "INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) " +
@@ -789,7 +789,7 @@ export class RoomCoordinator extends DurableObject {
             "UPDATE users SET balance=balance+? WHERE id=? AND changes()=1"
           ).bind(allocation.amount, allocation.userId),
           this.env.DB.prepare(
-            "INSERT INTO transactions(user_id,type,amount,description,created_at,round_id) SELECT ?,'room_prize',?,?,?,?,? WHERE changes()=1"
+            "INSERT INTO transactions(user_id,type,amount,description,created_at,round_id) SELECT ?,'room_prize',?,?,?,? WHERE changes()=1"
           ).bind(allocation.userId, allocation.amount, kind === "line" ? "جایزه برنده خطی" : "جایزه برنده کامل", new Date(now).toISOString(), round.id),
           this.env.DB.prepare(
             "INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) " +
