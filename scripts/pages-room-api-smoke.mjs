@@ -134,6 +134,13 @@ const emailList = accounts.map(account => sqlString(account.email)).join(',');
 d1("UPDATE users SET balance=" + startingBalance + " WHERE email IN (" + emailList + ");");
 for (const account of accounts) assert.equal(Number((await me(account)).balance), startingBalance);
 
+const healthCheck = await raw('/api/health');
+assert.equal(healthCheck.response.status, 200, 'Pages health must verify the live Worker and Durable Object: ' + JSON.stringify(healthCheck.data));
+assert.equal(healthCheck.data.schema, 'v4');
+assert.equal(healthCheck.data.roomCoordinator?.ready, true);
+assert.equal(healthCheck.data.roomCoordinator?.durableObject?.ready, true);
+assert.equal(healthCheck.data.roomCoordinator?.transactionRoundLink, true);
+
 const rateSince = Math.floor(Date.now() / 1000) - 600;
 const rateEmail = sqlString(accounts[0].email);
 const rateState = d1("SELECT " +
@@ -214,6 +221,8 @@ assert.equal(Number((await me(accounts[0])).balance), afterFive,
 const round1 = d1("SELECT id,sequence,status,registration_deadline FROM room_rounds WHERE room_id='room5000' ORDER BY sequence");
 assert.equal(round1.length, 1);
 const round1Id = round1[0].id;
+assert.equal(Number(d1("SELECT COUNT(*) AS count FROM transactions WHERE type='room_entry' AND round_id=" + sqlString(round1Id))[0].count), 3,
+  'all initial and additional room purchases must reference the exact round');
 
 // Repeated room GETs are read-only: they cannot draw a number or change round state.
 const readBefore = d1("SELECT status,called_numbers_json,next_draw_at FROM room_rounds WHERE id=" + sqlString(round1Id))[0];
@@ -270,6 +279,10 @@ assert.equal(Number(finance.line_prize_paid) + Number(finance.full_prize_paid) +
 assert.equal(Number(finance.line_prize_paid), 3000);
 assert.equal(Number(finance.full_prize_paid), 22500);
 assert.equal(Number(finance.site_commission), 4500);
+const payoutCount = Number(d1("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id=" + sqlString(round1Id))[0].count);
+const payoutTransactionCount = Number(d1("SELECT COUNT(*) AS count FROM transactions WHERE type='room_prize' AND round_id=" + sqlString(round1Id))[0].count);
+assert.equal(payoutTransactionCount, payoutCount,
+  'every room payout must have exactly one transaction with the same round_id');
 assert.equal(d1("SELECT COUNT(*) AS count FROM room_player_stats WHERE round_id=" + sqlString(round1Id))[0].count, 2);
 assert.equal(d1("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id=" + sqlString(round1Id))[0].count > 0, true);
 
@@ -287,6 +300,8 @@ assert.equal(Number((await me(accounts[0])).balance), refundBefore,
   'single-player cancellation must return the full amount');
 const refundCount = d1("SELECT COUNT(*) AS count FROM room_refunds WHERE round_id=" + sqlString(refundRound))[0].count;
 assert.equal(Number(refundCount), 1, 'the valid purchase must be refunded once');
+assert.equal(Number(d1("SELECT COUNT(*) AS count FROM transactions WHERE type='room_refund' AND round_id=" + sqlString(refundRound))[0].count), 1,
+  'the refund transaction must reference its exact round');
 const refundLedgerCount = d1("SELECT COUNT(*) AS count FROM financial_ledger WHERE operation='room_refund' AND reference_id IN (SELECT id FROM room_purchases WHERE round_id=" + sqlString(refundRound) + ")")[0].count;
 assert.equal(Number(refundLedgerCount), 1, 'refund must be represented once in the financial ledger');
 
