@@ -133,7 +133,9 @@ while (Date.now() <= deadline) {
   const requireRoomCoordinator = process.env.REQUIRE_ROOM_COORDINATOR === '1';
   const expectedPaidRoomsDegraded = !requireRoomCoordinator && health?.readiness === 'degraded' &&
     health?.ok === true &&
+    health?.roomCoordinator?.bindingAvailable === false &&
     health?.roomCoordinator?.available === false &&
+    health?.roomCoordinator?.ready === false &&
     unavailableFeatures.length === 1 &&
     unavailableFeatures[0] === 'paid_rooms';
 
@@ -143,9 +145,10 @@ while (Date.now() <= deadline) {
     jsonParseable: Boolean(health && typeof health === 'object'),
     healthOk: health?.ok === true,
     readinessCompatible: health?.readiness === 'ready' || expectedPaidRoomsDegraded,
-    schemaV3: health?.schema === 'v3',
-    roomCoordinatorStateValid: typeof health?.roomCoordinator?.available === 'boolean',
-    paidRoomsFailClosed: health?.roomCoordinator?.available === true || expectedPaidRoomsDegraded,
+    schemaV4: health?.schema === 'v4',
+    roomCoordinatorStateValid: typeof health?.roomCoordinator?.available === 'boolean' && typeof health?.roomCoordinator?.ready === 'boolean' && typeof health?.roomCoordinator?.bindingAvailable === 'boolean',
+    roomCoordinatorReady: health?.roomCoordinator?.ready === true || expectedPaidRoomsDegraded,
+    paidRoomsFailClosed: health?.roomCoordinator?.ready === true || expectedPaidRoomsDegraded,
     walletIdempotency: health?.walletRequests?.idempotency === true,
     tournamentIdempotency: health?.tournamentEntries?.idempotency === true,
   };
