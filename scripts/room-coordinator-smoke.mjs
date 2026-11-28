@@ -191,6 +191,7 @@ async function applyLocalMigrationsAndSeed() {
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", "migrations/0000_core_schema.sql"]);
   for (const migration of [
+    "migrations/0001_room_rounds_financial_queue.sql",
     "migrations/0002_wallet_request_idempotency.sql",
     "migrations/0003_tournament_entry_idempotency.sql",
     "migrations/0004_transaction_round_link.sql",
