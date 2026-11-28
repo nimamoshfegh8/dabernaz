@@ -112,7 +112,7 @@ async function assertSchemaReady(db) {
   if (bootstrappedBindings.has(db)) return;
   try {
     const row = await db.prepare('SELECT MAX(version) AS version FROM schema_migrations').first();
-    if (Number(row?.version) < 3) {
+    if (Number(row?.version) < 4) {
       throw new HttpError(503, 'ساختار پایگاه داده هنوز به نسخه موردنیاز ارتقا نیافته است.');
     }
     const required = await db.prepare(
@@ -120,6 +120,11 @@ async function assertSchemaReady(db) {
     ).first();
     if (Number(required?.total) !== 11) {
       throw new HttpError(503, 'بخشی از ساختار پایگاه داده ناقص است؛ اجرای Migration لازم است.');
+    }
+    try {
+      await db.prepare('SELECT round_id FROM transactions LIMIT 0').all();
+    } catch (_) {
+      throw new HttpError(503, 'ستون اتصال تراکنش‌ها به دور بازی در Schema موجود نیست.');
     }
     bootstrappedBindings.add(db);
   } catch (error) {
@@ -1592,6 +1597,7 @@ async function routeRequest(request, env) {
   // binding. A healthy D1 alone must never make an unconnected game engine look
   // ready. The route is read-only and intentionally does not advance any state.
   if (request.method === 'GET' && path === '/api/health') {
+    const bindingAvailable = typeof env.ROOM_COORDINATOR?.fetch === 'function';
     if (!env.DB) {
       return json({
         ok: false,
@@ -1599,7 +1605,7 @@ async function routeRequest(request, env) {
         backend: 'cloudflare-pages-functions',
         database: 'missing',
         schema: 'unknown',
-        roomCoordinator: { available: false },
+        roomCoordinator: { available: false, ready: false, bindingAvailable, binding: 'ROOM_COORDINATOR' },
         walletRequests: { idempotency: false },
         tournamentEntries: { idempotency: false },
         readiness: 'misconfigured',
@@ -1612,7 +1618,30 @@ async function routeRequest(request, env) {
       await assertSchemaReady(env.DB);
       const version = await env.DB.prepare('SELECT MAX(version) AS version FROM schema_migrations').first();
       const schemaVersion = Number(version?.version) || 0;
-      const roomCoordinatorAvailable = typeof env.ROOM_COORDINATOR?.fetch === 'function';
+      const roomCoordinator = {
+        available: bindingAvailable,
+        ready: false,
+        bindingAvailable,
+        binding: 'ROOM_COORDINATOR',
+      };
+      if (bindingAvailable) {
+        try {
+          const response = await env.ROOM_COORDINATOR.fetch(new Request(
+            'https://dabernaz-room-coordinator.internal/health',
+            { method: 'GET' }
+          ));
+          const body = await response.json().catch(() => null);
+          const workerSchema = Number(String(body?.schema || '').replace(/^v/, ''));
+          roomCoordinator.ready = response.ok && body?.ok === true && body?.ready === true &&
+            workerSchema >= 4 && body?.durableObject?.ready === true &&
+            body?.transactionRoundLink === true;
+          roomCoordinator.schema = body?.schema || null;
+          roomCoordinator.durableObject = body?.durableObject || { available: false, ready: false };
+          roomCoordinator.transactionRoundLink = body?.transactionRoundLink === true;
+        } catch (_) {
+          roomCoordinator.ready = false;
+        }
+      }
       let walletIdempotencyAvailable = false;
       try {
         await env.DB.prepare('SELECT 1 FROM wallet_request_idempotency LIMIT 1').first();
@@ -1623,9 +1652,9 @@ async function routeRequest(request, env) {
         await env.DB.prepare('SELECT 1 FROM tournament_entry_idempotency LIMIT 1').first();
         tournamentIdempotencyAvailable = true;
       } catch (_) {}
-      const readiness = roomCoordinatorAvailable && walletIdempotencyAvailable && tournamentIdempotencyAvailable ? 'ready' : 'degraded';
+      const readiness = roomCoordinator.ready && walletIdempotencyAvailable && tournamentIdempotencyAvailable ? 'ready' : 'degraded';
       const unavailableFeatures = [];
-      if (!roomCoordinatorAvailable) unavailableFeatures.push('paid_rooms');
+      if (!roomCoordinator.ready) unavailableFeatures.push('paid_rooms');
       if (!walletIdempotencyAvailable) unavailableFeatures.push('wallet_request_submission');
       if (!tournamentIdempotencyAvailable) unavailableFeatures.push('tournament_entry_idempotency');
       return json({
@@ -1635,10 +1664,7 @@ async function routeRequest(request, env) {
         database: 'D1',
         schema: 'v' + schemaVersion,
         binding: 'bound',
-        roomCoordinator: {
-          available: roomCoordinatorAvailable,
-          binding: 'ROOM_COORDINATOR',
-        },
+        roomCoordinator,
         walletRequests: {
           idempotency: walletIdempotencyAvailable,
           migration: walletIdempotencyAvailable ? 2 : null,
@@ -1659,7 +1685,7 @@ async function routeRequest(request, env) {
         backend: 'cloudflare-pages-functions',
         database: 'unreachable_or_unready',
         schema: 'unknown',
-        roomCoordinator: { available: typeof env.ROOM_COORDINATOR?.fetch === 'function' },
+        roomCoordinator: { available: bindingAvailable, ready: false, bindingAvailable, binding: 'ROOM_COORDINATOR' },
         walletRequests: { idempotency: false },
         tournamentEntries: { idempotency: false },
         readiness: 'degraded',
