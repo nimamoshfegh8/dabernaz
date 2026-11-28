@@ -21,7 +21,7 @@ function createStatement(sql) {
   return {
     bind(...values) { params = values; return this; },
     async first() {
-      if (/MAX\(version\)/i.test(sql)) return { version: 3 };
+      if (/MAX\(version\)/i.test(sql)) return { version: 4 };
       if (/sqlite_master/i.test(sql)) return { total: 11 };
       if (/FROM auth_sessions\s+s\s+JOIN users/i.test(sql)) return user;
       if (/SELECT bingo_coins FROM users/i.test(sql)) return { bingo_coins: user.bingo_coins };
@@ -47,6 +47,15 @@ const DB = {
 const ROOM_COORDINATOR = {
   async fetch(request) {
     if (request.method !== 'GET') writes.push({ kind: 'room-service-write', method: request.method });
+    if (new URL(request.url).pathname === '/health') {
+      return new Response(JSON.stringify({
+        ok: true,
+        ready: true,
+        schema: 'v4',
+        transactionRoundLink: true,
+        durableObject: { available: true, ready: true }
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     return new Response(JSON.stringify({
       ok: true,
       room: { id: 'room5000', status: 'waiting', joined: false, playerCount: 0 }
@@ -86,7 +95,7 @@ const healthResponse = await onRequest({
   env
 });
 const healthBody = await healthResponse.json();
-assert.equal(healthBody.schema, 'v3', 'API health must report the complete D1 schema');
+assert.equal(healthBody.schema, 'v4', 'API health must report the complete D1 schema');
 assert.equal(healthBody.walletRequests?.idempotency, true, 'wallet idempotency table must be observable');
 assert.equal(healthBody.tournamentEntries?.idempotency, true, 'tournament idempotency table must be observable');
 assert.equal(healthBody.readiness, 'ready', 'mocked Pages and room service bindings should report ready');
