@@ -367,8 +367,7 @@ async function main() {
   // Force one identical card for two different users so the smoke test proves
   // simultaneous line/full winners are both recorded and share each prize.
   const sharedCard = JSON.stringify(second.data.room.myCards[0]).replace(/'/g, "''");
-  const firstCardRow = one("SELECT id FROM room_cards WHERE round_id='" + firstRoundId + "' AND user_id=910023 ORDER BY card_number LIMIT 1");
-  query("UPDATE room_cards SET card_json='" + sharedCard + "' WHERE id='" + firstCardRow.id + "'");
+  query("UPDATE room_cards SET card_json='" + sharedCard + "' WHERE round_id='" + firstRoundId + "' AND user_id=910023");
 
   // A concurrent duplicate using the same key must produce one debit and one
   // purchase record, even when the caller sends both requests simultaneously.
