@@ -391,6 +391,9 @@ async function main() {
   // own 150-second-equivalent test deadline expires, it must wait in the queue.
   const firstPlaying = await waitForSnapshot("room5000", 910023, (room) => room.status === "playing", 30_000);
   assert.equal(firstPlaying.joined, true);
+  assert.equal(firstPlaying.allPlayerCards.length, 6, "All six purchased cards must be visible to a player in the active round");
+  assert.equal(new Set(firstPlaying.allPlayerCards.map((card) => card.playerName)).size, 2,
+    "The active room view must include cards belonging to both participating players");
   const nextA = await requestRoom("room5000", {
     method: "POST", action: "join", userId: 910026, idempotencyKey: "future-round-player-a-0001",
     body: { cardsCount: 1, purchaseConfirmed: true },
@@ -427,7 +430,7 @@ async function main() {
   const round1Id = queued.roundId;
   const completed = await waitForSnapshot("room5000", 910026,
     (room) => (room.recentSessions || []).some((session) => session.roundId === round1Id), 75_000);
-  const round1 = one("SELECT id,status,gross_revenue,line_prize_paid,full_prize_paid,site_commission,called_numbers_json FROM room_rounds WHERE room_id='room5000' AND sequence=1");
+  const round1 = one("SELECT id,status,gross_revenue,line_prize_paid,full_prize_paid,site_commission,called_numbers_json,line_winners_json,full_winners_json FROM room_rounds WHERE room_id='room5000' AND sequence=1");
   assert.equal(round1.status, "completed");
   const lineWinners = JSON.parse(round1.line_winners_json);
   const fullWinners = JSON.parse(round1.full_winners_json);
