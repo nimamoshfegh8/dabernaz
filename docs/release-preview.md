@@ -15,7 +15,7 @@ This release branch is deployed only to the Cloudflare Pages **Preview** environ
 A Preview deployment is not considered ready for paid rooms unless `GET /api/health` returns HTTP 200 with:
 
 - `readiness: "ready"`
-- `schema: "v3"`
+- `schema: "v4"`
 - `roomCoordinator.available: true`
 - `walletRequests.idempotency: true`
 - `tournamentEntries.idempotency: true`
