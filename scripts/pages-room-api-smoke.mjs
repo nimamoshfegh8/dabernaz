@@ -134,6 +134,15 @@ const emailList = accounts.map(account => sqlString(account.email)).join(',');
 d1("UPDATE users SET balance=" + startingBalance + " WHERE email IN (" + emailList + ");");
 for (const account of accounts) assert.equal(Number((await me(account)).balance), startingBalance);
 
+const appliedMigrationNames = d1("SELECT name FROM d1_migrations ORDER BY id").map((row) => row.name);
+assert.deepEqual(appliedMigrationNames, [
+  "0000_core_schema.sql",
+  "0001_room_rounds_financial_queue.sql",
+  "0002_wallet_request_idempotency.sql",
+  "0003_tournament_entry_idempotency.sql",
+  "0004_transaction_round_link.sql",
+], "Wrangler must track every applied D1 migration exactly once");
+
 const healthCheck = await raw('/api/health');
 assert.equal(healthCheck.response.status, 200, 'Pages health must verify the live Worker and Durable Object: ' + JSON.stringify(healthCheck.data));
 assert.equal(healthCheck.data.schema, 'v4');
