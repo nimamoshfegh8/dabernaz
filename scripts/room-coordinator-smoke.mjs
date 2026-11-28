@@ -473,7 +473,14 @@ async function main() {
   }
   assert.equal(updateBlocked, true, "Financial ledger UPDATE must be rejected by the database trigger");
 
-  console.log("Room coordinator integration checks passed: GET read-only (including mutation paths), server pricing, one-time refund, idempotent and concurrent purchase, 20-player capacity, five-card cap, independent queue, worker restart, payouts and append-only ledger.");
+  const unlinkedRoomTransactions = Number(one(
+    "SELECT COUNT(*) AS count FROM transactions WHERE type IN ('room_entry','room_refund','room_prize') AND round_id IS NULL"
+  ).count);
+  assert.equal(unlinkedRoomTransactions, 0, "Every new room purchase, refund and prize transaction must link to its round");
+  assert.equal(one("PRAGMA integrity_check").integrity_check, "ok", "The isolated D1 database must pass SQLite integrity_check");
+  assert.equal(query("PRAGMA foreign_key_check").length, 0, "The isolated D1 database must have no foreign-key violations");
+
+  console.log("Room coordinator integration checks passed: live health, GET read-only, server pricing, invalid six-card rejection, one-time refund, idempotent/concurrent purchases, 20-player capacity, five-card cap, simultaneous winners, exact payout splits, round-linked transactions, worker restart, and SQLite integrity.");
 }
 
 try {
