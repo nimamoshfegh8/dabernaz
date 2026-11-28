@@ -17,10 +17,20 @@ A Preview deployment is not considered ready for paid rooms unless `GET /api/hea
 - `readiness: "ready"`
 - `schema: "v4"`
 - `roomCoordinator.available: true`
+- `roomCoordinator.ready: true`
+- `roomCoordinator.durableObject.ready: true`
+- `roomCoordinator.transactionRoundLink: true`
 - `walletRequests.idempotency: true`
 - `tournamentEntries.idempotency: true`
 
 Read-only checks may then request `GET /api/rooms/room5000` to verify the Pages-to-Worker route without creating a user, joining a room, charging a wallet, or changing room state.
+
+## D1 migration tracking
+
+- `schema_migrations` is the application's schema-version contract; the current Preview version is 4.
+- `d1_migrations` is Wrangler's migration-file tracker. It records `0000_core_schema.sql` through `0004_transaction_round_link.sql`.
+- Both `wrangler.pages.ci.toml` and `workers/room-coordinator/wrangler.toml` explicitly point to the repository-level migrations directory and the `d1_migrations` tracker.
+- Do not run remote migrations against Production as part of this mission.
 
 ## Production safety
 
