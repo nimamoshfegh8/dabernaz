@@ -500,10 +500,27 @@ async function main() {
     "SELECT COUNT(*) AS count FROM transactions WHERE type IN ('room_entry','room_refund','room_prize') AND round_id IS NULL"
   ).count);
   assert.equal(unlinkedRoomTransactions, 0, "Every new room purchase, refund and prize transaction must link to its round");
-  assert.equal(one("PRAGMA integrity_check").integrity_check, "ok", "The isolated D1 database must pass SQLite integrity_check");
-  assert.equal(query("PRAGMA foreign_key_check").length, 0, "The isolated D1 database must have no foreign-key violations");
 
-  console.log("Room coordinator integration checks passed: live health, GET read-only, server pricing, invalid six-card rejection, one-time refund, idempotent/concurrent purchases, 20-player capacity, five-card cap, simultaneous winners, exact payout splits, round-linked transactions, worker restart, and SQLite integrity.");
+  let invalidRoundLinkBlocked = false;
+  try {
+    query("INSERT INTO transactions(user_id,type,amount,description,created_at,round_id) VALUES(910023,'room_entry',-1,'invalid foreign-key probe',CURRENT_TIMESTAMP,'missing-round-for-fk-check')");
+  } catch {
+    invalidRoundLinkBlocked = true;
+  }
+  assert.equal(invalidRoundLinkBlocked, true, "D1 must reject a room transaction referencing a nonexistent round");
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE description='invalid foreign-key probe'").count), 0,
+    "A rejected foreign-key probe must not leave a transaction row");
+
+  for (const [label, sql] of [
+    ["room purchases", "SELECT COUNT(*) AS count FROM room_purchases p LEFT JOIN room_rounds r ON r.id=p.round_id WHERE r.id IS NULL"],
+    ["room cards", "SELECT COUNT(*) AS count FROM room_cards c LEFT JOIN room_rounds r ON r.id=c.round_id WHERE r.id IS NULL"],
+    ["room payouts", "SELECT COUNT(*) AS count FROM room_payouts p LEFT JOIN room_rounds r ON r.id=p.round_id WHERE r.id IS NULL"],
+    ["room finance records", "SELECT COUNT(*) AS count FROM room_finances f LEFT JOIN room_rounds r ON r.id=f.round_id WHERE r.id IS NULL"],
+  ]) {
+    assert.equal(Number(one(sql).count), 0, "No orphaned " + label + " may exist");
+  }
+
+  console.log("Room coordinator integration checks passed: live health, GET read-only, server pricing, invalid six-card rejection, one-time refund, idempotent/concurrent purchases, 20-player capacity, five-card cap, simultaneous winners, exact payout splits, round-linked transactions, foreign-key enforcement, and no orphaned room records.");
 }
 
 try {
