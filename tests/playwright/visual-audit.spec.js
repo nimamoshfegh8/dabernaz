@@ -269,9 +269,11 @@ test('API health accurately reports D1 schema and room coordinator readiness', a
   expect(body.service).toBe('dabernaz');
   if (body.backend === 'cloudflare-pages-functions') {
     expect(body.database).toBe('D1');
-    expect(body.schema).toBe('v3');
+    expect(body.schema).toBe('v4');
     expect(typeof body.roomCoordinator?.available).toBe('boolean');
-    expect(typeof body.walletRequests?.idempotency).toBe('boolean');
+    expect(body.roomCoordinator?.ready).toBe(true);
+    expect(body.roomCoordinator?.transactionRoundLink).toBe(true);
+    expect(body.walletRequests?.idempotency).toBe(true);
     expect(body.walletRequests.idempotency).toBe(true);
     expect(body.tournamentEntries?.idempotency).toBe(true);
     expect(['ready', 'degraded']).toContain(body.readiness);
