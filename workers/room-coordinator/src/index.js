@@ -47,6 +47,34 @@ function json(data, status = 200) {
   });
 }
 
+async function databaseHealth(db) {
+  const [ping, migration, required] = await Promise.all([
+    db.prepare("SELECT 1 AS ok").first(),
+    db.prepare("SELECT MAX(version) AS version FROM schema_migrations").first(),
+    db.prepare(
+      "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN " +
+      "('users','transactions','schema_migrations','room_rounds','room_round_players','room_purchases','room_cards','room_refunds','room_payouts','room_player_stats','room_finances','room_outbox','financial_ledger','wallet_request_idempotency','tournament_entry_idempotency')"
+    ).first(),
+  ]);
+  let transactionRoundLink = false;
+  try {
+    await db.prepare("SELECT round_id FROM transactions LIMIT 0").all();
+    transactionRoundLink = true;
+  } catch (_) {}
+  const schemaVersion = Number(migration?.version) || 0;
+  const requiredTables = Number(required?.total) || 0;
+  const ready = Number(ping?.ok) === 1 && schemaVersion >= 4 &&
+    requiredTables === 15 && transactionRoundLink;
+  return {
+    ok: ready,
+    ready,
+    database: "D1",
+    schema: "v" + schemaVersion,
+    requiredTables,
+    transactionRoundLink,
+  };
+}
+
 function parseArray(value) {
   try {
     const parsed = JSON.parse(String(value || "[]"));
@@ -203,6 +231,40 @@ async function readJson(request, maxBytes = 8192) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/health") {
+      if (request.method !== "GET") return json({ error: "روش درخواست پشتیبانی نمی‌شود." }, 405);
+      try {
+        const dbHealth = await databaseHealth(env.DB);
+        const stub = env.ROOMS.getByName("room5000");
+        const response = await stub.fetch(new Request("https://room-coordinator/health", { method: "GET" }));
+        const durableHealth = await response.json().catch(() => null);
+        const durableReady = response.ok && durableHealth?.ready === true &&
+          durableHealth?.transactionRoundLink === true;
+        const ready = dbHealth.ready && durableReady;
+        return json({
+          ...dbHealth,
+          ok: ready,
+          ready,
+          service: "dabernaz-room-coordinator",
+          durableObject: {
+            available: response.ok,
+            ready: durableReady,
+            schema: durableHealth?.schema || null,
+          },
+        }, ready ? 200 : 503);
+      } catch (_) {
+        return json({
+          ok: false,
+          ready: false,
+          service: "dabernaz-room-coordinator",
+          database: "unavailable",
+          schema: "unknown",
+          requiredTables: 0,
+          transactionRoundLink: false,
+          durableObject: { available: false, ready: false },
+        }, 503);
+      }
+    }
     const match = url.pathname.match(/^\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|next|leave|reconcile))?$/);
     if (!match) return json({ error: "مسیر اتاق پیدا نشد." }, 404);
     const [, roomId] = match;
@@ -253,6 +315,10 @@ export class RoomCoordinator extends DurableObject {
     return this.runExclusive(async () => {
       try {
         const url = new URL(request.url);
+        if (url.pathname === "/health" && request.method === "GET") {
+          const health = await databaseHealth(this.env.DB);
+          return json({ ...health, service: "dabernaz-room-coordinator-do" }, health.ready ? 200 : 503);
+        }
         const match = url.pathname.match(/^\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|next|leave|reconcile))?$/);
         if (!match) return json({ error: "مسیر اتاق پیدا نشد." }, 404);
         const [, roomId, action] = match;
@@ -486,9 +552,9 @@ export class RoomCoordinator extends DurableObject {
 
     statements.push(
       this.env.DB.prepare(
-        "INSERT INTO transactions(user_id,type,amount,description,created_at) " +
-        "SELECT ?,'room_entry',?,?,? WHERE EXISTS (SELECT 1 FROM room_purchases WHERE id=?)"
-      ).bind(userId, -amount, "خرید کارت اتاق " + config.code, new Date(now).toISOString(), purchaseId),
+        "INSERT INTO transactions(user_id,type,amount,description,created_at,round_id) " +
+        "SELECT ?,'room_entry',?,?,?,? WHERE EXISTS (SELECT 1 FROM room_purchases WHERE id=?)"
+      ).bind(userId, -amount, "خرید کارت اتاق " + config.code, new Date(now).toISOString(), roundId, purchaseId),
       this.env.DB.prepare(
         "INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) " +
         "SELECT ?,?,'toman',?,'room_purchase','room_purchase',?,? WHERE EXISTS (SELECT 1 FROM room_purchases WHERE id=?)"
@@ -587,9 +653,9 @@ export class RoomCoordinator extends DurableObject {
               "UPDATE users SET balance=balance+? WHERE id=? AND changes()=1"
             ).bind(purchase.amount, purchase.user_id),
             this.env.DB.prepare(
-              "INSERT INTO transactions(user_id,type,amount,description,created_at) " +
-              "SELECT ?,'room_refund',?,?,? WHERE changes()=1"
-            ).bind(purchase.user_id, purchase.amount, "بازپرداخت کامل دور تک‌نفره " + roundId, new Date(now).toISOString()),
+              "INSERT INTO transactions(user_id,type,amount,description,created_at,round_id) " +
+              "SELECT ?,'room_refund',?,?,?,?,? WHERE changes()=1"
+            ).bind(purchase.user_id, purchase.amount, "بازپرداخت کامل دور تک‌نفره " + roundId, new Date(now).toISOString(), roundId),
             this.env.DB.prepare(
               "INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) " +
               "SELECT ?,?,'toman',?,'room_refund','room_purchase',?,? WHERE changes()=1"
@@ -723,8 +789,8 @@ export class RoomCoordinator extends DurableObject {
             "UPDATE users SET balance=balance+? WHERE id=? AND changes()=1"
           ).bind(allocation.amount, allocation.userId),
           this.env.DB.prepare(
-            "INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'room_prize',?,?,? WHERE changes()=1"
-          ).bind(allocation.userId, allocation.amount, kind === "line" ? "جایزه برنده خطی" : "جایزه برنده کامل", new Date(now).toISOString()),
+            "INSERT INTO transactions(user_id,type,amount,description,created_at,round_id) SELECT ?,'room_prize',?,?,?,?,? WHERE changes()=1"
+          ).bind(allocation.userId, allocation.amount, kind === "line" ? "جایزه برنده خطی" : "جایزه برنده کامل", new Date(now).toISOString(), round.id),
           this.env.DB.prepare(
             "INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) " +
             "SELECT ?,?,'toman',?,'room_prize',?,?,? WHERE changes()=1"
