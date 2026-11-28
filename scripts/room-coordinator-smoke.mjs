@@ -223,6 +223,15 @@ async function main() {
   await waitForServer();
   await assertWorkerHealth();
 
+  const invalidSixBefore = Number(one("SELECT balance FROM users WHERE id=910022").balance);
+  const invalidSix = await requestRoom("room10000", {
+    method: "POST", action: "join", userId: 910022, idempotencyKey: "six-cards-in-one-request-0001",
+    body: { cardsCount: 6, purchaseConfirmed: true },
+  });
+  assert.equal(invalidSix.status, 400, "A request for more than five cards must be rejected, not silently clamped");
+  assert.equal(Number(one("SELECT balance FROM users WHERE id=910022").balance), invalidSixBefore,
+    "An invalid six-card request must not debit the user");
+
   // GET must not create an empty round, change status, refund, draw, or write state.
   const before = Number(one("SELECT COUNT(*) AS count FROM room_rounds").count);
   const empty = await requestRoom("room5000");
@@ -354,6 +363,12 @@ async function main() {
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE type='room_entry' AND round_id='" + firstRoundId + "'").count), 2,
     "Both players' entry transactions must reference the same round");
 
+  // Force one identical card for two different users so the smoke test proves
+  // simultaneous line/full winners are both recorded and share each prize.
+  const sharedCard = JSON.stringify(second.data.room.myCards[0]).replace(/'/g, "''");
+  const firstCardRow = one("SELECT id FROM room_cards WHERE round_id='" + firstRoundId + "' AND user_id=910023 ORDER BY card_number LIMIT 1");
+  query("UPDATE room_cards SET card_json='" + sharedCard + "' WHERE id='" + firstCardRow.id + "'");
+
   // A concurrent duplicate using the same key must produce one debit and one
   // purchase record, even when the caller sends both requests simultaneously.
   const concurrentBefore = Number(one("SELECT balance FROM users WHERE id=910025").balance);
@@ -414,6 +429,12 @@ async function main() {
     (room) => (room.recentSessions || []).some((session) => session.roundId === round1Id), 75_000);
   const round1 = one("SELECT id,status,gross_revenue,line_prize_paid,full_prize_paid,site_commission,called_numbers_json FROM room_rounds WHERE room_id='room5000' AND sequence=1");
   assert.equal(round1.status, "completed");
+  const lineWinners = JSON.parse(round1.line_winners_json);
+  const fullWinners = JSON.parse(round1.full_winners_json);
+  assert.deepEqual(lineWinners.map((winner) => Number(winner.userId)).sort((a, b) => a - b), [910023, 910024],
+    "Both users with the same completed line must be recorded as simultaneous line winners");
+  assert.deepEqual(fullWinners.map((winner) => Number(winner.userId)).sort((a, b) => a - b), [910023, 910024],
+    "Both users with the same completed card must be recorded as simultaneous full winners");
   const gross = Number(round1.gross_revenue);
   assert.equal(gross, 30_000);
   assert.equal(Number(round1.line_prize_paid), Math.floor(gross * 10 / 100));
@@ -423,8 +444,12 @@ async function main() {
   const called = JSON.parse(round1.called_numbers_json);
   assert.equal(new Set(called).size, called.length, "A draw number must never repeat");
   assert.ok(called.every((number) => Number.isInteger(number) && number >= 1 && number <= 90));
-  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='line'").count) > 0, true);
-  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='full'").count) > 0, true);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='line'").count), 2);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='full'").count), 2);
+  assert.equal(Number(one("SELECT SUM(amount) AS total FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='line'").total), Number(round1.line_prize_paid),
+    "The line prize must be split across every simultaneous winner without losing value");
+  assert.equal(Number(one("SELECT SUM(amount) AS total FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='full'").total), Number(round1.full_prize_paid),
+    "The full prize must be split across every simultaneous winner without losing value");
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_finances WHERE round_id='" + round1.id + "'").count), 1);
   const payoutCount = Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "'").count);
   const payoutTransactionCount = Number(one("SELECT COUNT(*) AS count FROM transactions WHERE type='room_prize' AND round_id='" + round1.id + "'").count);
