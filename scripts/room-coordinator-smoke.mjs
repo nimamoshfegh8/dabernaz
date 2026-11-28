@@ -129,6 +129,16 @@ async function waitForServer() {
   throw new Error(`Local Worker did not become ready: ${lastError}\n${workerLog}`);
 }
 
+async function assertWorkerHealth() {
+  const response = await fetch(baseUrl + "/health");
+  const data = await response.json().catch(() => ({}));
+  assert.equal(response.status, 200, "Worker health must confirm the D1 and Durable Object bindings: " + JSON.stringify(data));
+  assert.equal(data.ready, true);
+  assert.equal(data.schema, "v4");
+  assert.equal(data.transactionRoundLink, true);
+  assert.equal(data.durableObject?.ready, true);
+}
+
 async function requestRoom(roomId, options = {}) {
   const headers = new Headers(options.headers || {});
   if (options.userId) headers.set("x-dabernaz-user-id", String(options.userId));
@@ -180,8 +190,14 @@ function assertValidCard(card) {
 async function applyLocalMigrationsAndSeed() {
   wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
     "--yes", "--file", "migrations/0000_core_schema.sql"]);
-  wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
-    "--yes", "--file", "migrations/0001_room_rounds_financial_queue.sql"]);
+  for (const migration of [
+    "migrations/0002_wallet_request_idempotency.sql",
+    "migrations/0003_tournament_entry_idempotency.sql",
+    "migrations/0004_transaction_round_link.sql",
+  ]) {
+    wrangler(["d1", "execute", database, "--config", config, "--local", "--persist-to", persist,
+      "--yes", "--file", migration]);
+  }
   const seed = [
     ...Array.from({ length: 27 }, (_, index) => {
       const id = 910001 + index;
@@ -196,7 +212,7 @@ async function applyLocalMigrationsAndSeed() {
   const users = one("SELECT COUNT(*) AS count FROM users WHERE id BETWEEN 910001 AND 910027");
   assert.equal(Number(users.count), 27, "Twenty-seven isolated synthetic test users must be seeded");
   const schema = one("SELECT MAX(version) AS version FROM schema_migrations");
-  assert.equal(Number(schema.version), 1, "Both versioned D1 migrations must be applied locally");
+  assert.equal(Number(schema.version), 4, "All four versioned D1 migrations must be applied locally");
 }
 
 async function main() {
@@ -205,6 +221,7 @@ async function main() {
 
   startWorker();
   await waitForServer();
+  await assertWorkerHealth();
 
   // GET must not create an empty round, change status, refund, draw, or write state.
   const before = Number(one("SELECT COUNT(*) AS count FROM room_rounds").count);
@@ -285,6 +302,9 @@ async function main() {
     "The solo account must own exactly one matching room purchase");
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM financial_ledger WHERE user_id=" + soloUserId + " AND operation='room_refund' AND reference_type='room_purchase' AND reference_id='" + soloPurchaseId + "'").count), 1,
     "Exactly one append-only refund ledger entry must exist");
+  const soloRoundId = String(one("SELECT round_id FROM room_purchases WHERE id='" + soloPurchaseId + "'").round_id);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE user_id=" + soloUserId + " AND type='room_refund' AND round_id='" + soloRoundId + "'").count), 1,
+    "The refund transaction must reference its exact round");
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE user_id=" + soloUserId + " AND type='room_refund' AND amount=20000 AND description=(SELECT 'بازپرداخت کامل دور تک‌نفره ' || round_id FROM room_refunds WHERE purchase_id='" + soloPurchaseId + "')").count), 1,
     "Exactly one refund transaction linked to the refunded round must exist");
 
@@ -299,6 +319,9 @@ async function main() {
   assert.equal(Number(first.data.purchase.amount), 25_000);
   assert.equal(first.data.room.myCards.length, 5);
   first.data.room.myCards.forEach(assertValidCard);
+  const firstRoundId = String(first.data.purchase.roundId);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE type='room_entry' AND round_id='" + firstRoundId + "'").count), 1,
+    "The purchase transaction must reference its exact round");
 
   const replay = await requestRoom("room5000", {
     method: "POST", action: "join", userId: 910023, idempotencyKey: "five-card-round-purchase-0001",
@@ -318,6 +341,8 @@ async function main() {
   assert.equal(sixth.status, 409);
   assert.equal(Number(one("SELECT balance FROM users WHERE id=910023").balance), firstBefore - 25_000);
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_purchases WHERE user_id=910023 AND room_id='room5000'").count), 1);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE type='room_entry' AND round_id='" + firstRoundId + "'").count), 1,
+    "Replaying a purchase must not create another round-linked debit transaction");
 
   const second = await requestRoom("room5000", {
     method: "POST", action: "join", userId: 910024, idempotencyKey: "second-player-round-0001",
@@ -325,6 +350,9 @@ async function main() {
   });
   assert.equal(second.status, 200, JSON.stringify(second.data));
   assert.equal(Number(second.data.room.playerCount), 2);
+  assert.equal(String(second.data.purchase.roundId), firstRoundId);
+  assert.equal(Number(one("SELECT COUNT(*) AS count FROM transactions WHERE type='room_entry' AND round_id='" + firstRoundId + "'").count), 2,
+    "Both players' entry transactions must reference the same round");
 
   // A concurrent duplicate using the same key must produce one debit and one
   // purchase record, even when the caller sends both requests simultaneously.
@@ -375,6 +403,7 @@ async function main() {
   await stopWorker();
   startWorker();
   await waitForServer();
+  await assertWorkerHealth();
   const afterRestart = await waitForSnapshot("room5000", 910023,
     (room) => room.status === "playing" && room.allCalledNumbers.length > calledBeforeRestart, 12_000);
   assert.ok(afterRestart.allCalledNumbers.length > calledBeforeRestart,
@@ -397,6 +426,9 @@ async function main() {
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='line'").count) > 0, true);
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "' AND prize_type='full'").count) > 0, true);
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_finances WHERE round_id='" + round1.id + "'").count), 1);
+  const payoutCount = Number(one("SELECT COUNT(*) AS count FROM room_payouts WHERE round_id='" + round1.id + "'").count);
+  const payoutTransactionCount = Number(one("SELECT COUNT(*) AS count FROM transactions WHERE type='room_prize' AND round_id='" + round1.id + "'").count);
+  assert.equal(payoutTransactionCount, payoutCount, "Every prize payout must have exactly one round-linked transaction");
   assert.equal(Number(one("SELECT COUNT(*) AS count FROM room_outbox WHERE round_id='" + round1.id + "' AND event_type='round.completed'").count), 1);
   assert.equal(completed.status, "playing", "A queued round must start after the current round completes");
   assert.equal(completed.joined, true);
