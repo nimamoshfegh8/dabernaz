@@ -7,6 +7,8 @@ workers_dev = false
 binding = "DB"
 database_name = "dabernaz-preview"
 database_id = "dbb4b34a-6085-4e55-bd33-5c57885aafab"
+migrations_dir = "../../migrations"
+migrations_table = "d1_migrations"
 
 [[durable_objects.bindings]]
 name = "ROOMS"
