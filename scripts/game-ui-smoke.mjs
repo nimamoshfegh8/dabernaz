@@ -32,15 +32,38 @@ assert.match(app, /id="homePoints"/,
 assert.match(app, /function updateHomeMiniStats\(\)[\s\S]*?homeGamesPlayed[\s\S]*?homeWins[\s\S]*?homePoints/,
   'all three homepage account counters must refresh from the same authenticated stats snapshot');
 assert.match(app, /queue\.status === 'finished'[\s\S]*?data-action="room-next-session"/,
-  'a finished room must offer a separate next-session action, not a purchase action');
-const nextSessionHandler = app.match(/if \(action === 'room-next-session'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-join-auto'\)/)?.[1] || '';
+  'a finished room must open the next session without buying a card');
+assert.match(app, /queue\.status === 'finished'[\s\S]*?ورود رایگان به سانس بعدی/,
+  'the finished-room action must be clearly described as free entry');
+const purchaseAction = app.match(/const purchaseAction =([\s\S]*?)const waitingMessage =/)?.[1] || '';
+const finishedAction = purchaseAction.match(/queue\.status === 'finished'\s*\?([\s\S]*?)(?::\s*joined && waiting)/)?.[1] || '';
+assert.match(finishedAction,/data-action="room-next-session"/,
+  'a finished room must expose the free next-session action');
+assert.doesNotMatch(finishedAction,/room-join-auto/,
+  'a finished room must not use the purchase endpoint to open the next session');
+const nextSessionHandler = app.match(/if \(action === 'room-next-session'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-join-auto'/)?.[1] || '';
 assert.match(nextSessionHandler, /\/api\/rooms\/\$\{activeRoomId\}\/next/,
   'opening the next session must call the no-purchase endpoint');
 assert.doesNotMatch(nextSessionHandler, /\/join|cardsCount|loadAuthenticatedUser/,
   'opening the next session must not trigger card purchase or wallet refresh');
-const explicitPurchaseHandler = app.match(/if \(action === 'room-join-auto'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-add-card'\)/)?.[1] || '';
+const explicitPurchaseHandler = app.match(/if \(action === 'room-join-auto' \|\| action === 'room-join-next'\) \{([\s\S]*?)\n  \}\n  if \(action === 'room-add-card'\)/)?.[1] || '';
 assert.match(explicitPurchaseHandler, /purchaseConfirmed\s*:\s*true/,
   'a new room card may be purchased only through the explicit purchase action');
+assert.match(app, /getWalletRequestIdempotencyKey\(\)/,
+  'wallet request forms must retain a stable idempotency key for retries');
+assert.match(app, /Idempotency-Key['"]\s*:\s*idempotencyKey/,
+  'wallet requests must send their idempotency key to the backend');
+assert.match(app, /clearWalletRequestIdempotencyKey\(\)/,
+  'wallet request idempotency state must clear after success or changed input');
+assert.match(app,/getTournamentEntryIdempotencyKey\(tournamentType\)/,'tournament registration must reuse a stable idempotency key after a lost response');
+assert.match(app,/headers:\{'Idempotency-Key':idempotencyKey\}/,'tournament registration must send its idempotency key to the server');
+assert.match(app,/clearTournamentEntryIdempotencyKey\(tournamentType\)/,'successful tournament registration must clear its pending idempotency key');
+assert.match(api,/FROM tournament_entry_idempotency WHERE user_id=\? AND idempotency_key=\?/,'tournament registration must resolve prior requests by user and idempotency key');
+assert.match(api,/NOT EXISTS \(SELECT 1 FROM tournament_entry_idempotency WHERE user_id=\? AND idempotency_key=\?\)/,'concurrent tournament retries must claim the key before charging another event');
+assert.match(api,/tournament_line_win/,'official tournament line winners must receive a BingoCoin ledger credit');
+assert.match(api,/tournament_full_win/,'official tournament full-card winners must receive a BingoCoin ledger credit');
+assert.match(api,/String\(round\.id\) \+ ':line'/,'line bonus idempotency must be scoped to a specific round');
+assert.match(api,/String\(round\.id\) \+ ':full'/,'full bonus idempotency must be scoped to a specific round');
 
 assert.match(app,/supportAdmin:renderSupportAdmin/,'the administrator support inbox must remain a registered app page');
 assert.match(app,/walletAdmin:renderWalletAdmin/,'the finance admin panel must remain a registered app page');
@@ -72,8 +95,9 @@ assert.ok(api.includes("r.user_note"),'the finance admin inbox must receive the 
 assert.ok(api.includes("VALUES(?,'user',?,?)"),'customer messages must be stored as customer messages');
 assert.ok(api.includes("VALUES(?,'admin',?,?)"),'admin replies must be stored as admin messages');
 assert.ok(!api.includes('SELECT id,request_type,amount,status,receipt_mime,card_number,card_holder,bank_name'),'user wallet requests must not return card details');
-assert.ok(app.includes("const safeState = { ...state, walletPaymentInfo:{cardNumber:'',cardHolder:'',bankName:'',paymentNote:''} }"),'finance destination card details must never be persisted in browser localStorage');
-assert.match(app,/walletPaymentInfo: \{cardNumber:'',cardHolder:'',bankName:'',paymentNote:''\}/,'old stored finance card details must be cleared when local state is loaded');
+assert.match(app,/JSON\.stringify\(\{ settings: \{ \.\.\.state\.settings \} \}\)/,'browser storage must persist only non-sensitive user preferences');
+assert.match(app,/localStorage\.setItem\(STORAGE_KEY, JSON\.stringify\(\{ settings \}\)\)/,'legacy localStorage records must be sanitized immediately on startup');
+assert.doesNotMatch(app,/JSON\.stringify\(\{ \.\.\.state/,'account state must never be serialized wholesale into browser storage');
 assert.doesNotMatch(app,/شارژ آنلاین و برداشت پول تا اتصال درگاه پرداخت غیرفعال است|شارژ و برداشت واقعی کیف پول تا اتصال درگاه پرداخت فعال نیست/,'help text must not contradict the manual wallet request workflow');
 assert.match(app,/واریز و برداشت تومانی کیف پول به‌صورت دستی و با بررسی مدیریت انجام می‌شود/,'help text must describe the current manual deposit and withdrawal process');
 console.log('Game-room, mini-game, support, admin portal and wallet request center UI smoke tests passed.');

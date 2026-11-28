@@ -1,0 +1,28 @@
+name = "dabernaz-room-coordinator-preview"
+main = "src/index.js"
+compatibility_date = "2026-11-17"
+workers_dev = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dabernaz-preview"
+database_id = "dbb4b34a-6085-4e55-bd33-5c57885aafab"
+migrations_dir = "../../migrations"
+migrations_table = "d1_migrations"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomCoordinator"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomCoordinator"]
+
+[triggers]
+crons = ["* * * * *"]
+
+[observability]
+enabled = true
+
+[observability.traces]
+enabled = true

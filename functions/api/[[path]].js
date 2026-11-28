@@ -12,7 +12,8 @@ const ROOM_ECONOMICS = Object.freeze({
 });
 const DRAW_INTERVAL_MS = 3000;
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
-const PASSWORD_ITERATIONS = 100000;
+const PASSWORD_ITERATIONS = 600000;
+const DUMMY_PASSWORD_HASH = 'pbkdf2$600000$00112233445566778899aabbccddeeff$488c95bb261cd14fae230743a6f0fe216edec7423d168135a783ce15c653ace8';
 const ROOM_IDS = ['room5000', 'room10000', 'room20000', 'room50000'];
 const encoder = new TextEncoder();
 const bootstrappedBindings = new WeakSet();
@@ -91,7 +92,7 @@ async function verifyPassword(password, stored) {
   try {
     const [kind, roundsText, saltText, digestText] = String(stored).split('$');
     const rounds = Number(roundsText);
-    if (kind !== 'pbkdf2' || !Number.isInteger(rounds) || rounds < 50000 || rounds > 100000) return false;
+    if (kind !== 'pbkdf2' || !Number.isInteger(rounds) || rounds < 50000 || rounds > 600000) return false;
     const salt = hexToBytes(saltText);
     const expected = hexToBytes(digestText);
     if (salt.length !== 16 || expected.length !== 32) return false;
@@ -104,6 +105,31 @@ async function verifyPassword(password, stored) {
     return diff === 0;
   } catch (_) {
     return false;
+  }
+}
+
+async function assertSchemaReady(db) {
+  if (bootstrappedBindings.has(db)) return;
+  try {
+    const row = await db.prepare('SELECT MAX(version) AS version FROM schema_migrations').first();
+    if (Number(row?.version) < 4) {
+      throw new HttpError(503, 'ساختار پایگاه داده هنوز به نسخه موردنیاز ارتقا نیافته است.');
+    }
+    const required = await db.prepare(
+      "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN ('users','auth_sessions','transactions','room_rounds','room_purchases','room_outbox','financial_ledger','referral_reward_claims','wallet_adjustment_requests','wallet_request_idempotency','tournament_entry_idempotency')"
+    ).first();
+    if (Number(required?.total) !== 11) {
+      throw new HttpError(503, 'بخشی از ساختار پایگاه داده ناقص است؛ اجرای Migration لازم است.');
+    }
+    try {
+      await db.prepare('SELECT round_id FROM transactions LIMIT 0').all();
+    } catch (_) {
+      throw new HttpError(503, 'ستون اتصال تراکنش‌ها به دور بازی در Schema موجود نیست.');
+    }
+    bootstrappedBindings.add(db);
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(503, 'نسخه Migration پایگاه داده در دسترس نیست؛ اجرای Migration محیط Preview لازم است.');
   }
 }
 
@@ -388,10 +414,9 @@ async function authenticatedUser(db, request) {
   const row = await db.prepare(`SELECT u.* FROM auth_sessions s
     JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ? AND s.expires_at > ? LIMIT 1`).bind(hash, now).first();
-  if (!row) {
-    await db.prepare('DELETE FROM auth_sessions WHERE token_hash = ?').bind(hash).run();
-    return null;
-  }
+  // Authentication checks are read-only. Expired rows are pruned by a
+  // scheduled maintenance task, never as a side effect of GET /api/auth/me.
+  if (!row) return null;
   return row;
 }
 
@@ -453,13 +478,30 @@ function validateWriteOrigin(request) {
 
 async function checkAuthRate(db, request, email) {
   const now = Math.floor(Date.now() / 1000);
-  const ip = request.headers.get('cf-connecting-ip') || 'unknown';
-  const count = await db.prepare(`SELECT COUNT(*) AS n FROM auth_attempts
-    WHERE ip = ? AND email = ? AND attempted_at > ?`).bind(ip, email, now - 600).first();
-  if (Number(count?.n || 0) >= 10) throw new HttpError(429, 'تعداد تلاش‌ها زیاد است. ده دقیقه بعد دوباره تلاش کن.');
-  await db.prepare('INSERT INTO auth_attempts (ip, email, attempted_at) VALUES (?, ?, ?)').bind(ip, email, now).run();
+  const ip = String(request.headers.get('cf-connecting-ip') || 'unknown').slice(0, 64);
+  const normalizedEmail = String(email || '').trim().toLowerCase().slice(0, 190);
+
+  // Enforce all three limits inside one conditional INSERT. The former
+  // SELECT-then-INSERT sequence allowed concurrent requests to observe the
+  // same low count and all pass the threshold before any attempt was recorded.
+  const attempt = await db.prepare(
+    'INSERT INTO auth_attempts(ip,email,attempted_at) ' +
+    'SELECT ?,?,? WHERE ' +
+    '(SELECT COUNT(*) FROM auth_attempts WHERE ip=? AND email=? AND attempted_at>?) < 10 ' +
+    'AND (SELECT COUNT(*) FROM auth_attempts WHERE email=? AND attempted_at>?) < 10 ' +
+    'AND (SELECT COUNT(*) FROM auth_attempts WHERE ip=? AND attempted_at>?) < 30'
+  ).bind(
+    ip, normalizedEmail, now,
+    ip, normalizedEmail, now - 600,
+    normalizedEmail, now - 600,
+    ip, now - 600
+  ).run();
+  if (Number(attempt?.meta?.changes || 0) !== 1) {
+    throw new HttpError(429, 'تعداد تلاش‌ها زیاد است. ده دقیقه بعد دوباره تلاش کن.');
+  }
+
   await db.prepare('DELETE FROM auth_attempts WHERE attempted_at < ?').bind(now - 3600).run();
-  return { ip, email };
+  return { ip, email:normalizedEmail };
 }
 
 async function handleAuth(db, request, path) {
@@ -481,6 +523,14 @@ async function handleAuth(db, request, path) {
     return json({ ok: true }, 200, { 'set-cookie': expiredCookie(request) });
   }
 
+  if (request.method === 'POST' && path === '/api/auth/logout-all') {
+    validateWriteOrigin(request);
+    const user = await authenticatedUser(db, request);
+    if (!user) throw new HttpError(401, 'نشست کاربری معتبر نیست.');
+    await db.prepare('DELETE FROM auth_sessions WHERE user_id = ?').bind(user.id).run();
+    return json({ ok: true, allSessionsRevoked: true }, 200, { 'set-cookie': expiredCookie(request) });
+  }
+
   if (request.method === 'POST' && (path === '/api/auth/register' || path === '/api/auth/login')) {
     validateWriteOrigin(request);
     const body = await readJson(request);
@@ -496,7 +546,7 @@ async function handleAuth(db, request, path) {
       const nameLength = [...name].length;
       if (nameLength < 2 || nameLength > 32) throw new HttpError(400, 'نام نمایشی باید بین ۲ تا ۳۲ نویسه باشد.');
       const existing = await db.prepare('SELECT id FROM users WHERE email = ? LIMIT 1').bind(email).first();
-      if (existing) throw new HttpError(409, 'با این ایمیل قبلاً حساب ساخته شده است.');
+      if (existing) throw new HttpError(409, 'با این اطلاعات امکان ساخت حساب وجود ندارد.');
       let memberId;
       for (let attempt = 0; attempt < 30; attempt++) {
         memberId = String(100000 + randomInt(900000));
@@ -521,7 +571,7 @@ async function handleAuth(db, request, path) {
       } catch (error) {
         const message = String(error?.message || error);
         if (/unique constraint failed|constraint failed/i.test(message)) {
-          throw new HttpError(409, 'این ایمیل، نام نمایشی یا شناسه قبلاً ثبت شده است.');
+          throw new HttpError(409, 'با این اطلاعات امکان ساخت حساب وجود ندارد.');
         }
         throw error;
       }
@@ -532,23 +582,47 @@ async function handleAuth(db, request, path) {
           .bind(inviter.id, userRow.id, new Date().toISOString()).run();
         const referralCount = await db.prepare('SELECT COUNT(*) AS n FROM referrals WHERE inviter_id = ?').bind(inviter.id).first();
         const milestones = Math.floor(Number(referralCount?.n || 0) / 5);
-        const rewarded = await db.prepare(`SELECT COUNT(*) AS n FROM transactions WHERE user_id = ? AND type = 'referral_reward'`).bind(inviter.id).first();
-        const alreadyRewarded = Number(rewarded?.n || 0);
+        const [legacyRewards, claimState] = await Promise.all([
+          db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE user_id=? AND type='referral_reward'").bind(inviter.id).first(),
+          db.prepare('SELECT COALESCE(MAX(milestone),0) AS n FROM referral_reward_claims WHERE inviter_id=?').bind(inviter.id).first(),
+        ]);
+        const alreadyRewarded = Math.max(Number(legacyRewards?.n || 0), Number(claimState?.n || 0));
         if (milestones > alreadyRewarded) {
           const nowText = new Date().toISOString();
           for (let milestone = alreadyRewarded + 1; milestone <= milestones; milestone++) {
+            const referenceId = String(inviter.id) + ':' + String(milestone);
             await db.batch([
-              db.prepare('UPDATE users SET balance = balance + 20000, bingo_coins = bingo_coins + 5 WHERE id = ?').bind(inviter.id),
-              db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, 'referral_reward', 20000, ?, ?)`).bind(inviter.id, `پاداش ${milestone * 5} دعوت موفق`, nowText),
-              db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at) VALUES (?, 'bingo_coin', 5, ?, ?)`).bind(inviter.id, `۵ بینگوکوین پاداش ${milestone * 5} دعوت موفق`, nowText),
+              db.prepare('INSERT INTO referral_reward_claims(inviter_id,milestone,referral_count,created_at) VALUES(?,?,?,?) ON CONFLICT(inviter_id,milestone) DO NOTHING')
+                .bind(inviter.id, milestone, Number(referralCount?.n || 0), nowText),
+              db.prepare('UPDATE users SET balance=balance+20000,bingo_coins=bingo_coins+5 WHERE id=? AND changes()=1')
+                .bind(inviter.id),
+              db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'referral_reward',20000,?,? WHERE changes()=1")
+                .bind(inviter.id, 'پاداش ' + String(milestone * 5) + ' دعوت موفق', nowText),
+              db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',5,?,? WHERE changes()=1")
+                .bind(inviter.id, '۵ بینگوکوین پاداش ' + String(milestone * 5) + ' دعوت موفق', nowText),
+              db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',20000,'referral_reward','referral_milestone',?,? WHERE changes()=1")
+                .bind(randomToken(16), inviter.id, referenceId, Date.now()),
+              db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',5,'referral_reward','referral_milestone',?,? WHERE changes()=1")
+                .bind(randomToken(16), inviter.id, referenceId, Date.now()),
             ]);
           }
         }
       }
     } else {
       userRow = await db.prepare('SELECT * FROM users WHERE email = ? LIMIT 1').bind(email).first();
-      const valid = userRow ? await verifyPassword(password, userRow.password_hash) : false;
+      const valid = userRow
+        ? await verifyPassword(password, userRow.password_hash)
+        : await verifyPassword(password, DUMMY_PASSWORD_HASH).then(() => false);
       if (!valid) throw new HttpError(401, 'ایمیل یا رمز عبور اشتباه است.');
+
+      // Opportunistically upgrade legacy hashes after a valid login. New
+      // registrations use PBKDF2-HMAC-SHA256 with 600k iterations.
+      const storedRounds = Number(String(userRow.password_hash || '').split('$')[1]) || 0;
+      if (storedRounds < PASSWORD_ITERATIONS) {
+        const upgradedHash = await hashPassword(password);
+        await db.prepare('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?')
+          .bind(upgradedHash, userRow.id, userRow.password_hash).run();
+      }
     }
 
     const user = await publicUser(db, userRow);
@@ -570,499 +644,78 @@ async function handleAuth(db, request, path) {
   return null;
 }
 
-function newRoom(roomId) {
-  return {
-    id: roomId, status: 'waiting', queue: [], cardCounts: {}, queuedCards: {},
-    queuedNames: {}, entryPayments: {}, players: [], calledNumbers: [],
-    winners: { line: [], full: [] }, roundId: null, totalPlayers: 0, totalCards: 0,
-    grossRevenue: 0, linePrizePaid: 0, fullPrizePaid: 0, siteCommission: 0,
-    commissionFinalized: false, statsRecorded: false,
-    registrationStartedAt: null, registrationDeadline: null,
-    startedAt: null, finishedAt: null, nextDrawAt: null, updatedAt: Date.now(),
-  };
-}
-
-async function loadRoom(db, roomId) {
-  const row = await db.prepare('SELECT payload FROM room_states WHERE room_id = ?').bind(roomId).first();
-  if (row?.payload) {
-    try {
-      const room = JSON.parse(row.payload);
-      room.queue ||= []; room.players ||= []; room.entryPayments ||= {};
-      room.cardCounts ||= {}; room.queuedCards ||= {}; room.queuedNames ||= {};
-      room.winners ||= { line: [], full: [] };
-      if (!Array.isArray(room.winners.line)) room.winners.line = room.winners.line ? [room.winners.line] : [];
-      if (!Array.isArray(room.winners.full)) room.winners.full = room.winners.full ? [room.winners.full] : [];
-      room.roundId ??= null; room.totalPlayers ||= 0; room.totalCards ||= 0;
-      room.grossRevenue ||= 0; room.linePrizePaid ||= 0; room.fullPrizePaid ||= 0;
-      room.siteCommission ||= 0; room.commissionFinalized ||= false;
-      room.statsRecorded ??= false;
-      room.registrationStartedAt ??= null; room.registrationDeadline ??= null;
-      // One-time migration for a queue created by the previous room rules.
-      if (room.status === 'waiting' && room.queue.length && !room.registrationDeadline) {
-        room.registrationStartedAt = Date.now();
-        room.registrationDeadline = room.registrationStartedAt + REGISTRATION_WINDOW_MS;
-        await saveRoom(db, room);
-      }
-      return room;
-    } catch (error) {
-      console.error('[dabernaz-room-state-corrupt]', JSON.stringify({ roomId, message:String(error?.message || error) }));
-      throw new HttpError(500, 'اطلاعات اتاق قابل خواندن نیست؛ برای جلوگیری از پاک شدن صف، اتاق بازنشانی نشد.');
-    }
-  }
-  const room = newRoom(roomId);
-  await saveRoom(db, room);
-  return room;
-}
-
-async function saveRoom(db, room, awards = []) {
-  room.updatedAt = Date.now();
-  const statements = [db.prepare(`INSERT INTO room_states (room_id, payload, updated_at) VALUES (?, ?, ?)
-    ON CONFLICT(room_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`)
-    .bind(room.id, JSON.stringify(room), room.updatedAt)];
-  for (const award of awards) {
-    if (award.kind === 'balance') {
-      statements.push(db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(award.amount, award.userId));
-      statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
-        VALUES (?, 'balance', ?, ?, ?)`).bind(award.userId, award.amount, award.description, award.createdAt));
-    } else if (award.kind === 'room_commission') {
-      statements.push(db.prepare(`INSERT INTO room_finances
-        (round_id, room_id, total_players, total_cards, gross_revenue, line_prize_paid, full_prize_paid, site_commission, line_winners_json, full_winners_json, finished_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(round_id) DO NOTHING`)
-        .bind(award.roundId, award.roomId, award.totalPlayers, award.totalCards, award.grossRevenue,
-          award.linePrizePaid, award.fullPrizePaid, award.siteCommission, JSON.stringify(award.lineWinners || []), JSON.stringify(award.fullWinners || []), award.finishedAt, award.createdAt));
-    } else if (award.kind === 'room_game_stats') {
-      statements.push(db.prepare(`UPDATE users
-        SET games_played = games_played + 1,
-            wins = wins + ?,
-            points = points + ?
-        WHERE id = ?`)
-        .bind(award.won ? 1 : 0, award.won ? 10 : 0, award.userId));
-    } else {
-      statements.push(db.prepare('UPDATE users SET bingo_coins = bingo_coins + ? WHERE id = ?').bind(award.amount, award.userId));
-      statements.push(db.prepare(`INSERT INTO transactions (user_id, type, amount, description, created_at)
-        VALUES (?, 'bingo_coin', ?, ?, ?)`).bind(award.userId, award.amount, award.description, award.createdAt));
-    }
-  }
-  // D1 batch is transactional: room winner state and its BGC rewards commit together.
-  await db.batch(statements);
-}
-
-async function cancelExpiredWaitingRoom(db, room, reason = 'حداقل دو بازیکن در مهلت ثبت‌نام کارت نخریدند؛ مبلغ خرید کارت بازگردانده شد.') {
-  const createdAt = new Date().toISOString();
-  const awards = Object.entries(room.entryPayments || [])
-    .map(([userId, amount]) => ({ userId:Number(userId), amount:Math.max(0, Math.floor(Number(amount) || 0)) }))
-    .filter((item) => Number.isInteger(item.userId) && item.userId > 0 && item.amount > 0)
-    .map((item) => ({ kind:'balance', userId:item.userId, amount:item.amount, description:reason, createdAt }));
-  const reset = newRoom(room.id);
-  await saveRoom(db, reset, awards);
-  return reset;
-}
-
-async function withRoomLock(db, roomId, callback) {
-  const token = randomToken(16);
-  let acquired = false;
-  for (let attempt = 0; attempt < 40; attempt++) {
-    // Refresh the clock on each attempt. A timestamp captured before waiting can
-    // otherwise prevent acquisition even after a previous lease has expired.
-    const now = Date.now();
-    const lock = await db.prepare(`INSERT INTO room_locks (room_id, token, expires_at) VALUES (?, ?, ?)
-      ON CONFLICT(room_id) DO UPDATE SET token = excluded.token, expires_at = excluded.expires_at
-      WHERE room_locks.expires_at < ?
-      RETURNING token`)
-      .bind(roomId, token, now + 30000, now).first();
-    if (lock?.token === token) { acquired = true; break; }
-    // Room writes are serialized in D1. Wait longer for neighboring joins
-    // instead of rejecting valid players during a short burst of activity.
-    await new Promise((resolve) => setTimeout(resolve, Math.min(45 + attempt * 10, 150) + randomInt(60)));
-  }
-  if (!acquired) throw new HttpError(409, 'اتاق در حال به‌روزرسانی است؛ چند لحظه دیگر دوباره تلاش کن.');
-  try { return await callback(); }
-  finally { await db.prepare('DELETE FROM room_locks WHERE room_id = ? AND token = ?').bind(roomId, token).run(); }
-}
-
-function shuffle(items) {
-  for (let i = items.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1);
-    [items[i], items[j]] = [items[j], items[i]];
-  }
-  return items;
-}
-
-function makeCard() {
-  const grid = Array.from({ length: 3 }, () => Array(9).fill(false));
-  for (let row = 0; row < 3; row++) {
-    const columns = shuffle(Array.from({ length: 9 }, (_, i) => i));
-    for (const col of columns.slice(0, 5)) grid[row][col] = true;
-  }
-  const counts = Array(9).fill(0);
-  for (let col = 0; col < 9; col++) for (let row = 0; row < 3; row++) if (grid[row][col]) counts[col]++;
-  for (let missing = 0; missing < 9; missing++) {
-    if (counts[missing] > 0) continue;
-    const moves = [];
-    for (let row = 0; row < 3; row++) {
-      if (grid[row][missing]) continue;
-      for (let donor = 0; donor < 9; donor++) if (grid[row][donor] && counts[donor] > 1) moves.push([row, donor]);
-    }
-    if (!moves.length) throw new Error('ساخت کارت معتبر ممکن نشد.');
-    const [row, donor] = moves[randomInt(moves.length)];
-    grid[row][donor] = false;
-    grid[row][missing] = true;
-    counts[donor]--;
-    counts[missing]++;
-  }
-  const card = grid.map((row) => row.map((occupied) => occupied ? 0 : null));
-  for (let col = 0; col < 9; col++) {
-    const min = col === 0 ? 1 : col * 10;
-    const max = col === 8 ? 90 : col * 10 + 9;
-    const places = [];
-    for (let row = 0; row < 3; row++) if (card[row][col] === 0) places.push(row);
-    const values = shuffle(Array.from({ length: max - min + 1 }, (_, i) => min + i)).slice(0, places.length).sort((a, b) => a - b);
-    places.forEach((row, index) => { card[row][col] = values[index]; });
-  }
-  return card;
-}
-
-function lineComplete(card, called) {
-  const set = new Set(called);
-  return card.some((row) => {
-    const numbers = row.filter(Number.isInteger);
-    return numbers.length === 5 && numbers.every((n) => set.has(n));
-  });
-}
-
-function fullComplete(card, called) {
-  const numbers = card.flat().filter(Number.isInteger);
-  const set = new Set(called);
-  return numbers.length === 15 && numbers.every((n) => set.has(n));
-}
-
-async function startRoom(db, room) {
-  const ids = [...new Set((room.queue || []).map(Number).filter(Number.isInteger))];
-  if (ids.length < MIN_PLAYERS_TO_START) return false;
-  const byId = new Map();
-  // Chunk lookups so a room has no hidden bind-parameter capacity.
-  for (let offset = 0; offset < ids.length; offset += 80) {
-    const chunk = ids.slice(offset, offset + 80);
-    const placeholders = chunk.map(() => '?').join(',');
-    const query = await db.prepare(`SELECT id, username, member_id FROM users WHERE id IN (${placeholders})`).bind(...chunk).all();
-    for (const row of query.results || []) byId.set(Number(row.id), row);
-  }
-  const players = [];
-  for (const id of ids) {
-    const row = byId.get(id);
-    const cards = Array.isArray(room.queuedCards?.[String(id)]) ? room.queuedCards[String(id)] : [];
-    if (row && cards.length) players.push({ userId:id, name:row.username, memberId:String(row.member_id || ''), cards });
-  }
-  const totalCards = players.reduce((sum, player) => sum + player.cards.length, 0);
-  if (players.length < MIN_PLAYERS_TO_START || totalCards < MIN_PLAYERS_TO_START) return false;
-  room.players = players;
-  room.totalPlayers = players.length;
-  room.totalCards = totalCards;
-  room.grossRevenue = Object.values(room.entryPayments || {}).reduce((sum, amount) => sum + Math.max(0, Number(amount) || 0), 0);
-  room.roundId = randomToken(16);
-  room.linePrizePaid = 0; room.fullPrizePaid = 0; room.siteCommission = 0; room.commissionFinalized = false;
-  room.queue = []; room.queuedCards = {}; room.queuedNames = {}; room.cardCounts = {};
-  room.status = 'playing'; room.calledNumbers = []; room.winners = { line: [], full: [] };
-  room.startedAt = Math.floor(Date.now() / 1000);
-  room.finishedAt = null;
-  room.nextDrawAt = Date.now() + DRAW_INTERVAL_MS;
-  return true;
-}
-
-function advanceRoom(room) {
-  if (room.status !== 'playing' || !room.nextDrawAt || room.nextDrawAt > Date.now()) {
-    return { changed: false, awards: [] };
-  }
-
-  // One request may announce at most one number. A participant returning after
-  // the app was backgrounded must never fast-forward an entire room to its end.
-  const awards = [];
-  const now = Date.now();
-  const remaining = Array.from({ length: 90 }, (_, index) => index + 1)
-    .filter((number) => !room.calledNumbers.includes(number));
-
-  if (!remaining.length) {
-    room.status = 'finished';
-    room.finishedAt = Math.floor(now / 1000);
-    room.nextDrawAt = null;
-  } else {
-    const number = remaining[randomInt(remaining.length)];
-    room.calledNumbers.push(number);
-    const called = new Set(room.calledNumbers);
-
-    room.winners ||= { line: [], full: [] };
-    if (!Array.isArray(room.winners.line)) room.winners.line = room.winners.line ? [room.winners.line] : [];
-    if (!Array.isArray(room.winners.full)) room.winners.full = room.winners.full ? [room.winners.full] : [];
-
-    const collectWinners = (checkComplete) => {
-      const byUser = new Map();
-      for (const player of room.players) {
-        if ((player.cards || []).some((card) => checkComplete(card, called))) {
-          byUser.set(String(player.userId), {
-            userId: player.userId,
-            name: player.name,
-            memberId: player.memberId,
-            number,
-            at: Math.floor(now / 1000),
-          });
-        }
-      }
-      return Array.from(byUser.values());
-    };
-    const splitPrize = (totalPrize, winners, description) => {
-      const total = Math.max(0, Number(totalPrize) || 0);
-      if (!total || !winners.length) return [];
-      const base = Math.floor(total / winners.length);
-      const remainder = total % winners.length;
-      const createdAt = new Date(now).toISOString();
-      return winners.map((winner, index) => ({
-        kind: 'balance',
-        userId: winner.userId,
-        amount: base + (index < remainder ? 1 : 0),
-        description,
-        createdAt,
-      })).filter((award) => award.amount > 0);
-    };
-
-    if (!room.winners.line.length) {
-      const lineWinners = collectWinners(lineComplete);
-      if (lineWinners.length) {
-        room.winners.line = lineWinners;
-        const prize = Math.floor((Number(room.grossRevenue) || 0) *
-          (Number(ROOM_ECONOMICS[room.id]?.linePrizePercent) || 0) / 100);
-        room.linePrizePaid = prize;
-        awards.push(...splitPrize(prize, lineWinners, 'سهم جایزه یک خط دبرنا'));
-      }
-    }
-    if (!room.winners.full.length) {
-      const fullWinners = collectWinners(fullComplete);
-      if (fullWinners.length) {
-        room.winners.full = fullWinners;
-        const prize = Math.floor((Number(room.grossRevenue) || 0) *
-          (Number(ROOM_ECONOMICS[room.id]?.fullPrizePercent) || 0) / 100);
-        room.fullPrizePaid = prize;
-        awards.push(...splitPrize(prize, fullWinners, 'سهم جایزه دبرنای کامل'));
-      }
-    }
-
-    if ((room.winners.line.length && room.winners.full.length) || room.calledNumbers.length >= 90) {
-      room.status = 'finished';
-      room.finishedAt = Math.floor(now / 1000);
-      room.nextDrawAt = null;
-    } else {
-      room.nextDrawAt = now + DRAW_INTERVAL_MS;
-    }
-  }
-
-  if (room.status === 'finished' && room.startedAt && !room.statsRecorded && room.players.length) {
-    const winnerIds = new Set();
-    for (const winner of [
-      ...(Array.isArray(room.winners?.line) ? room.winners.line : []),
-      ...(Array.isArray(room.winners?.full) ? room.winners.full : []),
-    ]) {
-      if (winner?.userId != null) winnerIds.add(String(winner.userId));
-    }
-    for (const player of room.players) {
-      const userId = Number(player.userId);
-      if (!Number.isSafeInteger(userId) || userId <= 0) continue;
-      const won = winnerIds.has(String(userId));
-      awards.push({ kind:'room_game_stats', userId, won });
-    }
-    room.statsRecorded = true;
-  }
-
-  if (room.status === 'finished' && room.roundId && !room.commissionFinalized) {
-    const grossRevenue = Math.max(0, Number(room.grossRevenue) || 0);
-    const linePrizePaid = Math.max(0, Number(room.linePrizePaid) || 0);
-    const fullPrizePaid = Math.max(0, Number(room.fullPrizePaid) || 0);
-    const siteCommission = grossRevenue - linePrizePaid - fullPrizePaid;
-    if (siteCommission < 0) {
-      throw new HttpError(500, 'جمع جوایز از درآمد کارت‌های این سانس بیشتر شده است؛ ثبت کمیسیون متوقف شد.');
-    }
-    room.siteCommission = siteCommission;
-    room.commissionFinalized = true;
-    const createdAt = new Date(now).toISOString();
-    awards.push({
-      kind: 'room_commission',
-      roundId: room.roundId,
-      roomId: room.id,
-      totalPlayers: Number(room.totalPlayers) || room.players.length,
-      totalCards: Number(room.totalCards) || room.players.reduce((total, player) => total + (player.cards?.length || 0), 0),
-      grossRevenue,
-      linePrizePaid,
-      fullPrizePaid,
-      siteCommission,
-      lineWinners: Array.isArray(room.winners?.line) ? room.winners.line : [],
-      fullWinners: Array.isArray(room.winners?.full) ? room.winners.full : [],
-      finishedAt: room.finishedAt ? new Date(room.finishedAt * 1000).toISOString() : createdAt,
-      createdAt,
-    });
-  }
-
-  return { changed: true, awards };
-}
-async function publicRoom(db, room, userId) {
-  const me = room.players.find((player) => Number(player.userId) === Number(userId));
-  const queued = room.queue.some((id) => Number(id) === Number(userId));
-  const account = await db.prepare('SELECT bingo_coins FROM users WHERE id = ?').bind(userId).first();
-  const grossRevenue = room.roundId
-    ? Math.max(0, Number(room.grossRevenue) || 0)
-    : Object.values(room.entryPayments || {}).reduce((sum, amount) => sum + Math.max(0, Number(amount) || 0), 0);
-  const economics = ROOM_ECONOMICS[room.id] || null;
-  const linePrize = economics ? Math.floor(grossRevenue * economics.linePrizePercent / 100) : 0;
-  const fullPrize = economics ? Math.floor(grossRevenue * economics.fullPrizePercent / 100) : 0;
-  const commission = grossRevenue - linePrize - fullPrize;
-  return {
-    id:room.id, status:room.status, capacity:null, minPlayersToStart:MIN_PLAYERS_TO_START,
-    maxCardsPerPlayer:MAX_CARDS_PER_PLAYER, registrationWindowMs:REGISTRATION_WINDOW_MS,
-    registrationStartedAt:room.registrationStartedAt || null,
-    registrationDeadline:room.registrationDeadline || null,
-    registrationRemainingMs:room.status === 'waiting' && room.registrationDeadline
-      ? Math.max(0, Number(room.registrationDeadline) - Date.now()) : null,
-    economics:{price:Number(economics?.price) || 0}, grossRevenue,
-    estimatedPrizes:{line:linePrize,full:fullPrize},
-    finance:room.roundId ? {
-      totalPlayers:Number(room.totalPlayers) || room.players.length,
-      totalCards:Number(room.totalCards) || room.players.reduce((sum, player) => sum + (player.cards?.length || 0), 0),
-      grossRevenue, linePrizePaid:Number(room.linePrizePaid) || 0, fullPrizePaid:Number(room.fullPrizePaid) || 0,
-      siteCommission:room.commissionFinalized ? Number(room.siteCommission) || 0 : null,
-      finalized:!!room.commissionFinalized,
-    } : null,
-    playerCount:room.status === 'waiting' ? room.queue.length : room.players.length,
-    cardCount:room.status === 'waiting'
-      ? Object.values(room.cardCounts || {}).reduce((sum, count) => sum + Math.max(0, Number(count) || 0), 0)
-      : (Number(room.totalCards) || room.players.reduce((sum, player) => sum + (player.cards?.length || 0), 0)),
-    queueCount:room.status === 'waiting' ? room.queue.length : room.players.length,
-    players:room.status === 'waiting'
-      ? room.queue.map(id => ({name:room.queuedNames?.[String(id)] || 'بازیکن',memberId:''}))
-      : room.players.map(player => ({name:player.name,memberId:player.memberId})),
-    calledNumbers:room.calledNumbers.slice(-15), allCalledNumbers:room.calledNumbers,
-    drawCount:room.calledNumbers.length,
-    latestNumber:room.calledNumbers.length ? room.calledNumbers[room.calledNumbers.length - 1] : null,
-    winners: {
-      line: (Array.isArray(room.winners?.line) ? room.winners.line : []).map(({name,memberId,number,at}) => ({name,memberId,number,at})),
-      full: (Array.isArray(room.winners?.full) ? room.winners.full : []).map(({name,memberId,number,at}) => ({name,memberId,number,at}))
-    },
-    myCards:room.status === 'finished' ? [] : (me?.cards || (queued ? (room.queuedCards[String(userId)] || []) : [])),
-    // Share every purchased card with authenticated participants of this live room only.
-    allPlayerCards:room.status === 'playing' && !!me ? room.players.flatMap((player) =>
-      (Array.isArray(player.cards) ? player.cards : []).map((card, cardIndex) => ({
-        playerName:String(player.name || 'بازیکن'), cardNumber:cardIndex + 1, card
-      }))
-    ) : [],
-    joined:room.status === 'finished' ? false : (queued || !!me), startedAt:room.startedAt, finishedAt:room.finishedAt,
-    myBingoCoins:Number(account?.bingo_coins) || 0,
-    myCoinTransactions:await coinHistory(db, userId),
-  };
-}
-
-async function handleRoom(db, request, user, path) {
+async function handleRoom(db, request, user, path, env) {
   const match = path.match(/^\/api\/rooms\/(room5000|room10000|room20000|room50000)(?:\/(join|leave|next))?$/);
   if (!match) return null;
-  const [, roomId, action = ''] = match;
-  const userId = Number(user.id);
 
-  if (request.method === 'GET' && !action) {
-    let room = await loadRoom(db, roomId);
-    const expired = room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now();
-    const drawDue = room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now();
-    if (expired || drawDue) {
-      await withRoomLock(db, roomId, async () => {
-        room = await loadRoom(db, roomId);
-        let started = false;
-        if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
-          started = await startRoom(db, room);
-          if (!started) room = await cancelExpiredWaitingRoom(db, room);
-        }
-        if (room.status === 'playing' && room.nextDrawAt && room.nextDrawAt <= Date.now()) {
-          const advanced = advanceRoom(room);
-          if (advanced.changed) await saveRoom(db, room, advanced.awards);
-          else if (started) await saveRoom(db, room);
-        } else if (started) await saveRoom(db, room);
-      }).catch(error => { if (!(error instanceof HttpError && error.status === 409)) throw error; });
-      room = await loadRoom(db, roomId);
-    }
-    return json({ok:true,room:await publicRoom(db,room,userId)});
+  // All room reads and mutations are delegated to the private, per-room
+  // Durable Object coordinator. Never fall back to the legacy JSON room state:
+  // doing so could create a second source of truth and an unsafe financial path.
+  if (!env?.ROOM_COORDINATOR || typeof env.ROOM_COORDINATOR.fetch !== 'function') {
+    return json({
+      ok: false,
+      code: 'ROOM_COORDINATOR_UNAVAILABLE',
+      error: 'زیرساخت امن اتاق بازی هنوز در محیط Preview متصل نشده است. خرید کارت موقتاً غیرفعال است.',
+    }, 503);
   }
 
-  if (request.method === 'POST' && action === 'next') {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
     validateWriteOrigin(request);
-    const result = await withRoomLock(db,roomId,async()=>{
-      let room = await loadRoom(db,roomId);
-      if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
-        const started = await startRoom(db,room);
-        if (started) await saveRoom(db,room);
-        else room = await cancelExpiredWaitingRoom(db,room);
-      }
-      if (room.status === 'playing') return {conflict:true,room:await publicRoom(db,room,userId)};
-      if (room.status === 'finished') {
-        room = newRoom(roomId);
-        await saveRoom(db,room);
-      }
-      return {room:await publicRoom(db,room,userId)};
-    });
-    if (result.conflict) return json({error:'این سانس هنوز در حال اجراست و امکان باز کردن سانس بعدی وجود ندارد.',room:result.room},409);
-    return json({ok:true,room:result.room});
   }
 
-  if (request.method === 'POST' && action === 'join') {
-    validateWriteOrigin(request);
-    const body = await readJson(request);
-    if (body.purchaseConfirmed !== true) throw new HttpError(400,'برای خرید کارت باید خرید را جداگانه تأیید کنی.');
-    const requested = Math.max(1,Math.min(MAX_CARDS_PER_PLAYER,Math.floor(Number(body.cardsCount)||1)));
-    const result = await withRoomLock(db,roomId,async()=>{
-      let room = await loadRoom(db,roomId);
-      const economics = ROOM_ECONOMICS[roomId];
-      if (!economics) throw new HttpError(500,'تنظیمات مالی این اتاق پیدا نشد.');
-      if (room.status === 'waiting' && room.registrationDeadline && Number(room.registrationDeadline) <= Date.now()) {
-        const started = await startRoom(db,room);
-        if (started) await saveRoom(db,room);
-        else room = await cancelExpiredWaitingRoom(db, room);
-      }
-      if (room.status === 'playing' || room.status === 'finished') return {conflict:true,room:await publicRoom(db,room,userId)};
-      const key = String(userId);
-      const alreadyQueued = room.queue.some(id=>Number(id)===userId);
-      const owned = alreadyQueued ? Math.max(0,Number(room.cardCounts?.[key])||room.queuedCards?.[key]?.length||0) : 0;
-      const available = Math.max(0,MAX_CARDS_PER_PLAYER-owned);
-      if (!available) throw new HttpError(409,'هر حساب در هر سانس حداکثر ۵ کارت می‌تواند بخرد.');
-      const cardsCount = Math.min(requested,available);
-      const totalPrice = economics.price * cardsCount;
-      const debit = await db.prepare('UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?').bind(totalPrice,userId,totalPrice).run();
-      if (!Number(debit.meta?.changes||0)) throw new HttpError(400,'موجودی کیف پول برای خرید تعداد کارت ثبت‌شده کافی نیست.');
-      const oldCards = Array.isArray(room.queuedCards?.[key]) ? room.queuedCards[key] : [];
-      room.cardCounts[key] = owned + cardsCount;
-      room.queuedCards[key] = [...oldCards,...Array.from({length:cardsCount},()=>makeCard())];
-      room.queuedNames[key] = String(user.username || 'بازیکن');
-      room.entryPayments[key] = (Math.max(0,Number(room.entryPayments?.[key])||0))+totalPrice;
-      if (!alreadyQueued) room.queue.push(userId);
-      if (!room.registrationDeadline) {
-        room.registrationStartedAt = Date.now();
-        room.registrationDeadline = room.registrationStartedAt + REGISTRATION_WINDOW_MS;
-      }
-      room.updatedAt = Date.now();
-      try {
-        await db.batch([
-          db.prepare(`INSERT INTO transactions (user_id,type,amount,description,created_at) VALUES (?, 'room_entry', ?, ?, ?)`)
-            .bind(userId,-totalPrice,alreadyQueued ? `خرید ${cardsCount} کارت اضافی دبرنا` : `خرید ${cardsCount} کارت دبرنا`,new Date().toISOString()),
-          db.prepare(`INSERT INTO room_states (room_id,payload,updated_at) VALUES (?,?,?)
-            ON CONFLICT(room_id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at`)
-            .bind(room.id,JSON.stringify(room),room.updatedAt),
-        ]);
-      } catch(error) {
-        await db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').bind(totalPrice,userId).run();
-        throw error;
-      }
-      return {room:await publicRoom(db,room,userId)};
-    });
-    if (result.conflict) return json({error:'این سانس در حال اجراست؛ بعد از پایان وارد سانس بعدی شو.',room:result.room},409);
-    return json({ok:true,room:result.room});
+  const [, roomId] = match;
+  const forwardedPath = path.replace(/^\/api/, '');
+  const target = 'https://dabernaz-room-coordinator.internal' + forwardedPath + new URL(request.url).search;
+  const headers = new Headers(request.headers);
+
+  // Never accept an identity header supplied by the browser. The Pages API
+  // overwrites it only after authenticatedUser() has validated the session.
+  headers.delete('x-dabernaz-user-id');
+  if (user?.id) headers.set('x-dabernaz-user-id', String(user.id));
+  headers.set('x-dabernaz-room-id', roomId);
+
+  const init = {
+    method: request.method,
+    headers,
+  };
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    init.body = await request.clone().arrayBuffer();
   }
-  if (request.method === 'POST' && action === 'leave') {
-    validateWriteOrigin(request);
-    throw new HttpError(409,'پس از خرید کارت، امکان لغو خرید یا خروج از صف وجود ندارد.');
+
+  const forwardedRequest = new Request(target, init);
+  return env.ROOM_COORDINATOR.fetch(forwardedRequest);
+}
+
+async function ensureWalletRequestIdempotencySchema(db) {
+  try {
+    await db.prepare('SELECT 1 FROM wallet_request_idempotency LIMIT 1').first();
+  } catch (_) {
+    throw new HttpError(503, 'ثبت امن درخواست‌های کیف پول تا اجرای Migration شماره ۲ موقتاً غیرفعال است.');
   }
-  return json({error:'روش درخواست برای این مسیر پشتیبانی نمی‌شود.'},405);
+}
+
+async function findWalletRequestReplay(db, userId, idempotencyKey, requestHash) {
+  let claim;
+  try {
+    claim = await db.prepare(
+      'SELECT request_hash,request_id FROM wallet_request_idempotency WHERE user_id=? AND idempotency_key=?'
+    ).bind(userId, idempotencyKey).first();
+  } catch (_) {
+    throw new HttpError(503, 'ساختار Idempotency کیف پول آماده نیست؛ Migration شماره ۲ لازم است.');
+  }
+  if (!claim) return null;
+  if (String(claim.request_hash) !== requestHash) {
+    throw new HttpError(409, 'این کلید یکتا قبلاً با اطلاعات متفاوتی استفاده شده است.');
+  }
+  const requestId = Number(claim.request_id);
+  if (!Number.isSafeInteger(requestId) || requestId <= 0) {
+    throw new HttpError(503, 'نتیجه درخواست مالی در وضعیت بازیابی است؛ دوباره وضعیت کیف پول را دریافت کن.');
+  }
+  const existing = await db.prepare(
+    'SELECT id,request_type,amount,status FROM manual_wallet_requests WHERE id=? AND user_id=?'
+  ).bind(requestId, userId).first();
+  if (!existing) throw new HttpError(503, 'مرجع درخواست مالی با رکورد پایدار آن تطبیق ندارد.');
+  return existing;
 }
 
 async function referralSummary(db, userId) {
@@ -1225,39 +878,24 @@ async function advanceServerGame(db,user,request,path) {
 }
 
 
-async function ensureRecurringTournamentTables(db) {
-  const sqls = [
-    "CREATE TABLE IF NOT EXISTS tournament_events (id TEXT PRIMARY KEY, tournament_type TEXT NOT NULL, scheduled_at TEXT NOT NULL, registration_opens_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'scheduled', registered_count INTEGER NOT NULL DEFAULT 0, capacity INTEGER NOT NULL DEFAULT 30, prize_pool INTEGER NOT NULL DEFAULT 0, min_players INTEGER NOT NULL DEFAULT 5, stage TEXT NOT NULL DEFAULT 'registration', stages_json TEXT NOT NULL DEFAULT '[]', stage_round INTEGER NOT NULL DEFAULT 1, stage_rounds INTEGER NOT NULL DEFAULT 1, current_round_id TEXT, started_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, finished_at TEXT, UNIQUE(tournament_type, scheduled_at))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_events_schedule ON tournament_events(tournament_type, scheduled_at)",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_events_status ON tournament_events(status, scheduled_at)",
-    "CREATE TABLE IF NOT EXISTS tournament_event_entries (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, user_id INTEGER NOT NULL, entry_cost INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'registered', total_points INTEGER NOT NULL DEFAULT 0, line_wins INTEGER NOT NULL DEFAULT 0, full_wins INTEGER NOT NULL DEFAULT 0, rounds_played INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, UNIQUE(event_id, user_id))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_event_entries_event ON tournament_event_entries(event_id, status, total_points DESC)",
-    "CREATE TABLE IF NOT EXISTS tournament_rounds (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, stage TEXT NOT NULL, round_number INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'playing', called_numbers_json TEXT NOT NULL DEFAULT '[]', line_winner_ids_json TEXT NOT NULL DEFAULT '[]', full_winner_ids_json TEXT NOT NULL DEFAULT '[]', next_draw_at INTEGER, started_at INTEGER NOT NULL, finished_at TEXT, UNIQUE(event_id, stage, round_number))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_rounds_event ON tournament_rounds(event_id, started_at)",
-    "CREATE TABLE IF NOT EXISTS tournament_round_players (id TEXT PRIMARY KEY, event_id TEXT NOT NULL, round_id TEXT NOT NULL, user_id INTEGER NOT NULL, card_json TEXT NOT NULL, matched_count INTEGER NOT NULL DEFAULT 0, line_hit INTEGER NOT NULL DEFAULT 0, full_hit INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0, scored_at TEXT, UNIQUE(round_id, user_id))",
-    "CREATE INDEX IF NOT EXISTS idx_tournament_round_players_round ON tournament_round_players(round_id, user_id)",
-    "CREATE TABLE IF NOT EXISTS tournament_prize_payouts (event_id TEXT NOT NULL, user_id INTEGER NOT NULL, rank INTEGER NOT NULL, amount INTEGER NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(event_id, user_id), UNIQUE(event_id, rank))"
-  ];
-  for (const sql of sqls) await db.prepare(sql).run();
+async function assertRecurringTournamentSchema(db) {
+  const tables = await db.prepare(
+    "SELECT COUNT(*) AS total FROM sqlite_master WHERE type='table' AND name IN " +
+    "('tournament_events','tournament_event_entries','tournament_rounds','tournament_round_players','tournament_prize_payouts')"
+  ).first();
+  if (Number(tables?.total) !== 5) {
+    throw new HttpError(503, "ساختار تورنومنت کامل نیست؛ Migration نسخه پایه لازم است.");
+  }
 
-  const migrations = [
-    ["tournament_events", "capacity", "INTEGER NOT NULL DEFAULT 30"],
-    ["tournament_events", "stage_round", "INTEGER NOT NULL DEFAULT 1"],
-    ["tournament_events", "stage_rounds", "INTEGER NOT NULL DEFAULT 1"],
-    ["tournament_events", "current_round_id", "TEXT"],
-    ["tournament_events", "started_at", "TEXT"],
-    ["tournament_event_entries", "rounds_played", "INTEGER NOT NULL DEFAULT 0"]
-  ];
-  for (const item of migrations) {
-    const info = await db.prepare("PRAGMA table_info(" + item[0] + ")").all();
-    const columns = new Set((info.results || []).map((row) => row.name));
-    if (!columns.has(item[1])) {
-      try {
-        await db.prepare("ALTER TABLE " + item[0] + " ADD COLUMN " + item[1] + " " + item[2]).run();
-      } catch (error) {
-        if (!String(error && error.message || error).toLowerCase().includes("duplicate column")) throw error;
-      }
-    }
+  const [events, entries] = await Promise.all([
+    db.prepare("PRAGMA table_info(tournament_events)").all(),
+    db.prepare("PRAGMA table_info(tournament_event_entries)").all()
+  ]);
+  const eventColumns = new Set((events.results || []).map((row) => row.name));
+  const entryColumns = new Set((entries.results || []).map((row) => row.name));
+  const requiredEventColumns = ["capacity","stage_round","stage_rounds","current_round_id","started_at"];
+  if (requiredEventColumns.some((column) => !eventColumns.has(column)) || !entryColumns.has("rounds_played")) {
+    throw new HttpError(503, "ستون‌های موردنیاز تورنومنت نصب نشده‌اند؛ Migration لازم است.");
   }
 }
 
@@ -1293,7 +931,8 @@ function tournamentStageLabel(stage) {
 
 async function ensureRecurringTournamentSchedule(db, nowMs) {
   const current = Number.isFinite(nowMs) ? nowMs : Date.now();
-  await ensureRecurringTournamentTables(db);
+  // DDL belongs in versioned migrations, never in a request or scheduler tick.
+  await assertRecurringTournamentSchema(db);
   for (const type of ["simple", "bingo"]) {
     const startMs = nextTournamentStartAt(type, current);
     const scheduledAt = new Date(startMs).toISOString();
@@ -1321,7 +960,9 @@ async function refundTournamentEvent(db, event, nowMs) {
         db.prepare("UPDATE users SET bingo_coins=bingo_coins+? WHERE id=? AND changes()=1")
           .bind(row.entry_cost, row.user_id),
         db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
-          .bind(row.user_id, row.entry_cost, "بازگشت ورودی " + tournamentTitle(event.tournament_type), nowText)
+          .bind(row.user_id, row.entry_cost, "بازگشت ورودی " + tournamentTitle(event.tournament_type), nowText),
+        db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',?,'tournament_refund','tournament_entry',?,? WHERE changes()=1")
+          .bind(randomToken(16), row.user_id, row.entry_cost, String(event.id) + ':' + String(row.user_id), Date.now())
       );
     }
     if (statements.length) await db.batch(statements);
@@ -1380,6 +1021,38 @@ async function scoreTournamentRound(db, eventId, round, tournamentType) {
     }
     if (statements.length) await db.batch(statements);
   }
+
+  // Official line/full winners receive the configured BingoCoin bonuses.
+  // The immutable ledger reference is unique per round, winner and reward type,
+  // so retries after a scheduler restart cannot credit the same bonus twice.
+  const bonusStatements = [];
+  const lineWinnerIds = [...new Set(parseTournamentArray(round.line_winner_ids_json).map(Number))]
+    .filter((id) => Number.isSafeInteger(id) && id > 0);
+  const fullWinnerIds = [...new Set(parseTournamentArray(round.full_winner_ids_json).map(Number))]
+    .filter((id) => Number.isSafeInteger(id) && id > 0);
+  for (const userId of lineWinnerIds) {
+    const referenceId = String(round.id) + ':line';
+    bonusStatements.push(
+      db.prepare("INSERT OR IGNORE INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) VALUES(?,?,'bingo_coin',1,'tournament_line_win','tournament_round',?,?)")
+        .bind(randomToken(16), userId, referenceId, Date.now()),
+      db.prepare("UPDATE users SET bingo_coins=bingo_coins+1 WHERE id=? AND changes()=1")
+        .bind(userId),
+      db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',1,?,? WHERE changes()=1")
+        .bind(userId, 'پاداش یک BingoCoin برای برنده خطی تورنومنت', nowText)
+    );
+  }
+  for (const userId of fullWinnerIds) {
+    const referenceId = String(round.id) + ':full';
+    bonusStatements.push(
+      db.prepare("INSERT OR IGNORE INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) VALUES(?,?,'bingo_coin',2,'tournament_full_win','tournament_round',?,?)")
+        .bind(randomToken(16), userId, referenceId, Date.now()),
+      db.prepare("UPDATE users SET bingo_coins=bingo_coins+2 WHERE id=? AND changes()=1")
+        .bind(userId),
+      db.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',2,?,? WHERE changes()=1")
+        .bind(userId, 'پاداش دو BingoCoin برای برنده کامل تورنومنت', nowText)
+    );
+  }
+  if (bonusStatements.length) await db.batch(bonusStatements);
 }
 
 async function advanceTournamentRound(db, round, nowMs) {
@@ -1455,6 +1128,8 @@ async function payTournamentPrizes(db, event) {
         .bind(amount, player.user_id),
       db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
         .bind(player.user_id, amount, "جایزه رتبه " + String(index + 1) + " تورنومنت دابرناز", nowText),
+      db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',?,'tournament_prize','tournament_prize',?,? WHERE changes()=1")
+        .bind(randomToken(16), player.user_id, amount, String(event.id) + ':rank:' + String(index + 1) + ':user:' + String(player.user_id), Date.now()),
       db.prepare("UPDATE tournament_event_entries SET status=? WHERE event_id=? AND user_id=? AND EXISTS (SELECT 1 FROM tournament_prize_payouts WHERE event_id=? AND user_id=?)")
         .bind("winner_" + String(index + 1), event.id, player.user_id, event.id, player.user_id)
     );
@@ -1571,7 +1246,7 @@ async function advanceTournamentSystem(db, nowMs, advanceDraws = true) {
 }
 
 async function recurringTournamentSnapshots(db, advanceDraws = true) {
-  await advanceTournamentSystem(db, Date.now(), advanceDraws);
+  if (advanceDraws) await advanceTournamentSystem(db, Date.now(), true);
   const rows = await db.prepare("SELECT * FROM tournament_events ORDER BY CASE WHEN status IN ('scheduled','registration','running') THEN 0 ELSE 1 END,scheduled_at ASC LIMIT 12").all();
   const output = [];
   for (const event of rows.results || []) {
@@ -1673,12 +1348,51 @@ async function publicTournamentSnapshots(db) {
   return rooms;
 }
 
+async function findTournamentRegistrationReplay(db, userId, idempotencyKey, requestHash) {
+  let claim;
+  try {
+    claim = await db.prepare(
+      'SELECT request_hash,event_id,entry_id FROM tournament_entry_idempotency WHERE user_id=? AND idempotency_key=?'
+    ).bind(userId, idempotencyKey).first();
+  } catch (_) {
+    throw new HttpError(503, 'ساختار Idempotency تورنومنت آماده نیست؛ Migration شماره ۳ لازم است.');
+  }
+  if (!claim) return null;
+  if (String(claim.request_hash) !== requestHash) {
+    throw new HttpError(409, 'این کلید یکتا قبلاً برای درخواست تورنومنت متفاوتی استفاده شده است.');
+  }
+  const [event, entry, user] = await Promise.all([
+    db.prepare('SELECT id,tournament_type FROM tournament_events WHERE id=?').bind(claim.event_id).first(),
+    db.prepare('SELECT id,event_id,user_id FROM tournament_event_entries WHERE id=? AND event_id=? AND user_id=?')
+      .bind(claim.entry_id, claim.event_id, userId).first(),
+    db.prepare('SELECT * FROM users WHERE id=?').bind(userId).first()
+  ]);
+  if (!event || !entry || !user) {
+    throw new HttpError(503, 'ثبت‌نام تورنومنت در وضعیت بازیابی است؛ اطلاعات مرجع را دوباره بررسی کن.');
+  }
+  return {
+    ok: true,
+    event_id: event.id,
+    tournament: event.tournament_type,
+    user: await publicUser(db, user),
+    replayed: true
+  };
+}
+
 async function registerRecurringTournament(db, user, request) {
   validateWriteOrigin(request);
   const body = await readJson(request);
   const type = String(body.type || "");
   const cost = tournamentCost(type);
   if (!cost) throw new HttpError(400, "نوع تورنومنت معتبر نیست.");
+  const idempotencyKey = String(request.headers.get('idempotency-key') || '');
+  if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+    throw new HttpError(400, 'کلید یکتای ثبت‌نام تورنومنت معتبر نیست.');
+  }
+  const requestHash = await sha256Hex(JSON.stringify({ type, cost }));
+  const replay = await findTournamentRegistrationReplay(db, user.id, idempotencyKey, requestHash);
+  if (replay) return json(replay);
+
   await advanceTournamentSystem(db, Date.now(), false);
   const nowText = new Date().toISOString();
   const event = await db.prepare("SELECT * FROM tournament_events WHERE tournament_type=? AND status='registration' AND scheduled_at>? ORDER BY scheduled_at ASC LIMIT 1")
@@ -1686,17 +1400,23 @@ async function registerRecurringTournament(db, user, request) {
   if (!event) throw new HttpError(409, "ثبت‌نام این دوره در حال حاضر باز نیست.");
 
   const result = await db.batch([
-    db.prepare("UPDATE tournament_events SET registered_count=registered_count+1,prize_pool=prize_pool+?,updated_at=? WHERE id=? AND status='registration' AND registered_count<capacity AND scheduled_at>? AND EXISTS (SELECT 1 FROM users WHERE id=? AND bingo_coins>=?) AND NOT EXISTS (SELECT 1 FROM tournament_event_entries WHERE event_id=? AND user_id=?)")
-      .bind(cost, nowText, event.id, nowText, user.id, cost, event.id, user.id),
+    db.prepare("UPDATE tournament_events SET registered_count=registered_count+1,prize_pool=prize_pool+?,updated_at=? WHERE id=? AND status='registration' AND registered_count<capacity AND scheduled_at>? AND EXISTS (SELECT 1 FROM users WHERE id=? AND bingo_coins>=?) AND NOT EXISTS (SELECT 1 FROM tournament_event_entries WHERE event_id=? AND user_id=?) AND NOT EXISTS (SELECT 1 FROM tournament_entry_idempotency WHERE user_id=? AND idempotency_key=?)")
+      .bind(cost, nowText, event.id, nowText, user.id, cost, event.id, user.id, user.id, idempotencyKey),
     db.prepare("UPDATE users SET bingo_coins=bingo_coins-? WHERE id=? AND changes()=1")
       .bind(cost, user.id),
     db.prepare("INSERT INTO tournament_event_entries (event_id,user_id,entry_cost,status,created_at) SELECT ?,?,?,'registered',? WHERE changes()=1")
       .bind(event.id, user.id, cost, nowText),
+    db.prepare("INSERT INTO tournament_entry_idempotency (user_id,idempotency_key,request_hash,event_id,entry_id,created_at) SELECT ?,?,?,?,last_insert_rowid(),? WHERE changes()=1")
+      .bind(user.id, idempotencyKey, requestHash, event.id, Date.now()),
     db.prepare("INSERT INTO transactions (user_id,type,amount,description,created_at) SELECT ?,'bingo_coin',?,?,? WHERE changes()=1")
-      .bind(user.id, -cost, "ورود به " + tournamentTitle(type), nowText)
+      .bind(user.id, -cost, "ورود به " + tournamentTitle(type), nowText),
+    db.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'bingo_coin',?,'tournament_entry','tournament_entry',?,? WHERE changes()=1")
+      .bind(randomToken(16), user.id, -cost, String(event.id) + ':' + String(user.id), Date.now())
   ]);
 
   if (!Number(result[0] && result[0].meta && result[0].meta.changes || 0)) {
+    const replayAfterRace = await findTournamentRegistrationReplay(db, user.id, idempotencyKey, requestHash);
+    if (replayAfterRace) return json(replayAfterRace);
     const existing = await db.prepare("SELECT id FROM tournament_event_entries WHERE event_id=? AND user_id=?").bind(event.id, user.id).first();
     if (existing) throw new HttpError(409, "برای این دوره قبلاً ثبت‌نام کرده‌ای.");
     const freshEvent = await db.prepare("SELECT registered_count,capacity FROM tournament_events WHERE id=?").bind(event.id).first();
@@ -1708,11 +1428,13 @@ async function registerRecurringTournament(db, user, request) {
     throw new HttpError(409, "مهلت ثبت‌نام این دوره به پایان رسیده است.");
   }
   const updated = await db.prepare("SELECT * FROM users WHERE id=?").bind(user.id).first();
-  return json({ ok: true, event_id: event.id, tournament: type, user: await publicUser(db, updated) });
+  return json({ ok: true, event_id: event.id, tournament: type, user: await publicUser(db, updated), replayed: false });
 }
 
 async function myRecurringTournamentData(db, userId) {
-  const events = await recurringTournamentSnapshots(db);
+  // GET /api/tournaments/me must be read-only. The authenticated scheduler
+  // endpoint is the sole entry point that advances tournament state and draws.
+  const events = await recurringTournamentSnapshots(db, false);
   const entries = await db.prepare("SELECT e.event_id,e.entry_cost,e.status,e.total_points,e.line_wins,e.full_wins,e.rounds_played,e.created_at,t.tournament_type,t.scheduled_at,t.status AS event_status,t.stage,t.prize_pool FROM tournament_event_entries e JOIN tournament_events t ON t.id=e.event_id WHERE e.user_id=? ORDER BY t.scheduled_at DESC LIMIT 30")
     .bind(userId).all();
   const ownedEntries = entries.results || [];
@@ -1871,16 +1593,105 @@ async function routeRequest(request, env) {
     'cache-control': 'no-store',
   } });
 
-  // Keep a lightweight health probe independent from schema initialization so the
-  // frontend can distinguish "API route is alive" from a D1/migration failure.
+  // Health reports both the Pages/D1 API and the independent room-coordinator
+  // binding. A healthy D1 alone must never make an unconnected game engine look
+  // ready. The route is read-only and intentionally does not advance any state.
   if (request.method === 'GET' && path === '/api/health') {
-    if (!env.DB) return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'missing', binding: 'missing', mode: 'misconfigured' }, 503);
+    const bindingAvailable = typeof env.ROOM_COORDINATOR?.fetch === 'function';
+    if (!env.DB) {
+      return json({
+        ok: false,
+        service: 'dabernaz',
+        backend: 'cloudflare-pages-functions',
+        database: 'missing',
+        schema: 'unknown',
+        roomCoordinator: { available: false, ready: false, bindingAvailable, binding: 'ROOM_COORDINATOR' },
+        walletRequests: { idempotency: false },
+        tournamentEntries: { idempotency: false },
+        readiness: 'misconfigured',
+        mode: 'misconfigured',
+      }, 503);
+    }
     try {
       const row = await env.DB.prepare('SELECT 1 AS ok').first();
       if (Number(row?.ok) !== 1) throw new Error('D1 health query returned an unexpected result.');
-      return json({ ok: true, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'D1', binding: 'bound', mode: 'ready' });
-    } catch (_) {
-      return json({ ok: false, service: 'dabernaz', backend: 'cloudflare-pages-functions', database: 'unreachable', binding: 'bound', mode: 'degraded' }, 503);
+      await assertSchemaReady(env.DB);
+      const version = await env.DB.prepare('SELECT MAX(version) AS version FROM schema_migrations').first();
+      const schemaVersion = Number(version?.version) || 0;
+      const roomCoordinator = {
+        available: bindingAvailable,
+        ready: false,
+        bindingAvailable,
+        binding: 'ROOM_COORDINATOR',
+      };
+      if (bindingAvailable) {
+        try {
+          const response = await env.ROOM_COORDINATOR.fetch(new Request(
+            'https://dabernaz-room-coordinator.internal/health',
+            { method: 'GET' }
+          ));
+          const body = await response.json().catch(() => null);
+          const workerSchema = Number(String(body?.schema || '').replace(/^v/, ''));
+          roomCoordinator.ready = response.ok && body?.ok === true && body?.ready === true &&
+            workerSchema >= 4 && body?.durableObject?.ready === true &&
+            body?.transactionRoundLink === true;
+          roomCoordinator.schema = body?.schema || null;
+          roomCoordinator.durableObject = body?.durableObject || { available: false, ready: false };
+          roomCoordinator.transactionRoundLink = body?.transactionRoundLink === true;
+        } catch (_) {
+          roomCoordinator.ready = false;
+        }
+      }
+      let walletIdempotencyAvailable = false;
+      try {
+        await env.DB.prepare('SELECT 1 FROM wallet_request_idempotency LIMIT 1').first();
+        walletIdempotencyAvailable = true;
+      } catch (_) {}
+      let tournamentIdempotencyAvailable = false;
+      try {
+        await env.DB.prepare('SELECT 1 FROM tournament_entry_idempotency LIMIT 1').first();
+        tournamentIdempotencyAvailable = true;
+      } catch (_) {}
+      const readiness = roomCoordinator.ready && walletIdempotencyAvailable && tournamentIdempotencyAvailable ? 'ready' : 'degraded';
+      const unavailableFeatures = [];
+      if (!roomCoordinator.ready) unavailableFeatures.push('paid_rooms');
+      if (!walletIdempotencyAvailable) unavailableFeatures.push('wallet_request_submission');
+      if (!tournamentIdempotencyAvailable) unavailableFeatures.push('tournament_entry_idempotency');
+      return json({
+        ok: true,
+        service: 'dabernaz',
+        backend: 'cloudflare-pages-functions',
+        database: 'D1',
+        schema: 'v' + schemaVersion,
+        binding: 'bound',
+        roomCoordinator,
+        walletRequests: {
+          idempotency: walletIdempotencyAvailable,
+          migration: walletIdempotencyAvailable ? 2 : null,
+        },
+        tournamentEntries: {
+          idempotency: tournamentIdempotencyAvailable,
+          migration: tournamentIdempotencyAvailable ? 3 : null,
+        },
+        readiness,
+        mode: readiness,
+        unavailableFeatures,
+      });
+    } catch (error) {
+      const message = error instanceof HttpError ? error.message : 'D1 is unreachable or the required schema is unavailable.';
+      return json({
+        ok: false,
+        service: 'dabernaz',
+        backend: 'cloudflare-pages-functions',
+        database: 'unreachable_or_unready',
+        schema: 'unknown',
+        roomCoordinator: { available: bindingAvailable, ready: false, bindingAvailable, binding: 'ROOM_COORDINATOR' },
+        walletRequests: { idempotency: false },
+        tournamentEntries: { idempotency: false },
+        readiness: 'degraded',
+        mode: 'degraded',
+        error: message,
+      }, 503);
     }
   }
 
@@ -1903,7 +1714,8 @@ async function routeRequest(request, env) {
   }
 
   if (!env.DB) return json({ ok: false, error: 'اتصال D1 تنظیم نشده است؛ در Pages Settings یک D1 binding با نام DB اضافه کن.' }, 503);
-  await ensureSchema(env.DB);
+  if (env.DABERNAZ_TEST_DIAGNOSTICS === '1') await ensureSchema(env.DB);
+  else await assertSchemaReady(env.DB);
 
   if (request.method === 'GET' && path === '/api/rooms/history') {
     return json({ ok: true, rounds: await recentWinners(env.DB) });
@@ -2013,14 +1825,49 @@ async function routeRequest(request, env) {
       if (reason.length < 3 || reason.length > 180) throw new HttpError(400, 'علت اصلاح موجودی باید بین ۳ تا ۱۸۰ نویسه باشد.');
       const target = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE member_id=? LIMIT 1').bind(memberId).first();
       if (!target) throw new HttpError(404, 'کاربری با این شناسه پیدا نشد.');
+      const idempotencyKey = String(request.headers.get('idempotency-key') || '');
+      if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+        throw new HttpError(400, 'کلید یکتای اصلاح موجودی معتبر نیست؛ دوباره تلاش کن.');
+      }
+      const requestHash = await sha256Hex(JSON.stringify({targetUserId:Number(target.id),amount,reason}));
+      const prior = await env.DB.prepare(
+        'SELECT request_hash,status,target_user_id FROM wallet_adjustment_requests WHERE admin_user_id=? AND idempotency_key=?'
+      ).bind(user.id,idempotencyKey).first();
+      if (prior) {
+        if (prior.request_hash !== requestHash) throw new HttpError(409, 'این کلید برای اطلاعات اصلاح موجودی متفاوتی استفاده شده است.');
+        if (prior.status !== 'applied') throw new HttpError(409, 'درخواست قبلی اعمال نشده است؛ برای عملیات جدید کلید تازه بساز.');
+        const replayUser = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE id=?').bind(target.id).first();
+        return json({ok:true,user:replayUser,replayed:true});
+      }
+
       const now = new Date().toISOString();
+      const adjustmentId = randomToken(16);
       const result = await env.DB.batch([
-        env.DB.prepare('UPDATE users SET balance=balance+? WHERE id=? AND balance+?>=0').bind(amount,target.id,amount),
-        env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'admin_adjustment',?,?,? WHERE changes()=1").bind(target.id,amount,'اصلاح موجودی توسط مدیر: '+reason,now),
+        env.DB.prepare("INSERT INTO wallet_adjustment_requests(id,admin_user_id,idempotency_key,request_hash,target_user_id,amount,reason,status,created_at) VALUES(?,?,?,?,?,?,?,'pending',?) ON CONFLICT(admin_user_id,idempotency_key) DO NOTHING")
+          .bind(adjustmentId,user.id,idempotencyKey,requestHash,target.id,amount,reason,Date.now()),
+        env.DB.prepare('UPDATE users SET balance=balance+? WHERE id=? AND balance+?>=0 AND changes()=1')
+          .bind(amount,target.id,amount),
+        env.DB.prepare("UPDATE wallet_adjustment_requests SET status=CASE WHEN changes()=1 THEN 'applied' ELSE 'rejected' END WHERE admin_user_id=? AND idempotency_key=? AND status='pending'")
+          .bind(user.id,idempotencyKey),
+        env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?, 'admin_adjustment',?,?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM wallet_adjustment_requests WHERE admin_user_id=? AND idempotency_key=? AND status='applied')")
+          .bind(target.id,amount,'اصلاح موجودی توسط مدیر: '+reason,now,user.id,idempotencyKey),
+        env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'admin_adjustment','wallet_adjustment',?,? WHERE changes()=1")
+          .bind(randomToken(16),target.id,amount,adjustmentId,Date.now()),
       ]);
-      if (Number(result?.[0]?.meta?.changes || 0) !== 1) throw new HttpError(409, 'موجودی کافی نیست یا اصلاح موجودی انجام نشد.');
+
+      if (Number(result?.[1]?.meta?.changes || 0) !== 1) {
+        const saved = await env.DB.prepare(
+          'SELECT request_hash,status FROM wallet_adjustment_requests WHERE admin_user_id=? AND idempotency_key=?'
+        ).bind(user.id,idempotencyKey).first();
+        if (saved?.request_hash !== requestHash) throw new HttpError(409, 'درخواست اصلاح موجودی هم‌زمان با اطلاعات متفاوت ثبت شد.');
+        if (saved?.status === 'applied') {
+          const replayUser = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE id=?').bind(target.id).first();
+          return json({ok:true,user:replayUser,replayed:true});
+        }
+        throw new HttpError(409, 'موجودی کافی نیست یا درخواست اصلاح موجودی اعمال نشد.');
+      }
       const updated = await env.DB.prepare('SELECT id,username,member_id,email,balance FROM users WHERE id=?').bind(target.id).first();
-      return json({ok:true,user:updated});
+      return json({ok:true,user:updated,replayed:false});
     }
     const detailMatch = path.match(/^\/api\/admin\/wallet\/(\d+)$/);
     if (detailMatch && request.method === 'GET') {
@@ -2050,6 +1897,8 @@ async function routeRequest(request, env) {
             .bind(decision === 'approve' ? 'approved' : 'rejected',note,user.id,now,now,id),
           env.DB.prepare("UPDATE users SET balance=balance+? WHERE id=? AND changes()=1 AND ?='approve'").bind(Number(current.amount),Number(current.user_id),decision),
           env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'manual_deposit',?,?,? WHERE changes()=1").bind(Number(current.user_id),Number(current.amount),'شارژ دستی کیف پول · درخواست '+id,now),
+          env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'manual_deposit','manual_wallet_request',?,? WHERE changes()=1")
+            .bind(randomToken(16),Number(current.user_id),Number(current.amount),'deposit:'+String(id),Date.now()),
         ]);
       } else {
         if (!['paid','reject'].includes(decision)) throw new HttpError(400, 'برای برداشت فقط ثبت واریز یا رد درخواست مجاز است.');
@@ -2058,6 +1907,8 @@ async function routeRequest(request, env) {
             .bind(decision === 'paid' ? 'paid' : 'rejected',note,user.id,now,now,id),
           env.DB.prepare("UPDATE users SET balance=balance+? WHERE id=? AND changes()=1 AND ?='reject'").bind(Number(current.amount),Number(current.user_id),decision),
           env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_refund',?,?,? WHERE changes()=1").bind(Number(current.user_id),Number(current.amount),'بازگشت وجه برداشت ردشده · درخواست '+id,now),
+          env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'withdrawal_refund','manual_wallet_request',?,? WHERE changes()=1")
+            .bind(randomToken(16),Number(current.user_id),Number(current.amount),'withdraw:'+String(id),Date.now()),
         ]);
       }
       if (Number(batch?.[0]?.meta?.changes || 0) !== 1) throw new HttpError(409, 'این درخواست قبلاً بررسی شده یا در وضعیت قابل بررسی نیست.');
@@ -2110,6 +1961,12 @@ async function routeRequest(request, env) {
   }
   if (request.method === 'POST' && path === '/api/wallet/requests') {
     validateWriteOrigin(request);
+    await ensureWalletRequestIdempotencySchema(env.DB);
+    const idempotencyKey = String(request.headers.get('idempotency-key') || '');
+    if (!/^[A-Za-z0-9._:-]{16,128}$/.test(idempotencyKey)) {
+      throw new HttpError(400, 'کلید یکتای درخواست مالی معتبر نیست؛ دوباره تلاش کن.');
+    }
+
     const body = await readJson(request);
     const requestType = String(body.type || '');
     const amount = Number(body.amount);
@@ -2123,31 +1980,80 @@ async function routeRequest(request, env) {
     const userNote = String(body.userNote || '').trim();
     if (userNote.length > 300) throw new HttpError(400, 'توضیحات درخواست حداکثر ۳۰۰ نویسه است.');
     const now = new Date().toISOString();
+    const createdAt = Date.now();
+
     if (requestType === 'deposit') {
+      const requestHash = await sha256Hex(JSON.stringify({type:requestType,amount,userNote}));
+      const replay = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+      if (replay) return json({ok:true,requestId:Number(replay.id),status:replay.status,replayed:true});
+
       const settings = await env.DB.prepare('SELECT card_number,card_holder,bank_name,payment_note FROM wallet_payment_settings WHERE id=1').first();
       if (!settings?.card_number) throw new HttpError(409, 'اطلاعات کارت مقصد هنوز توسط مدیریت تنظیم نشده است.');
-      const inserted = await env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,user_note,payment_card_number,payment_card_holder,payment_bank_name,payment_note,created_at,updated_at) VALUES(?,'deposit',?,'awaiting_receipt',?,?,?,?,?,?,?)")
-        .bind(user.id,amount,userNote,settings.card_number,settings.card_holder || '',settings.bank_name || '',settings.payment_note || '',now,now).run();
-      const id = Number(inserted.meta?.last_row_id || 0);
-      if (!id) throw new HttpError(500, 'ثبت درخواست واریز انجام نشد.');
-      return json({ok:true,requestId:id,status:'awaiting_receipt'});
+      const depositBatch = await env.DB.batch([
+        env.DB.prepare(
+          'INSERT INTO wallet_request_idempotency(user_id,idempotency_key,request_hash,request_id,created_at) ' +
+          'VALUES(?,?,?,NULL,?) ON CONFLICT(user_id,idempotency_key) DO NOTHING'
+        ).bind(user.id,idempotencyKey,requestHash,createdAt),
+        env.DB.prepare(
+          "INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,user_note,payment_card_number,payment_card_holder,payment_bank_name,payment_note,created_at,updated_at) " +
+          "SELECT ?,'deposit',?,'awaiting_receipt',?,?,?,?,?,?,? WHERE changes()=1"
+        ).bind(user.id,amount,userNote,settings.card_number,settings.card_holder || '',settings.bank_name || '',settings.payment_note || '',now,now),
+        env.DB.prepare(
+          'UPDATE wallet_request_idempotency SET request_id=last_insert_rowid() WHERE user_id=? AND idempotency_key=? AND request_id IS NULL AND changes()=1'
+        ).bind(user.id,idempotencyKey),
+      ]);
+      const result = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+      if (!result) throw new HttpError(409, 'درخواست واریز ثبت نشد؛ اطلاعات را بررسی و دوباره تلاش کن.');
+      return json({
+        ok:true,
+        requestId:Number(result.id),
+        status:result.status,
+        replayed:Number(depositBatch?.[0]?.meta?.changes || 0) !== 1
+      });
     }
+
     const cardNumber = String(body.cardNumber || '').replace(/[۰-۹]/g, digit => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(digit))).replace(/[٠-٩]/g, digit => String('٠١٢٣٤٥٦٧٨٩'.indexOf(digit))).replace(/\D/g, '');
     const cardHolder = String(body.cardHolder || '').trim();
     const bankName = String(body.bankName || '').trim();
     if (!/^\d{16}$/.test(cardNumber)) throw new HttpError(400, 'شماره کارت مقصد برای برداشت باید ۱۶ رقم باشد.');
     if (cardHolder.length < 2 || cardHolder.length > 80 || bankName.length > 60) throw new HttpError(400, 'مشخصات صاحب کارت معتبر نیست.');
-    const batch = await env.DB.batch([
-      env.DB.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=?').bind(amount,user.id,amount),
-      env.DB.prepare("INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,card_number,card_holder,bank_name,user_note,created_at,updated_at) SELECT ?,'withdraw',?,'pending_transfer',?,?,?,?,?,? WHERE changes()=1")
-        .bind(user.id,amount,cardNumber,cardHolder,bankName,userNote,now,now),
-      env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_reserved',?,?,? WHERE changes()=1")
-        .bind(user.id,-amount,'رزرو موجودی برای درخواست برداشت',now),
+    const requestHash = await sha256Hex(JSON.stringify({
+      type:requestType,amount,userNote,cardNumber,cardHolder,bankName
+    }));
+    const replay = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+    if (replay) return json({ok:true,requestId:Number(replay.id),status:replay.status,replayed:true});
+
+    const withdrawalBatch = await env.DB.batch([
+      env.DB.prepare(
+        'INSERT INTO wallet_request_idempotency(user_id,idempotency_key,request_hash,request_id,created_at) ' +
+        'SELECT ?,?,?,NULL,? FROM users WHERE id=? AND balance>=? ' +
+        'ON CONFLICT(user_id,idempotency_key) DO NOTHING'
+      ).bind(user.id,idempotencyKey,requestHash,createdAt,user.id,amount),
+      env.DB.prepare('UPDATE users SET balance=balance-? WHERE id=? AND balance>=? AND changes()=1')
+        .bind(amount,user.id,amount),
+      env.DB.prepare(
+        "INSERT INTO manual_wallet_requests(user_id,request_type,amount,status,card_number,card_holder,bank_name,user_note,created_at,updated_at) " +
+        "SELECT ?,'withdraw',?,'pending_transfer',?,?,?,?,?,? WHERE changes()=1"
+      ).bind(user.id,amount,cardNumber,cardHolder,bankName,userNote,now,now),
+      env.DB.prepare(
+        'UPDATE wallet_request_idempotency SET request_id=last_insert_rowid() WHERE user_id=? AND idempotency_key=? AND request_id IS NULL AND changes()=1'
+      ).bind(user.id,idempotencyKey),
+      env.DB.prepare(
+        "INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) " +
+        "SELECT ?,?,'toman',?,'withdrawal_reserved','manual_wallet_request','withdraw:'||CAST(last_insert_rowid() AS TEXT),? WHERE changes()=1"
+      ).bind(randomToken(16),user.id,-amount,createdAt),
+      env.DB.prepare(
+        "INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_reserved',?,?,? WHERE changes()=1"
+      ).bind(user.id,-amount,'رزرو موجودی برای درخواست برداشت',now),
     ]);
-    if (Number(batch?.[0]?.meta?.changes || 0) !== 1 || Number(batch?.[1]?.meta?.changes || 0) !== 1) {
-      throw new HttpError(409, 'موجودی کیف پول برای این برداشت کافی نیست.');
-    }
-    return json({ok:true,requestId:Number(batch[1].meta?.last_row_id || 0),status:'pending_transfer'});
+    const result = await findWalletRequestReplay(env.DB,user.id,idempotencyKey,requestHash);
+    if (!result) throw new HttpError(409, 'موجودی کیف پول برای این برداشت کافی نیست یا درخواست ثبت نشد.');
+    return json({
+      ok:true,
+      requestId:Number(result.id),
+      status:result.status,
+      replayed:Number(withdrawalBatch?.[0]?.meta?.changes || 0) !== 1
+    });
   }
   const receiptMatch = path.match(/^\/api\/wallet\/requests\/(\d+)\/receipt$/);
   if (receiptMatch && request.method === 'POST') {
@@ -2191,6 +2097,8 @@ async function routeRequest(request, env) {
       env.DB.prepare("UPDATE manual_wallet_requests SET status='cancelled',updated_at=? WHERE id=? AND user_id=? AND status='pending_transfer'").bind(now,id,user.id),
       env.DB.prepare('UPDATE users SET balance=balance+? WHERE id=? AND changes()=1').bind(Number(item.amount),user.id),
       env.DB.prepare("INSERT INTO transactions(user_id,type,amount,description,created_at) SELECT ?,'withdrawal_cancel_refund',?,?,? WHERE changes()=1").bind(user.id,Number(item.amount),'بازگشت وجه با لغو درخواست برداشت · درخواست '+id,now),
+      env.DB.prepare("INSERT INTO financial_ledger(id,user_id,asset,amount,operation,reference_type,reference_id,created_at) SELECT ?,?,'toman',?,'withdrawal_cancel_refund','manual_wallet_request',?,? WHERE changes()=1")
+        .bind(randomToken(16),user.id,Number(item.amount),'withdraw:'+String(id),Date.now()),
     ]);
     if (Number(batch?.[0]?.meta?.changes || 0) !== 1) throw new HttpError(409, 'درخواست برداشت قبلاً پردازش شده است.');
     return json({ok:true,status:'cancelled'});
@@ -2324,7 +2232,7 @@ async function routeRequest(request, env) {
     return registerRecurringTournament(env.DB,user,request);
   }
 
-  const roomResponse = await handleRoom(env.DB, request, user, path);
+  const roomResponse = await handleRoom(env.DB, request, user, path, env);
   if (roomResponse) return roomResponse;
   return json({ error: 'روش درخواست برای این مسیر پشتیبانی نمی‌شود.' }, 405);
 }
