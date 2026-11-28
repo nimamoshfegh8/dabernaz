@@ -7,6 +7,7 @@ binding = "DB"
 database_name = "dabernaz-local-ci"
 database_id = "00000000000000000000000000000000"
 migrations_dir = "./migrations"
+migrations_table = "d1_migrations"
 
 [vars]
 SUPPORT_ADMIN_MEMBER_IDS = "999999"
